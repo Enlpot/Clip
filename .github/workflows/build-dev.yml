@@ -8,6 +8,11 @@ on:
         required: true
         default: "snow-shot-msvc-release"
         type: string
+      skip_prepare:
+        description: "Reuse cached dependencies and skip the prepare job"
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - "build/**"
@@ -19,12 +24,19 @@ concurrency:
   group: build-clip-dev-${{ github.ref_name }}
   cancel-in-progress: false
 
+env:
+  VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
+  QT_KIT_PATH: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
+  QT_KIT_KEY: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+
 jobs:
-  build:
-    name: Build Clip (${{ inputs.preset || 'snow-shot-msvc-release' }})
+  # Runs as its own job so a later compile failure cannot discard the
+  # expensive dependency and Qt caches: this job ends right after they are
+  # stored, and the build job only restores them.
+  prepare:
+    if: ${{ !inputs.skip_prepare }}
+    name: Prepare dependencies and Qt kit
     runs-on: windows-2025-vs2026
-    env:
-      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -59,22 +71,85 @@ jobs:
         shell: pwsh
         run: .\scripts\bootstrap.ps1 -VcpkgVariants Static -SkipQtValidation
 
+      - name: Cache vcpkg installed tree
+        uses: actions/cache@v4
+        with:
+          path: .tools/vcpkg/installed
+          key: vcpkg-installed-static-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake') }}
+
       - name: Cache static Qt kit
         uses: actions/cache@v4
         with:
-          path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
-          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+          path: ${{ env.QT_KIT_PATH }}
+          key: ${{ env.QT_KIT_KEY }}
 
-      - name: Prepare Qt 6.11.1 static kit
+      - name: Build Qt 6.11.1 static kit
         shell: pwsh
         run: |
-          $prefix = Join-Path $env:RUNNER_TOOL_CACHE "snow-qt\6.11.1\msvc2026_64-static-system-codecs"
+          $prefix = "${{ env.QT_KIT_PATH }}"
           $dependencies = Join-Path $env:GITHUB_WORKSPACE ".tools\vcpkg\installed\static\x64-windows-static"
           & "$env:GITHUB_WORKSPACE\scripts\build-static-qt.ps1" -QtVersion 6.11.1 -InstallPrefix $prefix -DependencyPrefix $dependencies
           if ($LASTEXITCODE -ne 0) { throw "Static Qt bootstrap failed." }
           $qtDir = Join-Path $prefix "lib\cmake\Qt6"
           if (-not (Test-Path -LiteralPath (Join-Path $qtDir "Qt6Config.cmake") -PathType Leaf)) {
             throw "Qt 6.11.1 static CMake package was not found at $qtDir"
+          }
+
+  build:
+    needs: prepare
+    if: ${{ always() && !cancelled() }}
+    name: Build Clip (${{ inputs.preset || 'snow-shot-msvc-release' }})
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select MSVC x64 tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: 14.51
+          vsversion: 18.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          target: x86_64-pc-windows-msvc
+
+      - name: Install Python build helper
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check virtualenv
+
+      - name: Export GitHub Actions cache service
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Restore vcpkg installed tree
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools/vcpkg/installed
+          key: vcpkg-installed-static-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake') }}
+          fail-on-cache-miss: true
+
+      - name: Restore static Qt kit
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.QT_KIT_PATH }}
+          key: ${{ env.QT_KIT_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Export Qt path
+        shell: pwsh
+        run: |
+          $qtDir = Join-Path "${{ env.QT_KIT_PATH }}" "lib\cmake\Qt6"
+          if (-not (Test-Path -LiteralPath (Join-Path $qtDir "Qt6Config.cmake") -PathType Leaf)) {
+            throw "Restored Qt kit is incomplete at $qtDir"
           }
           "SNOW_QT_STATIC_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "Qt6_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
