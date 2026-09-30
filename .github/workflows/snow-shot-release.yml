@@ -58,6 +58,12 @@ jobs:
             snow_rust_ffi -> ../build/snow-shot-msvc-release/cargo
           cache-on-failure: true
 
+      - name: Restore vcpkg installed tree
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools/vcpkg/installed
+          key: vcpkg-installed-static-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake') }}
+
       - name: Install static project dependencies
         shell: pwsh
         run: .\scripts\bootstrap.ps1 -VcpkgVariants Static -SkipQtValidation
@@ -66,7 +72,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
-          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
 
       - name: Prepare Qt 6.11.1 static kit
         shell: pwsh
