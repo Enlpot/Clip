@@ -79,7 +79,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
-          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
 
       - name: Build Qt 6.11.1 static kit
         shell: pwsh
@@ -141,7 +141,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
-          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
           fail-on-cache-miss: true
 
       - name: Export Qt path
