@@ -92,7 +92,31 @@ if ($Reset) {
 New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
 
 $vcpkgGitDirectory = Join-Path $vcpkgRoot ".git"
-if (-not (Test-Path -LiteralPath $vcpkgExe) -and
+$vcpkgRootPopulated = (Test-Path -LiteralPath $vcpkgRoot) -and
+    -not (Test-Path -LiteralPath $vcpkgGitDirectory -PathType Container)
+if ($vcpkgRootPopulated) {
+    # A restored dependency cache can pre-populate $vcpkgRoot (e.g. the
+    # installed/ tree) without the vcpkg checkout itself. Relocate the
+    # restored tree, clone a fresh checkout, then move it back so the
+    # cached packages survive without rebuilding anything.
+    $restoredInstalled = Join-Path $vcpkgRoot "installed"
+    $installedBackup = $null
+    if (Test-Path -LiteralPath $restoredInstalled -PathType Container) {
+        $installedBackup = Join-Path $toolsRoot "vcpkg-installed-restored"
+        if (Test-Path -LiteralPath $installedBackup) {
+            Remove-Item -LiteralPath $installedBackup -Recurse -Force
+        }
+        Move-Item -LiteralPath $restoredInstalled -Destination $installedBackup
+    }
+    Remove-Item -LiteralPath $vcpkgRoot -Recurse -Force
+    Invoke-Checked -Command $git.Source -Arguments @(
+        "clone", "https://github.com/microsoft/vcpkg.git", $vcpkgRoot
+    ) -WorkingDirectory $repoRoot
+    if ($installedBackup) {
+        Move-Item -LiteralPath $installedBackup -Destination $restoredInstalled
+    }
+}
+elseif (-not (Test-Path -LiteralPath $vcpkgExe) -and
     -not (Test-Path -LiteralPath $vcpkgGitDirectory -PathType Container)) {
     Invoke-Checked -Command $git.Source -Arguments @(
         "clone", "https://github.com/microsoft/vcpkg.git", $vcpkgRoot
