@@ -119,7 +119,8 @@
         "SNOW_APPS_PACKAGE_SNOW_SHOT": "ON",
         "SNOW_APPS_API_BASE_URL": "https://snowshot.top",
         "SNOW_IMAGE_PROFILE": "redistributable",
-        "SNOW_IMAGE_DEFAULT_LINKAGE": "static"
+        "SNOW_IMAGE_DEFAULT_LINKAGE": "static",
+        "SNOW_SHOT_ENABLE_MCP": "ON"
       }
     },
     {
