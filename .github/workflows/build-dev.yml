@@ -26,8 +26,6 @@ concurrency:
 
 env:
   VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
-  QT_KIT_PATH: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
-  QT_KIT_KEY: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
 
 jobs:
   # Runs as its own job so a later compile failure cannot discard the
@@ -80,13 +78,15 @@ jobs:
       - name: Cache static Qt kit
         uses: actions/cache@v4
         with:
-          path: ${{ env.QT_KIT_PATH }}
-          key: ${{ env.QT_KIT_KEY }}
+          path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
+          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
 
       - name: Build Qt 6.11.1 static kit
         shell: pwsh
+        env:
+          QT_KIT_PATH: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
         run: |
-          $prefix = "${{ env.QT_KIT_PATH }}"
+          $prefix = "$env:QT_KIT_PATH"
           $dependencies = Join-Path $env:GITHUB_WORKSPACE ".tools\vcpkg\installed\static\x64-windows-static"
           & "$env:GITHUB_WORKSPACE\scripts\build-static-qt.ps1" -QtVersion 6.11.1 -InstallPrefix $prefix -DependencyPrefix $dependencies
           if ($LASTEXITCODE -ne 0) { throw "Static Qt bootstrap failed." }
@@ -140,14 +140,16 @@ jobs:
       - name: Restore static Qt kit
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.QT_KIT_PATH }}
-          key: ${{ env.QT_KIT_KEY }}
+          path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
+          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
           fail-on-cache-miss: true
 
       - name: Export Qt path
         shell: pwsh
+        env:
+          QT_KIT_PATH: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
         run: |
-          $qtDir = Join-Path "${{ env.QT_KIT_PATH }}" "lib\cmake\Qt6"
+          $qtDir = Join-Path $env:QT_KIT_PATH "lib\cmake\Qt6"
           if (-not (Test-Path -LiteralPath (Join-Path $qtDir "Qt6Config.cmake") -PathType Leaf)) {
             throw "Restored Qt kit is incomplete at $qtDir"
           }
