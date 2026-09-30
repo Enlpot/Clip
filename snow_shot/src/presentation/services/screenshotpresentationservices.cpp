@@ -1,0 +1,276 @@
+#include "snow_shot/presentation/screenshotpresentationservices.h"
+
+#include "../capture/screenshotcaptureperfinstrumentation.h"
+#include "snow_shot/presentation/screenshotcapturestate.h"
+#include "snow_shot/presentation/screenshotcanvasrenderer.h"
+#include "snow_shot/presentation/screenshotcolorpickercontroller.h"
+#include "snow_shot/presentation/screenshotdisplaysession.h"
+#include "snow_shot/presentation/screenshotgeometry.h"
+#include "snow_shot/presentation/screenshotinteractionstate.h"
+#include "snow_shot/presentation/screenshotintelligentselectionmodel.h"
+#include "snow_shot/presentation/screenshotselectionmodel.h"
+#include "snow_shot/presentation/styles/themecolorscheme.h"
+#include "snow_shot/presentation/screenshotoverlaycoordinator.h"
+#include "snow_shot/presentation/screenshotoverlaywindow.h"
+#include "snow_shot/presentation/screenshotshortcuthints.h"
+#include "snow_shot/presentation/screenshottoolbarpresenter.h"
+#include "snow_shot/presentation/screenshottoolbarpresentationstatefactory.h"
+#include "snow_shot/storage/applicationstorage.h"
+#include "snow_shot/storage/settingsadapters.h"
+
+ScreenshotPresentationServices::ScreenshotPresentationServices(
+    ScreenshotPresentationServicesContext context)
+    : m_context(context), m_smartSelectionTransition([this](const QRectF& selection) {
+          presentSelectionFrame(selection);
+      }) {
+    reloadConfiguredShortcuts();
+}
+
+void ScreenshotPresentationServices::hideToolbar() {
+    m_context.toolbarPresenter.hideToolbar();
+}
+
+void ScreenshotPresentationServices::hideMainToolbar() {
+    m_context.toolbarPresenter.hideMainToolbar();
+}
+
+void ScreenshotPresentationServices::showToolbar() {
+    if (m_context.captureState.presentationSuppressed)
+        return;
+    m_context.toolbarPresenter.showToolbar(toolbarPresentationState());
+}
+
+void ScreenshotPresentationServices::showSelectionToolbar() {
+    if (m_context.captureState.presentationSuppressed)
+        return;
+    m_context.toolbarPresenter.showSelectionToolbar(toolbarPresentationState());
+}
+
+void ScreenshotPresentationServices::moveToolbar() {
+    if (m_selectionMovementActive)
+        return;
+    m_context.toolbarPresenter.moveToolbar(toolbarPresentationState());
+}
+
+void ScreenshotPresentationServices::repositionToolbarForContentChange() {
+    if (m_selectionMovementActive)
+        return;
+    m_context.toolbarPresenter.repositionForContentChange(toolbarPresentationState());
+}
+
+void ScreenshotPresentationServices::raiseToolbarForCanvasInteraction() {
+    if (m_context.captureState.presentationSuppressed)
+        return;
+    m_context.toolbarPresenter.raiseToolbarForCanvasInteraction(toolbarPresentationState());
+}
+
+void ScreenshotPresentationServices::setSelectionToolbarHovered(bool hovered) {
+    if (m_selectionToolbarHovered == hovered) {
+        return;
+    }
+
+    m_selectionToolbarHovered = hovered;
+    updateOverlayState();
+}
+
+void ScreenshotPresentationServices::setUiPreferences(const ScreenshotUiPreferences& preferences) {
+    m_uiPreferences = preferences.normalized();
+    m_smartSelectionTransition.setEnabled(m_uiPreferences.selectionTransitionAnimationEnabled);
+    m_context.overlayCoordinator.setSelectionBorderColor(m_context.displaySession,
+                                                         m_uiPreferences.selectionBorderColor);
+    m_context.overlayCoordinator.setSelectionMaskColor(m_context.displaySession,
+                                                       m_uiPreferences.selectionMaskColor);
+    m_context.overlayCoordinator.setColorPickerCenterGuideLineColor(
+        m_uiPreferences.colorPickerCenterGuideLineColor);
+    updateOverlayState();
+}
+
+void ScreenshotPresentationServices::setQuickSelectionDisabledTools(
+    const QSet<SnowCanvasTool>& tools) {
+    if (m_context.quickSelectionDisabledTools == tools) {
+        return;
+    }
+    m_context.quickSelectionDisabledTools = tools;
+    updateOverlayState();
+}
+
+void ScreenshotPresentationServices::reloadConfiguredShortcuts() {
+    if (!snow_shot::storage::ApplicationStorage::instance().isInitialized()) {
+        m_configuredShortcuts.reset();
+        return;
+    }
+    m_configuredShortcuts = snow_shot::storage::ScreenshotShortcutSettings().allShortcuts();
+}
+
+void ScreenshotPresentationServices::setSelectionMovementActive(bool active) {
+    m_selectionMovementActive = active;
+}
+
+void ScreenshotPresentationServices::updateOverlayState() {
+    m_context.stateChanged();
+    const bool smartFraming = m_context.interaction.intelligentSelecting();
+    const ScreenshotToolbarPresentationState toolbarState = toolbarPresentationState();
+    {
+        SNOW_SHOT_CAPTURE_PERF_SCOPE("overlay.toolbar_state_update");
+        if (!m_selectionMovementActive)
+            m_context.toolbarPresenter.updateSelectionToolbarState(toolbarState, !smartFraming);
+    }
+    bool selectionChanged = false;
+    {
+        SNOW_SHOT_CAPTURE_PERF_SCOPE("overlay.smart_selection_present");
+        selectionChanged = m_smartSelectionTransition.update(
+            m_context.selection.normalizedSelection(), smartFraming);
+    }
+    if (!selectionChanged) {
+        presentOverlayState(m_smartSelectionTransition.displayedSelection());
+    }
+}
+
+void ScreenshotPresentationServices::presentSelectionFrame(const QRectF& selection) {
+    {
+        SNOW_SHOT_CAPTURE_PERF_SCOPE("overlay.present_state");
+        presentOverlayState(selection);
+    }
+    if (!m_context.interaction.intelligentSelecting()) {
+        return;
+    }
+
+    ScreenshotToolbarPresentationState toolbarState = toolbarPresentationState();
+    toolbarState.selectionCanvas = selection;
+    SNOW_SHOT_CAPTURE_PERF_SCOPE("overlay.move_selection_toolbar");
+    m_context.toolbarPresenter.moveSelectionToolbar(toolbarState);
+}
+
+void ScreenshotPresentationServices::presentOverlayState(const QRectF& selection) const {
+    const bool anchored = m_context.displaySession.anchoredCursorPosition().has_value();
+    const QPoint cursorPosition = m_context.displaySession.logicalCursorPosition();
+    ScreenshotOverlayWindow* cursorOwner =
+        anchored
+            ? m_context.displaySession.startupOverlay()
+            : m_context.displaySession.overlayForDisplay(m_context.geometry.displayForLogicalPoint(
+                  m_context.displaySession, cursorPosition));
+    m_context.overlayCoordinator.setSelectionBorderColor(m_context.displaySession,
+                                                         m_uiPreferences.selectionBorderColor);
+    m_context.overlayCoordinator.setSelectionMaskColor(m_context.displaySession,
+                                                       m_uiPreferences.selectionMaskColor);
+    const bool regionOperation = m_context.selection.regionOperationActive();
+    const bool shaped = regionOperation || m_context.selection.selectionRegion().rectCount() > 1;
+    ScreenshotSelectionVisualState visualState;
+    visualState.bounds =
+        regionOperation
+            ? QRectF(m_context.selection.confirmedRegion().boundingRect()).united(selection)
+            : selection;
+    visualState.present = visualState.bounds.isValid() && !visualState.bounds.isEmpty();
+    visualState.handlesVisible = !m_context.interaction.intelligentSelecting() &&
+                                 m_context.interaction.selectionHandlesVisible() &&
+                                 m_context.selection.rectangular();
+    visualState.cornerRadius = m_context.selection.cornerRadius();
+    visualState.shadowWidth = m_context.selection.shadowWidth();
+    visualState.shadowColor = m_context.selection.shadowColor();
+    visualState.toolbarHovered = m_selectionToolbarHovered;
+    visualState.draftPath = m_context.selection.draftPath();
+    visualState.draftVertices = m_context.selection.draftVertices();
+    if (shaped) {
+        const bool animatedMarquee = m_context.interaction.intelligentSelecting() &&
+                                     regionOperation && !m_context.selection.constructionActive();
+        visualState.region = animatedMarquee
+                                 ? m_context.selection.selectionRegionForMarquee(selection)
+                                 : m_context.selection.selectionRegion();
+        visualState.confirmedRegion = m_context.selection.confirmedRegion();
+        visualState.marquee = animatedMarquee ? selection : m_context.selection.pendingMarquee();
+        visualState.subtracting = m_context.selection.regionOperation() ==
+                                  ScreenshotSelectionModel::RegionOperation::Subtract;
+        visualState.dangerColor =
+            snow_shot::presentation::styles::generateThemeColorScheme().map.colorError;
+        visualState.bounds = QRectF(visualState.region->boundingRect())
+                                 .united(QRectF(visualState.confirmedRegion.boundingRect()))
+                                 .united(visualState.marquee);
+        visualState.present = !visualState.bounds.isEmpty();
+        visualState.handlesVisible = false;
+    }
+    {
+        SNOW_SHOT_CAPTURE_PERF_SCOPE("overlay.canvas_state");
+        m_context.overlayCoordinator.updateOverlayState(
+            m_context.displaySession, visualState, m_context.interaction.intelligentSelecting(),
+            m_context.interaction.marqueeSelecting(), m_context.interaction.dragging());
+    }
+
+    ScreenshotOverlayWindow* selectionOwner = nullptr;
+    QRectF selectionGlobal;
+    if (selection.isValid() && !selection.isEmpty()) {
+        const CapturedDisplayModel* display =
+            m_context.geometry.displayForCanvasRect(m_context.displaySession, selection);
+        selectionOwner = m_context.displaySession.overlayForDisplay(display);
+        if (selectionOwner != nullptr && display != nullptr) {
+            const QRectF displayCanvasRect = ScreenshotGeometryMapper::displayCanvasRect(*display);
+            const QRectF selectionOnDisplay = selection.intersected(displayCanvasRect);
+            if (selectionOnDisplay.isValid() && !selectionOnDisplay.isEmpty()) {
+                selectionGlobal = QRectF(m_context.geometry.logicalPositionForCanvasPoint(
+                                             *display, selectionOnDisplay.topLeft()),
+                                         m_context.geometry.logicalPositionForCanvasPoint(
+                                             *display, selectionOnDisplay.bottomRight()))
+                                      .normalized();
+            }
+        }
+    }
+    m_context.displaySession.forEachOverlay([&](qsizetype, ScreenshotOverlayWindow* overlay) {
+        if (overlay)
+            overlay->setRegionTypeControlVisible(
+                m_uiPreferences.screenshotAreaTypeHintEnabled && overlay == cursorOwner &&
+                    m_context.interaction.preselectionActive(m_context.selection),
+                m_context.selection.regionType(), selectionGlobal, cursorPosition);
+    });
+    m_context.overlayCoordinator.updateGuideLines(
+        m_context.displaySession, cursorOwner,
+        cursorOwner ? QPointF(cursorPosition - cursorOwner->geometry().topLeft()) : QPointF(),
+        m_context.interaction.selecting(), m_uiPreferences.cursorGuideLineColor,
+        m_uiPreferences.monitorCenterGuideLineColor);
+
+    ScreenshotShortcutHintContext hintContext{m_context.interaction.activeTool(),
+                                              m_context.interaction.mode(),
+                                              m_context.quickSelectionDisabledTools};
+    hintContext.configuredShortcuts = m_configuredShortcuts;
+    hintContext.smartSelectionEnabled = m_context.intelligentSelection.smartSelectionEnabled();
+    const ScreenshotShortcutHintMode hintMode = screenshotShortcutHintModeForContext(hintContext);
+    ScreenshotOverlayWindow* hintOwner = nullptr;
+    if (hintMode != ScreenshotShortcutHintMode::Hidden) {
+        hintOwner = selectionOwner;
+        if (hintOwner == nullptr)
+            hintOwner = cursorOwner;
+    }
+    SNOW_SHOT_CAPTURE_PERF_SCOPE("overlay.shortcut_hints");
+    m_context.overlayCoordinator.updateShortcutHints(hintOwner, hintContext,
+                                                     m_uiPreferences.shortcutHintOpacity,
+                                                     selectionGlobal, cursorPosition);
+}
+
+void ScreenshotPresentationServices::updateOverlayCursors() const {
+    const bool selecting =
+        m_context.interaction.intelligentSelecting() || m_context.interaction.marqueeSelecting();
+    m_context.overlayCoordinator.updateOverlayCursors(m_context.displaySession, selecting,
+                                                      m_context.interaction.dragging());
+}
+
+ScreenshotColorPickerContext ScreenshotPresentationServices::colorPickerContext() const {
+    ScreenshotColorPickerContext context;
+    context.selectionDisplayUnit = m_uiPreferences.selectionDisplayUnit;
+    context.active = !m_context.interaction.inactive() &&
+                     !m_context.captureState.captureInProgress &&
+                     !m_context.interaction.scrollingCapture();
+    context.moveToolActive = m_context.interaction.moveToolActive();
+    context.intelligentSelecting = m_context.interaction.intelligentSelecting();
+    context.manualSelecting = m_context.interaction.manualSelecting();
+    context.movingSelection = m_context.interaction.movingSelection();
+    context.dragging = m_context.interaction.dragging();
+    context.selectionPixels = m_context.selection.pixelSelection();
+    context.selectionCanvas = m_context.selection.normalizedSelection();
+    context.dragMode = m_context.interaction.dragMode();
+    return context;
+}
+
+ScreenshotToolbarPresentationState
+ScreenshotPresentationServices::toolbarPresentationState() const {
+    auto state = makeScreenshotToolbarPresentationState(m_context.interaction, m_context.selection);
+    state.selectionDisplayUnit = m_uiPreferences.selectionDisplayUnit;
+    return state;
+}

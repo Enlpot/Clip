@@ -1,0 +1,67 @@
+#ifndef SNOW_SHOT_PRESENTATION_SCREENSHOTOCRTEXTLAYER_H
+#define SNOW_SHOT_PRESENTATION_SCREENSHOTOCRTEXTLAYER_H
+
+#include "snow_shot/presentation/screenshotocrpresentation.h"
+
+#include <QColor>
+#include <QGraphicsView>
+#include <QRect>
+#include <QTransform>
+
+#include <limits>
+#include <memory>
+#include <vector>
+
+class QGraphicsScene;
+class ScreenshotOcrGraphicsTextItem;
+
+class ScreenshotOcrTextLayer final : public QGraphicsView {
+  public:
+    enum class RenderingMode { Normal, SelectionOnly };
+
+    explicit ScreenshotOcrTextLayer(QWidget* parent = nullptr);
+
+    void setPresentation(std::shared_ptr<ScreenshotOcrPresentation> presentation,
+                         RenderingMode mode = RenderingMode::Normal);
+    void clearPresentation();
+    [[nodiscard]] QColor textColor() const {
+        return m_textColor;
+    }
+    void synchronize(const QTransform& canvasToViewTransform, const QRect& viewportRect);
+    void updateSelection();
+    void updateLineText(int lineIndex);
+    [[nodiscard]] ScreenshotOcrTextPosition textPositionAt(const QPointF& canvasPosition,
+                                                           bool useClosestLine) const;
+
+#if defined(SNOW_SHOT_BENCH_INTERNALS)
+    [[nodiscard]] quint64 geometrySynchronizationCount() const {
+        return m_geometrySynchronizationCount;
+    }
+#endif
+
+  private:
+    struct TextItem {
+        int lineIndex = -1;
+        ScreenshotOcrGraphicsTextItem* graphicsText = nullptr;
+    };
+
+    void rebuildTextItems();
+    void synchronizeTextItem(TextItem& item, const QTransform& canvasToViewTransform);
+
+    QGraphicsScene* m_scene = nullptr;
+    std::shared_ptr<ScreenshotOcrPresentation> m_presentation;
+    QColor m_textColor;
+    RenderingMode m_renderingMode = RenderingMode::Normal;
+    std::vector<TextItem> m_textItems;
+    QTransform m_canvasToViewTransform;
+    QRect m_viewportRect;
+    ScreenshotOcrTextPosition m_selectionAnchor;
+    ScreenshotOcrTextPosition m_selectionFocus;
+    quint64 m_selectionRevision = std::numeric_limits<quint64>::max();
+#if defined(SNOW_SHOT_BENCH_INTERNALS)
+    quint64 m_geometrySynchronizationCount = 0;
+#endif
+    bool m_synchronized = false;
+};
+
+#endif // SNOW_SHOT_PRESENTATION_SCREENSHOTOCRTEXTLAYER_H

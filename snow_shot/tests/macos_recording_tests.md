@@ -1,0 +1,156 @@
+# macOS recording acceptance
+
+Recording requires macOS 15+. The Qt controller uses the existing opaque C session
+API; a native worker owns capture, effects, audio, encoding and destruction.
+The UI and capture region use desktop points. Output sizing resolves the native
+desktop transform (the highest intersecting display density), then applies the
+orientation-aware quality cap and output-format alignment. Odd capture dimensions
+and negative origins are retained; output dimensions are fixed at startup.
+
+## Focused checks
+
+Use the toolchain described in `../../docs-macos-build.md`:
+
+```sh
+scripts/build.sh snow-shot-macos-arm64-debug --target snow_shot
+cmake --build build/snow-shot-macos-arm64-debug --parallel 8 --target \
+  snow-shot-screen-recording-controller-tests \
+  snow-shot-screen-recording-area-window-tests \
+  snow-shot-screen-recording-shortcut-tests \
+  snow-shot-screen-recording-geometry-tests \
+  snow-shot-screenshot-recording-workflow-tests snow-shot-app-permissions-tests
+ctest --test-dir build/snow-shot-macos-arm64-debug --output-on-failure \
+  -R '^snow-shot-(app-permissions|screen-recording-(controller|area-window|geometry|shortcut)|screenshot-recording-workflow|recording-effects-preview|recording-capture-exclusion|macos-recording-capture-exclusion)-tests$'
+
+export FFMPEG_DIR="$PWD/.tools/macos/installed/dynamic/arm64-osx-snow-shot"
+export DYLD_LIBRARY_PATH="$FFMPEG_DIR/lib"
+cargo test --manifest-path snow-crates/Cargo.toml \
+  -p snow-recording-c -p snow-recording-runtime -p snow-recording-effects --lib
+cargo test --manifest-path snow-crates/Cargo.toml \
+  -p snow-recording-export --lib streaming::tests::
+cargo test --manifest-path snow-crates/Cargo.toml -p snow-macos --lib desktop::tests
+cargo clippy --manifest-path snow-crates/Cargo.toml \
+  -p snow-recording-c -p snow-recording-runtime -p snow-recording-effects \
+  -p snow-recording-export --all-targets -- -D warnings
+```
+
+The controller fixtures cover deferred startup, permission denial, cancellation,
+countdown, pause/resume, stop failure, clipboard publication, exclusions, and stale
+asynchronous native sizing. Controlled worker barriers also verify that controller
+destruction neither blocks the GUI thread nor releases a finalizing session early. Area tests cover logical dragging, resizing, odd sizes,
+negative origins, annotation persistence and countdown placement. The Cocoa shortcut
+test checks native click-through, drawing input, stacking and fullscreen Space
+policies through repeated show/hide cycles. Native desktop geometry tests exercise
+mixed display density without requiring multiple physical displays.
+
+Recording border input has a focused Cocoa check (requires permission to post mouse
+events; otherwise CTest reports a skip):
+
+```sh
+ctest --test-dir build/snow-shot-macos-arm64-debug --output-on-failure \
+  -R '^snow-shot-macos-recording-border-input-tests$'
+```
+
+It drags every painted edge and corner to the ten-physical-pixel minimum, across
+the fixed boundary, and back before releasing. The same cases run offscreen in
+the area-window tests. The native overlay-initialization fixture also verifies
+that AppKit cannot take over recording geometry after native surface recreation.
+
+## Cursor orientation and hotspot regression
+
+Cursor bitmaps, effect tiles, and editable cursor assets use top-first rows.
+`NSCursor.hotSpot` uses points from the image's top-left; Quartz input locations
+use top-left desktop points. Drawing the native CGImage into an untransformed
+bitmap context preserves its scanline order. Applying a Cocoa-style Y flip here
+inverts only the image, leaving its hotspot unchanged: the pointer tip then appears
+below the highlight. Fix this at cursor acquisition, shared by direct and editable
+recording, rather than compensating in the highlight or desktop transform.
+
+Focused, offscreen checks (use the FFmpeg environment above for runtime tests):
+
+```sh
+cargo test --manifest-path snow-crates/Cargo.toml -p snow-macos --lib cursor::tests
+cargo test --manifest-path snow-crates/Cargo.toml -p snow-macos --lib compositor::tests
+cargo test --manifest-path snow-crates/Cargo.toml -p snow-recording-runtime --lib macos_effects::
+cargo test --manifest-path snow-crates/Cargo.toml -p snow-recording-runtime --lib macos::editable_cursor::
+```
+
+The asymmetric native pixel fixture failed with reversed rows before the correction
+and passed afterward. Coverage includes premultiplied alpha, scaled hotspots at
+1x/1.5x/2x, negative desktop origins, destination offsets, tile boundaries, editable
+straight-alpha assets, and native GPU overlay/highlight orientation with padded
+rows and clipping at the canvas edge. For visual acceptance, record with highlight
+and separate cursor enabled, switch between arrow and text cursors, and verify the
+hotspot stays at the highlight center in both direct output and editable export.
+
+## Native export probe
+
+Deploy with the normal bundle installer, then use the diagnostic entry point:
+
+```sh
+cmake --install build/snow-shot-macos-arm64-debug --component SnowShot \
+  --prefix "$PWD/build/snow-shot-macos-arm64-debug/run"
+build/snow-shot-macos-arm64-debug/run/snow_shot.app/Contents/MacOS/snow_shot \
+  --recording-macos-probe "$PWD/build/recording.mp4" system-audio effects
+```
+
+The probe uses the ordinary C API and a Cocoa event loop, records a 321×239-point
+region, pauses for 300 ms between two 800 ms active intervals, and finalizes.
+Choose `.gif`, `.apng`, or `.webp` to exercise animation export. Optional arguments
+are `system-audio`, `microphone`, `effects`, `software`, and `hevc`. Omit audio
+arguments for animations. The probe does not modify application settings.
+Check decoded dimensions, duration, codec, every animation frame and loop metadata;
+play a known sound throughout startup and recording to distinguish silence from
+failed system-audio capture.
+
+## Concurrent screenshot input
+
+With system audio enabled, record a small region while taking a screenshot. Move
+the pointer across screenshot toolbar buttons, open their popups, and drag the
+selection. Verify smooth input and stable cursor changes with recorded cursor
+visibility both enabled and disabled. Repeat after pause/resume and with a large
+recording region. Play a known sound and confirm the exported video still contains
+system audio and follows the selected cursor visibility setting.
+
+The audio stream has no screen-output consumer and must disable cursor capture and
+click visualization. Its permission-free regression runs with
+`cargo test --manifest-path snow-crates/Cargo.toml -p snow-macos --lib audio::tests`.
+On 2026-09-26, user-assisted verification of the rebuilt arm64 debug app confirmed
+smooth screenshot-toolbar input with system audio enabled and audible sound in
+the exported recording. The configuration regression failed before the correction
+and all three focused audio tests passed afterward.
+
+## Coverage on 2026-09-22
+
+Hardware: Apple M4 Mac mini, one 1920×1080 display at 1× scale.
+
+The arm64 debug application build and bundle deployment passed. All nine focused
+CTest checks passed, including the Cocoa checks. After the shutdown change, all
+four controller/exclusion checks passed again. Rust checks passed: 29 C facade,
+100 recording runtime, 41 effects, 22 streaming-export tests (one existing ignored),
+and five native desktop geometry tests. Clippy, formatting, translation extraction
+and catalog completeness checks passed. The full test suite was not run.
+
+- MP4 hardware H.264, software H.264 and hardware HEVC export completed. On this
+  display MP4 output is 320×238; the capture region remains 321×239 points.
+- GIF, APNG and WebP exported at 321×239. Pillow decoded every frame and confirmed
+  infinite-loop metadata in moving-content probes. A static WebP may collapse to
+  one frame. The deployed bundle also exported and decoded all four formats.
+  FFmpeg's GIF decoder reported LZW errors for a GIF that
+  Pillow decoded completely; use an independent decoder when checking GIF output.
+- System audio produced an AAC stream with a nonzero decoded signal from a known
+  system sound. A pause/resume probe produced approximately 1.67 s of output,
+  excluding its 300 ms pause. Effects and cursor-highlight probes completed.
+- No microphone input device is installed on this machine. Requested microphone
+  recording correctly failed with device unavailable; audible microphone capture
+  and combined-source synchronization remain unverified.
+- Physical Retina/mixed-density displays, Intel hardware and Windows execution are
+  unavailable. Fullscreen application switching, visual effect/layout comparison,
+  long recordings, and actual input delivery to another application's controls
+  still need interactive acceptance. Native window-policy assertions do not replace
+  those checks. Release DMG/notarization acceptance is separate from the debug app.
+
+Manual acceptance should also draw during recording, change toolbar settings before
+start, verify the toolbar stays excluded, copy each format to the clipboard, open
+the recording folder, repeat start/stop, and revoke optional input permissions to
+confirm basic recording remains usable when those effects are disabled.

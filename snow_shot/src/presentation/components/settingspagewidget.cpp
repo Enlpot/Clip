@@ -1,0 +1,2175 @@
+#include "snow_shot/presentation/components/settingspagewidget.h"
+#include "snow_shot/network/snowshotapiclient.h"
+
+#include "snow_shot/presentation/components/pagecontainerwidget.h"
+#include "snow_shot/presentation/apppermissionservice.h"
+#include "widgets/alert.h"
+#include "snow_shot/presentation/components/globalmouserow.h"
+#include "snow_shot/presentation/components/pathinput.h"
+#include "snow_shot/presentation/components/sectionheaderwidget.h"
+#include "snow_shot/presentation/components/settingscustomwidget.h"
+#include "snow_shot/presentation/components/settingspageutils.h"
+#include "snow_shot/presentation/components/shortcutkeyrow.h"
+#include "snow_shot/presentation/settings/settingsruntimesession.h"
+#include "snow_shot/presentation/settings/settingsregistry.h"
+#include "snow_shot/presentation/styles/mainwindowcomponenttoken.h"
+#include "snow_shot/presentation/styles/thememanager.h"
+#include "snow_shot/storage/configurationschema.h"
+
+#include "widgets/button.h"
+#include "widgets/message.h"
+#include "widgets/color_picker.h"
+#include "widgets/divider.h"
+#include "widgets/input_number.h"
+#include "widgets/input_line_edit.h"
+#include "widgets/modal.h"
+#include "widgets/multi_select.h"
+#include "widgets/radio.h"
+#include "widgets/radio_button_group.h"
+#include "widgets/scroll_area.h"
+#include "widgets/select.h"
+#include "widgets/slider.h"
+#include "widgets/switch.h"
+
+#include <QAbstractButton>
+#include <QApplication>
+#include "snow_shot/presentation/globalmousemanager.h"
+#include <QEvent>
+#include <QFileDialog>
+#include <QFocusEvent>
+#include <QGridLayout>
+#include <QHash>
+#include <QHideEvent>
+#include <QHBoxLayout>
+#include <QIcon>
+#include <QLabel>
+#include <QPointer>
+
+#include <QScrollBar>
+#include <QSignalBlocker>
+#include <QScopedValueRollback>
+#include <QShowEvent>
+#include <QStyle>
+#include <QStandardItemModel>
+#include <QSizePolicy>
+#include <QTimer>
+
+#include <QVBoxLayout>
+
+#include <algorithm>
+#include <functional>
+#include <optional>
+#include <type_traits>
+#include <utility>
+
+namespace {
+namespace settings = snow_shot::presentation::settings;
+namespace settings_ui = snow_shot::presentation::components;
+
+adqt::widgets::AdSelect::Option selectOption(const QVariant& value, const QString& label) {
+    adqt::widgets::AdSelect::Option result;
+    result.value = value;
+    result.label = label;
+    return result;
+}
+
+std::optional<snow_shot::presentation::AppPermission>
+permissionForRenderer(settings::SettingsCustomRenderer renderer) {
+    using Permission = snow_shot::presentation::AppPermission;
+    using Renderer = settings::SettingsCustomRenderer;
+    switch (renderer) {
+    case Renderer::PermissionScreenRecording:
+        return Permission::ScreenRecording;
+    case Renderer::PermissionAccessibility:
+        return Permission::Accessibility;
+    case Renderer::PermissionInputMonitoring:
+        return Permission::InputMonitoring;
+    case Renderer::PermissionMicrophone:
+        return Permission::Microphone;
+    case Renderer::TextTranslationConfigurations:
+    case Renderer::CustomAiModels:
+    case Renderer::McpStatus:
+    case Renderer::StorageStatus:
+    case Renderer::DrawingToolbarEditor:
+    case Renderer::ScreenshotToolbarEditor:
+    case Renderer::PinnedToolbarEditor:
+    case Renderer::TrayMenuOptions:
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+class SettingsPageWidget::Impl {
+  public:
+    struct RuntimeItem {
+        const settings::SettingsFieldDescriptor* descriptor = nullptr;
+        const settings::SettingsItemDefinition* definition = nullptr;
+        QWidget* anchor = nullptr;
+        QWidget* focusTarget = nullptr;
+        QLabel* title = nullptr;
+        QLabel* description = nullptr;
+        adqt::widgets::AdSelect* select = nullptr;
+        adqt::widgets::AdMultiSelect* multiSelect = nullptr;
+        adqt::widgets::AdSwitch* switchControl = nullptr;
+        adqt::widgets::AdInputNumber* integerControl = nullptr;
+        adqt::widgets::AdSlider* sliderControl = nullptr;
+        QLabel* sliderValue = nullptr;
+        adqt::widgets::AdColorPicker* colorControl = nullptr;
+        adqt::widgets::AdRadioButtonGroup* radioGroup = nullptr;
+        QVector<adqt::widgets::AdRadio*> radioButtons;
+        QVector<QVariant> radioValues;
+        FilePathInput* filePathControl = nullptr;
+        DirectoryPathInput* directoryPathControl = nullptr;
+        adqt::widgets::AdLineEdit* textControl = nullptr;
+        ShortcutKeyRow* shortcutControl = nullptr;
+        GlobalMouseRow* globalMouseControl = nullptr;
+        adqt::widgets::AdButton* actionControl = nullptr;
+        adqt::widgets::AdButton* permissionControl = nullptr;
+        std::optional<snow_shot::presentation::AppPermission> permission;
+        SettingsCustomWidget* customControl = nullptr;
+        std::optional<settings::SettingsCustomRenderer> deferredRenderer;
+        QPointer<adqt::widgets::AdModal> modal;
+        bool fontOptionsLoaded = false;
+        QVector<adqt::widgets::AdSelect::Option> presentedOptions;
+    };
+
+    struct RuntimeSection {
+        const settings::SettingsSectionDefinition* definition = nullptr;
+        SectionHeaderWidget* header = nullptr;
+        settings::SettingsSectionReset reset = settings::SettingsSectionReset::None;
+        settings::SettingsSectionItemLayout itemLayout =
+            settings::SettingsSectionItemLayout::VerticalList;
+        const settings::SettingsSectionPlan* plan = nullptr;
+        QWidget* list = nullptr;
+        bool materialized = false;
+    };
+
+    Impl(SettingsPageWidget& owner, const settings::SettingsRegistry& sourceRegistry,
+         const QString& sourcePageId, settings::SettingsRuntimeSession& sourceRuntimeSession)
+        : q(owner), registry(sourceRegistry), catalog(sourceRegistry.catalog()),
+          runtimeSession(sourceRuntimeSession), pagePlan(sourceRegistry.pagePlan(sourcePageId)),
+          page(catalog.page(sourcePageId)),
+          colorScheme(
+              snow_shot::presentation::styles::ThemeManager::instance().themeColorScheme()) {
+        Q_ASSERT(page == nullptr || page->id == sourcePageId);
+        build();
+        connectServices();
+        retranslateUi();
+        applyTheme(colorScheme);
+        initialized = true;
+    }
+
+    RuntimeItem* runtimeItem(const QString& itemId) {
+        const auto found = itemIndexes.constFind(itemId);
+        return found == itemIndexes.cend() ? nullptr : &items[found.value()];
+    }
+
+    RuntimeSection* runtimeSection(const QString& sectionId) {
+        const auto found = sectionIndexes.constFind(sectionId);
+        return found == sectionIndexes.cend() ? nullptr : &sections[found.value()];
+    }
+
+    void build() {
+        if (page == nullptr) {
+            q.setObjectName(settings::generatedObjectName(QStringLiteral("settings-page"),
+                                                          QStringLiteral("invalid")));
+            return;
+        }
+        const auto metric = colorScheme.metricAlias;
+        q.setObjectName(settings::generatedObjectName(QStringLiteral("settings-page"), page->id));
+        if (pagePlan != nullptr) {
+            q.setProperty("settingsProviderId", pagePlan->providerId);
+            q.setProperty("settingsPagePlanIndex", pagePlan->pageIndex);
+        }
+        q.setAutoFillBackground(false);
+
+        auto* pageLayout = new QVBoxLayout(&q);
+        pageLayout->setContentsMargins(0, 0, 0, 0);
+        pageLayout->setSpacing(0);
+
+        auto* pageContainer = new PageContainerWidget(metric, &q);
+        pageContainer->setObjectName(
+            settings::generatedObjectName(QStringLiteral("settings-container"), page->id));
+        scrollArea = pageContainer->scrollArea();
+        scrollArea->setObjectName(
+            settings::generatedObjectName(QStringLiteral("settings-scroll"), page->id));
+
+        contentWidget = pageContainer->contentWidget();
+        contentWidget->setObjectName(
+            settings::generatedObjectName(QStringLiteral("settings-content"), page->id));
+        contentLayout = pageContainer->contentLayout();
+        contentLayout->setSpacing(0);
+
+#ifdef Q_OS_MACOS
+        if (page->id == QStringLiteral("global-mouse") ||
+            page->id == QStringLiteral("global-hotkeys")) {
+            const QMargins margins = contentLayout->contentsMargins();
+            contentTopMarginWithoutPermissionBanner = margins.top();
+            permissionBanner = new adqt::widgets::AdAlert(contentWidget);
+            permissionBanner->setObjectName(QStringLiteral("appPermissionsAlert"));
+            permissionBanner->setSeverity(adqt::widgets::AdAlert::Severity::Warning);
+            permissionBanner->setIconMode(adqt::widgets::AdAlert::IconMode::Visible);
+            permissionBanner->setAnimated(false);
+            permissionButton = new adqt::widgets::AdButton(permissionBanner);
+            permissionBanner->setActionsWidget(permissionButton);
+            connect(permissionButton, &QAbstractButton::clicked, &q, [this] {
+                auto* service = runtimeSession.appPermissions();
+                if (!service)
+                    return;
+                const auto missing = relevantMissingPermissions();
+                settings::SettingsCommand command;
+                command.kind = settings::SettingsCommandKind::Navigate;
+                command.location = {
+                    QStringLiteral("app-permissions"), QStringLiteral("permissions"),
+                    missing.isEmpty() ? QString()
+                                      : snow_shot::presentation::appPermissionId(missing.first())};
+                emit q.commandRequested(command);
+            });
+            if (auto* service = runtimeSession.appPermissions())
+                connect(service, &snow_shot::presentation::AppPermissionService::changed, &q,
+                        [this] { syncMousePermission(); });
+            connect(&runtimeSession,
+                    &settings::SettingsRuntimeSession::globalMousePermissionChanged, &q,
+                    [this] { syncValues(); });
+            connect(&runtimeSession, &settings::SettingsRuntimeSession::fieldChanged, &q,
+                    [this] { syncMousePermission(); });
+            contentLayout->addWidget(permissionBanner);
+        }
+#endif
+
+        if (pagePlan != nullptr) {
+            for (const settings::SettingsSectionPlan& sectionPlan : pagePlan->sectionPlans) {
+                Q_ASSERT(sectionPlan.sectionIndex >= 0 &&
+                         sectionPlan.sectionIndex < page->sections.size());
+                if (sectionPlan.sectionIndex < 0 ||
+                    sectionPlan.sectionIndex >= page->sections.size()) {
+                    continue;
+                }
+                const settings::SettingsSectionDefinition& sectionDefinition =
+                    page->sections.at(sectionPlan.sectionIndex);
+                Q_ASSERT(sectionDefinition.id == sectionPlan.id);
+                buildSection(sectionDefinition, &sectionPlan);
+            }
+        }
+        pageLayout->addWidget(pageContainer, 1);
+        if (!sections.isEmpty()) {
+            materializeSection(sections.first());
+        }
+        scrollMarginX = metric.paddingSM;
+        scrollMarginY = metric.paddingSM;
+        requestVisibleSectionSync();
+    }
+
+    void buildSection(const settings::SettingsSectionDefinition& sectionDefinition,
+                      const settings::SettingsSectionPlan* sectionPlan) {
+        const auto metric = colorScheme.metricAlias;
+        const settings::SettingsSectionReset reset =
+            sectionPlan != nullptr ? sectionPlan->reset : sectionDefinition.reset;
+        const settings::SettingsSectionItemLayout itemLayout =
+            sectionPlan != nullptr ? sectionPlan->itemLayout : sectionDefinition.itemLayout;
+        RuntimeSection runtimeSection;
+        runtimeSection.definition = &sectionDefinition;
+        runtimeSection.reset = reset;
+        runtimeSection.itemLayout = itemLayout;
+        runtimeSection.header =
+            new SectionHeaderWidget(sectionDefinition.title.translated(), metric, contentWidget);
+        runtimeSection.header->setObjectName(settings::generatedObjectName(
+            QStringLiteral("settings-section"),
+            QStringLiteral("%1-%2").arg(page->id, sectionDefinition.id)));
+        runtimeSection.header->setResetVisible(reset != settings::SettingsSectionReset::None);
+#ifdef Q_OS_MACOS
+        if (page->id == QStringLiteral("app-permissions")) {
+            runtimeSection.header->setTrailingAction(SectionHeaderWidget::TrailingAction::Refresh);
+            connect(runtimeSection.header, &SectionHeaderWidget::refreshRequested, &q, [this] {
+                if (auto* service = runtimeSession.appPermissions()) {
+                    service->refresh();
+                }
+            });
+        }
+#endif
+        contentLayout->addWidget(runtimeSection.header);
+
+        auto* list = new QWidget(contentWidget);
+        list->setObjectName(settings::generatedObjectName(
+            QStringLiteral("settings-section-list"),
+            QStringLiteral("%1-%2").arg(page->id, sectionDefinition.id)));
+        list->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        runtimeSection.plan = sectionPlan;
+        runtimeSection.list = list;
+        list->setAccessibleName(sectionDefinition.title.translated());
+        // A focusable shell keeps deferred content reachable by keyboard and
+        // accessibility clients. Entering it creates the real controls.
+        list->setFocusPolicy(Qt::TabFocus);
+        list->setFixedHeight(estimatedSectionHeight(runtimeSection));
+        sections.push_back(runtimeSection);
+        sectionIndexes.insert(sectionDefinition.id, static_cast<int>(sections.size()) - 1);
+        contentLayout->addWidget(list);
+    }
+
+    int estimatedSectionHeight(const RuntimeSection& section) const {
+        if (section.plan == nullptr) {
+            return 0;
+        }
+        const auto& metric = colorScheme.metricAlias;
+        const int rowHeight = metric.controlHeight + metric.fontSize + metric.paddingSM;
+        int height = 0;
+        for (int fieldIndex : section.plan->fieldIndexes) {
+            height += registry.fields().at(fieldIndex).kind == settings::SettingsFieldKind::Custom
+                          ? rowHeight * 4
+                          : rowHeight;
+        }
+        if (section.itemLayout == settings::SettingsSectionItemLayout::TwoColumnGrid) {
+            return (height + rowHeight) / 2 +
+                   static_cast<int>(section.plan->fieldIndexes.size() / 2) * metric.marginLG;
+        }
+        return height +
+               qMax(0, static_cast<int>(section.plan->fieldIndexes.size()) - 1) * metric.paddingLG;
+    }
+
+    void materializeSection(RuntimeSection& section) {
+        if (section.materialized) {
+            return;
+        }
+        section.materialized = true;
+        QWidget* shell = section.list;
+        // Populate a hidden body, then attach it once. Initializing each row in
+        // an already visible shell would repeatedly run show/layout work.
+        auto* list = new QWidget(shell);
+        list->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        list->hide();
+        const auto metric = colorScheme.metricAlias;
+        const auto itemLayout = section.itemLayout;
+        const auto& sectionDefinition = *section.definition;
+        const QVector<int>* plannedFieldIndexes =
+            section.plan != nullptr ? &section.plan->fieldIndexes : nullptr;
+        const int firstItem = static_cast<int>(items.size());
+        auto* listLayout = new QVBoxLayout(list);
+        listLayout->setContentsMargins(0, 0, 0, 0);
+        const bool twoColumnItemGrid =
+            itemLayout == settings::SettingsSectionItemLayout::TwoColumnGrid;
+        const bool dividedItemList = itemLayout == settings::SettingsSectionItemLayout::DividedList;
+        listLayout->setSpacing(twoColumnItemGrid
+                                   ? 0
+                                   : (dividedItemList ? 0
+                                      : (page->id == QStringLiteral("global-hotkeys") ||
+                                         page->id == QStringLiteral("global-mouse"))
+                                          ? metric.padding
+                                          : metric.paddingLG));
+
+        QGridLayout* itemGrid = nullptr;
+        if (twoColumnItemGrid) {
+            itemGrid = new QGridLayout;
+            itemGrid->setContentsMargins(0, 0, 0, 0);
+            itemGrid->setHorizontalSpacing(metric.marginLG);
+            itemGrid->setVerticalSpacing(metric.marginLG);
+            itemGrid->setColumnStretch(0, 1);
+            itemGrid->setColumnStretch(1, 1);
+            listLayout->addLayout(itemGrid);
+        }
+        if (plannedFieldIndexes != nullptr) {
+            for (int itemIndex = 0; itemIndex < plannedFieldIndexes->size(); ++itemIndex) {
+                const int fieldIndex = plannedFieldIndexes->at(itemIndex);
+                Q_ASSERT(fieldIndex >= 0 && fieldIndex < registry.fields().size());
+                if (fieldIndex < 0 || fieldIndex >= registry.fields().size()) {
+                    continue;
+                }
+                const settings::SettingsFieldDescriptor& descriptor =
+                    registry.fields().at(fieldIndex);
+                Q_ASSERT(descriptor.pageId == page->id &&
+                         descriptor.sectionId == sectionDefinition.id &&
+                         descriptor.definition != nullptr);
+                if (descriptor.pageId != page->id || descriptor.sectionId != sectionDefinition.id ||
+                    descriptor.definition == nullptr) {
+                    continue;
+                }
+                buildItem(*descriptor.definition, &descriptor, fieldIndex, list, listLayout,
+                          itemLayout, itemGrid, itemIndex);
+            }
+        }
+        if (initialized) {
+            retranslateUi(firstItem);
+            applyTheme(colorScheme, firstItem);
+        }
+        auto* shellLayout = new QVBoxLayout(shell);
+        shellLayout->setContentsMargins(0, 0, 0, 0);
+        shellLayout->addWidget(list);
+        shell->setFocusPolicy(Qt::NoFocus);
+        shell->setMinimumHeight(0);
+        shell->setMaximumHeight(QWIDGETSIZE_MAX);
+        list->show();
+        rebuildTabOrder();
+    }
+
+    void buildItem(const settings::SettingsItemDefinition& definition,
+                   const settings::SettingsFieldDescriptor* descriptor, int fieldIndex,
+                   QWidget* list, QVBoxLayout* listLayout,
+                   settings::SettingsSectionItemLayout itemLayout, QGridLayout* itemGrid = nullptr,
+                   int itemIndex = 0) {
+        RuntimeItem runtime;
+        runtime.descriptor = descriptor;
+        runtime.definition = &definition;
+
+        const auto addItemWidget = [list, listLayout, itemGrid, itemIndex,
+                                    itemLayout](QWidget* widget) {
+            if (itemGrid != nullptr) {
+                itemGrid->addWidget(widget, itemIndex / 2, itemIndex % 2);
+            } else {
+                if (itemLayout == settings::SettingsSectionItemLayout::DividedList &&
+                    itemIndex > 0) {
+                    auto* divider = new adqt::widgets::AdDivider(list);
+                    divider->setObjectName(
+                        QStringLiteral("settings-item-divider-%1").arg(itemIndex));
+                    divider->setDividerSize(adqt::widgets::AdDivider::Size::Small);
+                    listLayout->addWidget(divider);
+                }
+                listLayout->addWidget(widget);
+            }
+        };
+
+        std::visit(
+            [&](const auto& payload) {
+                using Payload = std::decay_t<decltype(payload)>;
+                if constexpr (std::is_same_v<Payload, settings::SettingsSelectDefinition>) {
+                    auto* select = new adqt::widgets::AdSelect(list);
+                    select->setSearchEnabled(true);
+                    select->setSearchFilterFields({QStringLiteral("label")});
+                    select->setMode(adqt::widgets::AdSelect::Mode::Single);
+                    select->setControlSize(adqt::widgets::AdSelect::ControlSize::Middle);
+                    select->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.select = select;
+                    if (payload.binding == settings::SettingsSelectBinding::AppFont) {
+                        connect(select, &adqt::widgets::AdSelect::popupOpening, select,
+                                [this, itemId = definition.id]() {
+                                    RuntimeItem* item = runtimeItem(itemId);
+                                    if (item == nullptr || item->fontOptionsLoaded) {
+                                        return;
+                                    }
+                                    item->fontOptionsLoaded = true;
+                                    const QSignalBlocker blocker(item->select);
+                                    runtimeSession.requestFontOptions();
+                                    setOptions(*item, selectOptions(*item));
+                                });
+                    }
+                    runtime.focusTarget = select;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description, select,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(select, &adqt::widgets::AdSelect::currentValueChanged, &q,
+                            [this, itemId = definition.id](const QVariant& value) {
+                                applySelectValue(itemId, value);
+                            });
+                } else if constexpr (std::is_same_v<Payload,
+                                                    settings::SettingsMultiSelectDefinition>) {
+                    auto* control = new adqt::widgets::AdMultiSelect(list);
+                    control->setControlSize(adqt::widgets::AdMultiSelect::ControlSize::Middle);
+                    control->setSearchEnabled(true);
+                    control->setSearchFilterFields({QStringLiteral("label")});
+                    control->setResponsiveMaxTagCount(true);
+                    control->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.multiSelect = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &adqt::widgets::AdMultiSelect::selectedValuesChanged, &q,
+                            [this, binding = payload.binding](const QVariantList& value) {
+                                if (!synchronizingValues &&
+                                    !runtimeSession.applyMultiSelectValue(binding, value)) {
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsSwitchDefinition>) {
+                    auto* control = new adqt::widgets::AdSwitch(list);
+                    control->setControlSize(adqt::widgets::AdSwitch::ControlSize::Medium);
+                    runtime.switchControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &QAbstractButton::toggled, &q,
+                            [this, binding = payload.binding](bool checked) {
+                                applySwitchValue(binding, checked);
+                            });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsIntegerDefinition>) {
+                    auto* control = new adqt::widgets::AdInputNumber(list);
+                    control->setControlSize(adqt::widgets::AdInputNumber::ControlSize::Medium);
+                    control->setVariant(adqt::widgets::AdInputNumber::Variant::Outlined);
+                    control->setStepButtonLayout(
+                        adqt::widgets::AdInputNumber::StepButtonLayout::Compact);
+                    control->setDecimals(0);
+                    control->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    const auto* schemaEntry =
+                        snow_shot::storage::ConfigurationSchema::entry(definition.configurationKey);
+                    Q_ASSERT(schemaEntry != nullptr && schemaEntry->integerRange.has_value());
+                    control->setRange(schemaEntry->integerRange->minimum,
+                                      schemaEntry->integerRange->maximum);
+                    control->setSingleStep(schemaEntry->integerRange->step);
+                    runtime.integerControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &adqt::widgets::AdInputNumber::valueChanged, &q,
+                            [this, binding = payload.binding](double value) {
+                                applyIntegerValue(binding, static_cast<int>(value));
+                            });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsSliderDefinition>) {
+                    auto* container = new QWidget(list);
+                    auto* layout = new QHBoxLayout(container);
+                    layout->setContentsMargins(0, 0, 0, 0);
+                    layout->setSpacing(0);
+                    auto* control = new adqt::widgets::AdSlider(container);
+                    const auto* schemaEntry =
+                        snow_shot::storage::ConfigurationSchema::entry(definition.configurationKey);
+                    Q_ASSERT(schemaEntry != nullptr && schemaEntry->integerRange.has_value());
+                    control->setRange(schemaEntry->integerRange->minimum,
+                                      schemaEntry->integerRange->maximum);
+                    control->setSingleStep(schemaEntry->integerRange->step);
+                    control->setPageStep(std::max(schemaEntry->integerRange->step, 10));
+                    control->setTooltipEnabled(true);
+                    auto* valueLabel = new QLabel(container);
+                    valueLabel->setMinimumWidth(colorScheme.metricAlias.controlHeightLG);
+                    valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+                    layout->addWidget(control, 1);
+                    layout->addWidget(valueLabel);
+                    container->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.sliderControl = control;
+                    runtime.sliderValue = valueLabel;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        container,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(
+                        control, &adqt::widgets::AdSlider::valueChanged, &q,
+                        [this, binding = payload.binding, valueLabel,
+                         suffix = payload.suffix](double value) {
+                            const int integerValue = qRound(value);
+                            valueLabel->setText(
+                                QStringLiteral("%1%2").arg(integerValue).arg(suffix.translated()));
+                            if (!synchronizingValues &&
+                                !runtimeSession.applySliderValue(binding, integerValue)) {
+                                syncValues();
+                            }
+                        });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsColorDefinition>) {
+                    auto* control = new adqt::widgets::AdColorPicker(list);
+                    // A settings page can contain many pickers below the fold.
+                    // Build each popup when opened, not when its page is shown.
+                    control->setPopupPrewarmEnabled(false);
+                    control->setSize(adqt::widgets::AdColorPicker::Size::Middle);
+                    control->setModeOptions({adqt::widgets::AdColorPicker::Mode::Solid});
+                    control->setMode(adqt::widgets::AdColorPicker::Mode::Solid);
+                    control->setFormat(adqt::widgets::AdColorPicker::Format::Hex);
+                    control->setAlphaChannelEnabled(payload.alphaChannelEnabled);
+                    control->setAllowClear(false);
+                    control->setTriggerTextVisible(true);
+                    control->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    if (auto* layout = qobject_cast<QHBoxLayout*>(control->layout());
+                        layout != nullptr && layout->count() > 0 &&
+                        layout->itemAt(0)->widget() != nullptr) {
+                        layout->setAlignment(layout->itemAt(0)->widget(),
+                                             Qt::AlignRight | Qt::AlignVCenter);
+                    }
+                    runtime.colorControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &adqt::widgets::AdColorPicker::editingFinished, &q,
+                            [this,
+                             binding = payload.binding](const adqt::widgets::AdColorValue& value) {
+                                if (!synchronizingValues && value.isSolid() &&
+                                    !runtimeSession.applyColorValue(binding, value.solidColor)) {
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsRadioDefinition>) {
+                    auto* container = new QWidget(list);
+                    auto* layout = new QHBoxLayout(container);
+                    layout->setContentsMargins(0, 0, 0, 0);
+                    layout->setSpacing(0);
+                    auto* radioList = new QWidget(container);
+                    radioList->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+                    auto* radioLayout = new QVBoxLayout(radioList);
+                    radioLayout->setContentsMargins(0, 0, 0, 0);
+                    radioLayout->setSpacing(colorScheme.metricAlias.marginXS);
+                    auto* group = new adqt::widgets::AdRadioButtonGroup(container);
+                    group->setManagedLayout(radioLayout);
+                    group->setControlSize(adqt::widgets::AdRadio::ControlSize::Small);
+                    for (int index = 0; index < payload.options.size(); ++index) {
+                        const settings::SettingsRadioOptionDefinition& option =
+                            payload.options.at(index);
+                        auto* radio = new adqt::widgets::AdRadio(radioList);
+                        radio->setIcon(QIcon(option.iconResource));
+                        radio->setIconSize(QSize(24, 24));
+                        group->addButton(radio, index);
+                        radioLayout->addWidget(radio);
+                        runtime.radioButtons.push_back(radio);
+                        runtime.radioValues.push_back(option.value);
+                    }
+                    layout->addStretch(1);
+                    layout->addWidget(radioList, 0, Qt::AlignRight);
+                    container->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.radioGroup = group;
+                    runtime.focusTarget = runtime.radioButtons.isEmpty()
+                                              ? static_cast<QWidget*>(container)
+                                              : runtime.radioButtons.constFirst();
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        container,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(
+                        group, &adqt::widgets::AdRadioButtonGroup::checkedIdChanged, &q,
+                        [this, binding = payload.binding, values = runtime.radioValues](int id) {
+                            if (!synchronizingValues && id >= 0 && id < values.size() &&
+                                !runtimeSession.applyRadioValue(binding, values.at(id))) {
+                                syncValues();
+                            }
+                        });
+                } else if constexpr (std::is_same_v<Payload,
+                                                    settings::SettingsFilePathDefinition>) {
+                    auto* control = new FilePathInput(list);
+                    control->setControlSize(adqt::widgets::AdLineEdit::ControlSize::Medium);
+                    control->setAllowClear(true);
+                    control->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.filePathControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &DirectoryPathInput::editingFinished, &q,
+                            [this, control, binding = payload.binding]() {
+                                if (!synchronizingValues &&
+                                    !runtimeSession.applyFilePathValue(binding, control->text())) {
+                                    syncValues();
+                                }
+                            });
+                    connect(control, &DirectoryPathInput::browseRequested, &q,
+                            [this, control, binding = payload.binding,
+                             dialogTitle = payload.dialogTitle,
+                             fileFilter = payload.fileFilter](const QString& text) {
+                                const QString path = QFileDialog::getOpenFileName(
+                                    &q, dialogTitle.translated(), text, fileFilter.translated());
+                                if (!path.isEmpty()) {
+                                    control->setText(path);
+                                    if (!runtimeSession.applyFilePathValue(binding, path)) {
+                                        syncValues();
+                                    }
+                                }
+                            });
+                    connect(control, &DirectoryPathInput::cleared, &q,
+                            [this, binding = payload.binding] {
+                                if (!runtimeSession.applyFilePathValue(binding, QString())) {
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<Payload,
+                                                    settings::SettingsDirectoryPathDefinition>) {
+                    auto* control = new DirectoryPathInput(list);
+                    control->setControlSize(adqt::widgets::AdLineEdit::ControlSize::Medium);
+                    control->setAllowClear(true);
+                    control->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.directoryPathControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &DirectoryPathInput::editingFinished, &q,
+                            [this, control, binding = payload.binding]() {
+                                if (!synchronizingValues && !runtimeSession.applyDirectoryPathValue(
+                                                                binding, control->text())) {
+                                    syncValues();
+                                }
+                            });
+                    connect(control, &DirectoryPathInput::browseRequested, &q,
+                            [this, control, binding = payload.binding,
+                             dialogTitle = payload.dialogTitle](const QString& text) {
+                                const QString path = QFileDialog::getExistingDirectory(
+                                    &q, dialogTitle.translated(), text);
+                                if (!path.isEmpty()) {
+                                    control->setText(path);
+                                    if (!runtimeSession.applyDirectoryPathValue(binding, path)) {
+                                        syncValues();
+                                    }
+                                }
+                            });
+                    connect(control, &DirectoryPathInput::cleared, &q,
+                            [this, binding = payload.binding] {
+                                if (!runtimeSession.applyDirectoryPathValue(binding, QString())) {
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsTextDefinition>) {
+                    auto* control = new adqt::widgets::AdLineEdit(list);
+                    control->setControlSize(adqt::widgets::AdLineEdit::ControlSize::Medium);
+                    control->setAllowClear(payload.binding ==
+                                           settings::SettingsTextBinding::ServerUrl);
+                    if (payload.binding == settings::SettingsTextBinding::ServerUrl)
+                        control->setPlaceholderText(SnowShotApiClient::configuredBaseUrl());
+                    control->setFixedWidth(
+                        settings_ui::settingsControlWidth(colorScheme.metricAlias));
+                    runtime.textControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &QLineEdit::editingFinished, &q,
+                            [this, control, binding = payload.binding]() {
+                                if (!synchronizingValues &&
+                                    !runtimeSession.applyTextValue(binding, control->text())) {
+                                    if (binding == settings::SettingsTextBinding::ServerUrl) {
+                                        adqt::widgets::AdMessage::Request request;
+                                        request.content =
+                                            runtimeSession.state(QStringLiteral("api.server-url"))
+                                                .error;
+                                        adqt::widgets::AdMessageService::error(std::move(request),
+                                                                               &q);
+                                    }
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<Payload,
+                                                    settings::SettingsShortcutActionDefinition>) {
+                    const auto shortcutState = runtimeSession.shortcutState(payload.shortcutAction);
+                    const auto metric = colorScheme.metricAlias;
+                    const auto mainWindowMetric =
+                        snow_shot::presentation::styles::buildMainWindowComponentMetricToken(
+                            colorScheme);
+                    ShortcutKeyRowConfig config;
+                    config.title = definition.title.translated();
+                    config.iconRef =
+                        payload.iconFactory ? payload.iconFactory() : adqt::icons::IconRef();
+                    config.shortcuts = shortcutState.shortcuts;
+                    config.registrationState = shortcutState;
+                    config.rowState = QStringLiteral("normal");
+                    config.useStableBorder = true;
+                    config.maxShortcutCount = 2;
+                    config.shortcutValidator =
+                        [this, action = payload.shortcutAction](const auto& shortcut) {
+                            return runtimeSession.validateShortcut(action, shortcut);
+                        };
+                    config.suspendGlobalShortcuts = [this]() {
+                        return runtimeSession.suspendGlobalShortcuts();
+                    };
+                    config.resumeGlobalShortcuts = [this](quint64 handle) {
+                        runtimeSession.resumeGlobalShortcuts(handle);
+                    };
+                    config.adjustableDelay =
+                        payload.adjustment ==
+                        settings::SettingsShortcutAdjustment::ScreenshotDelaySeconds;
+                    config.delaySeconds =
+                        config.adjustableDelay
+                            ? runtimeSession.integerValue(
+                                  settings::SettingsIntegerBinding::ScreenshotDelaySeconds)
+                            : 3;
+                    config.delaySetter = [this](int value) {
+                        return runtimeSession.applyIntegerValue(
+                            settings::SettingsIntegerBinding::ScreenshotDelaySeconds, value);
+                    };
+                    auto* control = new ShortcutKeyRow(config, metric, mainWindowMetric, list);
+                    control->setObjectName(settings::generatedObjectName(
+                        QStringLiteral("settings-item"), definition.id));
+                    runtime.shortcutControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = control;
+                    addItemWidget(control);
+                    connect(
+                        control, &ShortcutKeyRow::clicked, &q,
+                        [this, command = payload.command]() { emit q.commandRequested(command); });
+                    connect(control, &ShortcutKeyRow::shortcutsChanged, &q,
+                            [this, action = payload.shortcutAction](const auto& shortcuts) {
+                                if (!runtimeSession.applyShortcuts(action, shortcuts)) {
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<Payload,
+                                                    settings::SettingsLocalShortcutDefinition>) {
+                    const snow_shot::shortcuts::ShortcutBindingList shortcuts =
+                        runtimeSession.localShortcuts(payload.scope, payload.shortcutId);
+                    snow_shot::presentation::GlobalShortcutRegistrationState displayState;
+                    displayState.shortcuts = shortcuts;
+                    displayState.status =
+                        shortcuts.isEmpty()
+                            ? snow_shot::presentation::GlobalShortcutStatus::Unset
+                            : snow_shot::presentation::GlobalShortcutStatus::Registered;
+                    const auto metric = colorScheme.metricAlias;
+                    const auto mainWindowMetric =
+                        snow_shot::presentation::styles::buildMainWindowComponentMetricToken(
+                            colorScheme);
+                    ShortcutKeyRowConfig config;
+                    config.title = definition.title.translated();
+                    config.iconRef =
+                        payload.iconFactory ? payload.iconFactory() : adqt::icons::IconRef();
+                    config.shortcuts = shortcuts;
+                    config.registrationState = displayState;
+                    config.rowState = QStringLiteral("normal");
+                    config.useStableBorder = false;
+                    config.maxShortcutCount = 2;
+                    config.shortcutValidator = [this, scope = payload.scope,
+                                                shortcutId =
+                                                    payload.shortcutId](const auto& shortcut) {
+                        return runtimeSession.validateLocalShortcut(scope, shortcutId, shortcut);
+                    };
+                    config.showRegistrationStatus = false;
+                    config.validationScope =
+                        payload.scope == settings::SettingsLocalShortcutScope::Screenshot
+                            ? ShortcutKeyRowConfig::ValidationScope::ScreenshotShortcut
+                        : payload.scope == settings::SettingsLocalShortcutScope::Drawing
+                            ? ShortcutKeyRowConfig::ValidationScope::DrawingShortcut
+                        : payload.scope == settings::SettingsLocalShortcutScope::ScreenRecording
+                            ? ShortcutKeyRowConfig::ValidationScope::RecordingShortcut
+                            : ShortcutKeyRowConfig::ValidationScope::PinnedWindowShortcut;
+                    config.presentation = ShortcutKeyRowConfig::Presentation::CompactFormField;
+                    auto* control = new ShortcutKeyRow(config, metric, mainWindowMetric, list);
+                    control->setObjectName(settings::generatedObjectName(
+                        QStringLiteral("settings-item"), definition.id));
+                    runtime.shortcutControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = control;
+                    addItemWidget(control);
+                    connect(control, &ShortcutKeyRow::shortcutsChanged, &q,
+                            [this, scope = payload.scope,
+                             shortcutId = payload.shortcutId](const auto& next) {
+                                if (!runtimeSession.applyLocalShortcuts(scope, shortcutId, next)) {
+                                    syncValues();
+                                }
+                            });
+                } else if constexpr (std::is_same_v<
+                                         Payload, settings::SettingsGlobalMouseActionDefinition>) {
+                    auto* control =
+                        new GlobalMouseRow(definition.title.translated(), payload.action,
+                                           runtimeSession, colorScheme, list);
+                    control->setObjectName(settings::generatedObjectName(
+                        QStringLiteral("settings-item"), definition.id));
+                    runtime.globalMouseControl = control;
+                    runtime.focusTarget = control->configurationButton();
+                    runtime.anchor = control;
+                    addItemWidget(control);
+                    connect(control, &GlobalMouseRow::dragRequested, &q,
+                            [this](settings::SettingsGlobalMouseAction action) {
+                                settings::SettingsCommand command;
+                                command.kind = settings::SettingsCommandKind::BeginGlobalMouseDrag;
+                                command.globalMouseAction = action;
+                                emit q.commandRequested(command);
+                            });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsActionDefinition>) {
+                    auto* control = new adqt::widgets::AdButton(list);
+                    control->setButtonStyle(adqt::widgets::AdButton::ButtonStyle::Outline);
+                    control->setAccentRole(payload.accent == settings::SettingsActionAccent::Danger
+                                               ? adqt::widgets::AdButton::AccentRole::Danger
+                                               : adqt::widgets::AdButton::AccentRole::Neutral);
+                    control->setSizeClass(adqt::widgets::AdButton::SizeClass::Medium);
+                    if (payload.iconFactory) {
+                        control->setIconRef(payload.iconFactory());
+                    }
+                    runtime.actionControl = control;
+                    runtime.focusTarget = control;
+                    runtime.anchor = settings_ui::createSettingItemRow(
+                        list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                        control,
+                        settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                      definition.id));
+                    addItemWidget(runtime.anchor);
+                    connect(control, &QAbstractButton::clicked, &q,
+                            [this, itemId = definition.id]() { triggerAction(itemId); });
+                } else if constexpr (std::is_same_v<Payload, settings::SettingsCustomDefinition>) {
+                    if (const auto permission = permissionForRenderer(payload.renderer);
+                        permission.has_value()) {
+                        auto* control = new adqt::widgets::AdButton(list);
+                        control->setButtonStyle(adqt::widgets::AdButton::ButtonStyle::Outline);
+                        control->setSizeClass(adqt::widgets::AdButton::SizeClass::Medium);
+                        control->setObjectName(
+                            QStringLiteral("appPermission-%1-settings")
+                                .arg(snow_shot::presentation::appPermissionId(permission.value())));
+                        runtime.permissionControl = control;
+                        runtime.permission = permission;
+                        runtime.anchor = settings_ui::createSettingItemRow(
+                            list, colorScheme.metricAlias, &runtime.title, &runtime.description,
+                            control,
+                            settings::generatedObjectName(QStringLiteral("settings-item"),
+                                                          definition.id));
+                        runtime.anchor->setFocusPolicy(Qt::StrongFocus);
+                        runtime.focusTarget = runtime.anchor;
+                        addItemWidget(runtime.anchor);
+                        connect(
+                            control, &QAbstractButton::clicked, &q,
+                            [this, permission = permission.value()] {
+                                auto* service = runtimeSession.appPermissions();
+                                if (service == nullptr ||
+                                    service->snapshot().status(permission) ==
+                                        snow_shot::presentation::AppPermissionStatus::Checking ||
+                                    service->snapshot().granted(permission)) {
+                                    return;
+                                }
+                                if (!service->openSettings(permission)) {
+                                    adqt::widgets::AdMessage::Request request;
+                                    request.content =
+                                        q.tr("Could not open System Settings. Open System "
+                                             "Settings > Privacy & Security > %1.")
+                                            .arg(snow_shot::presentation::appPermissionName(
+                                                permission));
+                                    adqt::widgets::AdMessageService::error(std::move(request), &q);
+                                }
+                            });
+                        return;
+                    }
+                    // Toolbar previews can be far below the viewport even in a
+                    // visible section. Defer their drag surfaces and tool buttons
+                    // independently from the section's ordinary settings rows.
+                    if (payload.renderer ==
+                            settings::SettingsCustomRenderer::DrawingToolbarEditor ||
+                        payload.renderer ==
+                            settings::SettingsCustomRenderer::ScreenshotToolbarEditor ||
+                        payload.renderer == settings::SettingsCustomRenderer::PinnedToolbarEditor) {
+                        runtime.anchor = new QWidget(list);
+                        runtime.anchor->setObjectName(settings::generatedObjectName(
+                            QStringLiteral("settings-item"), definition.id));
+                        runtime.anchor->setFixedHeight(colorScheme.metricAlias.controlHeight * 4);
+                        runtime.anchor->setFocusPolicy(Qt::TabFocus);
+                        runtime.focusTarget = runtime.anchor;
+                        runtime.deferredRenderer = payload.renderer;
+                        if (initialized) {
+                            runtime.anchor->installEventFilter(&q);
+                        }
+                        addItemWidget(runtime.anchor);
+                        return;
+                    }
+                    auto* control = createSettingsCustomWidget(payload.renderer, registry,
+                                                               definition, runtimeSession, list);
+                    Q_ASSERT(control != nullptr);
+                    if (control == nullptr) {
+                        return;
+                    }
+                    control->setObjectName(settings::generatedObjectName(
+                        QStringLiteral("settings-item"), definition.id));
+                    runtime.customControl = control;
+                    runtime.anchor = control;
+                    runtime.focusTarget = control;
+                    addItemWidget(control);
+                }
+            },
+            definition.payload);
+
+        if (runtime.focusTarget != nullptr && runtime.focusTarget != runtime.anchor) {
+            runtime.focusTarget->setObjectName(
+                settings::generatedObjectName(QStringLiteral("settings-control"), definition.id));
+        }
+        if (descriptor != nullptr && runtime.anchor != nullptr) {
+            runtime.anchor->setProperty("settingsFieldIndex", fieldIndex);
+            runtime.anchor->setProperty("settingsFieldKind", static_cast<int>(descriptor->kind));
+            runtime.anchor->setProperty("settingsProviderId", descriptor->providerId);
+        }
+        items.push_back(runtime);
+        itemIndexes.insert(definition.id, static_cast<int>(items.size()) - 1);
+    }
+
+    void connectServices() {
+        QObject::connect(&runtimeSession, &settings::SettingsRuntimeSession::operationMessage, &q,
+                         [this](const QString& message, bool warning) {
+                             if (!q.isVisible())
+                                 return;
+                             adqt::widgets::AdMessage::Request request;
+                             request.content = message;
+                             if (warning)
+                                 adqt::widgets::AdMessageService::warning(std::move(request), &q);
+                             else
+                                 adqt::widgets::AdMessageService::error(std::move(request), &q);
+                         });
+        QObject::connect(
+            &runtimeSession, &settings::SettingsRuntimeSession::actionFinished, &q,
+            [this](settings::SettingsActionBinding action, bool success, const QString& error) {
+                Q_UNUSED(error);
+                if (!q.isVisible() || !success)
+                    return;
+                for (const RuntimeItem& item : items) {
+                    if (item.definition == nullptr)
+                        continue;
+                    const auto* definition =
+                        std::get_if<settings::SettingsActionDefinition>(&item.definition->payload);
+                    if (definition == nullptr || definition->binding != action ||
+                        !definition->successMessage.has_value()) {
+                        continue;
+                    }
+                    adqt::widgets::AdMessage::Request request;
+                    request.key =
+                        QStringLiteral("settings-action-success-%1").arg(static_cast<int>(action));
+                    request.content = definition->successMessage->translated();
+                    adqt::widgets::AdMessageService::success(std::move(request), &q);
+                    return;
+                }
+            });
+        auto& themeManager = snow_shot::presentation::styles::ThemeManager::instance();
+        QObject::connect(&themeManager,
+                         &snow_shot::presentation::styles::ThemeManager::themeChanged, &q,
+                         [this](const auto& scheme) { applyTheme(scheme); });
+        QObject::connect(&themeManager,
+                         &snow_shot::presentation::styles::ThemeManager::themeModeChanged, &q,
+                         [this](auto) { syncValues(); });
+        QObject::connect(
+            &runtimeSession, &settings::SettingsRuntimeSession::shortcutStateChanged, &q,
+            [this](snow_shot::presentation::GlobalShortcutAction action,
+                   const snow_shot::presentation::GlobalShortcutRegistrationState& state) {
+                const auto* descriptor = registry.fieldForShortcut(action);
+                RuntimeItem* item = descriptor == nullptr ? nullptr : runtimeItem(descriptor->id);
+                if (item != nullptr && item->shortcutControl != nullptr) {
+                    item->shortcutControl->setRegistrationState(state);
+                }
+            });
+        QObject::connect(
+            &runtimeSession, &settings::SettingsRuntimeSession::auxiliaryIntegerChanged, &q,
+            [this](settings::SettingsIntegerBinding binding, int value) {
+                if (binding != settings::SettingsIntegerBinding::ScreenshotDelaySeconds) {
+                    return;
+                }
+                const auto* descriptor = registry.fieldForShortcut(
+                    snow_shot::presentation::GlobalShortcutAction::ScreenshotDelay);
+                RuntimeItem* item = descriptor == nullptr ? nullptr : runtimeItem(descriptor->id);
+                if (item != nullptr && item->shortcutControl != nullptr) {
+                    item->shortcutControl->setDelaySeconds(value);
+                }
+            });
+        QObject::connect(&runtimeSession, &settings::SettingsRuntimeSession::fieldChanged, &q,
+                         [this](const QString& fieldId, const settings::SettingsFieldState& state) {
+                             RuntimeItem* item = runtimeItem(fieldId);
+                             if (item == nullptr) {
+                                 return;
+                             }
+                             syncField(*item, &state);
+                         });
+        QObject::connect(
+            &runtimeSession, &settings::SettingsRuntimeSession::optionsChanged, &q,
+            [this](const QString& fieldId, const settings::SettingsOptions& options) {
+                RuntimeItem* item = runtimeItem(fieldId);
+                if (item == nullptr) {
+                    return;
+                }
+                if (item->select != nullptr) {
+                    QList<adqt::widgets::AdSelect::Option> values;
+                    values.reserve(options.values.size());
+                    for (const settings::SettingsRuntimeOption& option : options.values) {
+                        values.push_back(selectOption(option.value, option.label));
+                    }
+                    const QSignalBlocker blocker(item->select);
+                    const auto* definition =
+                        std::get_if<settings::SettingsSelectDefinition>(&item->definition->payload);
+                    setOptions(*item,
+                               definition != nullptr && definition->binding ==
+                                                            settings::SettingsSelectBinding::AppFont
+                                   ? selectOptions(*item)
+                                   : values);
+                }
+                if (item->multiSelect != nullptr) {
+                    QVector<adqt::widgets::AdMultiSelect::Option> values;
+                    values.reserve(options.values.size());
+                    for (const settings::SettingsRuntimeOption& option : options.values) {
+                        values.push_back(selectOption(option.value, option.label));
+                    }
+                    const QSignalBlocker blocker(item->multiSelect);
+                    setOptions(*item, values);
+                }
+            });
+#ifdef Q_OS_MACOS
+        if (page != nullptr && page->id == QStringLiteral("app-permissions")) {
+            if (auto* service = runtimeSession.appPermissions()) {
+                QObject::connect(service, &snow_shot::presentation::AppPermissionService::changed,
+                                 &q, [this] { syncPermissionButtons(); });
+            }
+        }
+#endif
+        QObject::connect(&runtimeSession, &settings::SettingsRuntimeSession::storageStateChanged,
+                         &q, [this](const snow_shot::storage::StorageStatus& status) {
+                             for (RuntimeSection& section : sections) {
+                                 if (section.definition != nullptr &&
+                                     section.reset != settings::SettingsSectionReset::None) {
+                                     const bool historyPolicyUpdate =
+                                         section.reset ==
+                                             settings::SettingsSectionReset::HistoryPolicy &&
+                                         status.historyPolicyUpdating;
+                                     section.header->setResetEnabled(status.writeAvailable &&
+                                                                     !historyPolicyUpdate);
+                                 }
+                             }
+                         });
+
+        if (scrollArea != nullptr && scrollArea->verticalScrollBar() != nullptr) {
+            QObject::connect(scrollArea->verticalScrollBar(), &QScrollBar::valueChanged, &q,
+                             [this](int) { requestVisibleSectionSync(); });
+            QObject::connect(scrollArea->verticalScrollBar(), &QScrollBar::rangeChanged, &q,
+                             [this](int, int) { requestVisibleSectionSync(); });
+        }
+
+        for (RuntimeSection& section : sections) {
+            QObject::connect(section.header, &SectionHeaderWidget::resetRequested, &q,
+                             [this, reset = section.reset]() { resetSection(reset); });
+        }
+    }
+
+    void applySelectValue(const QString& itemId, const QVariant& value) {
+        const RuntimeItem* item = runtimeItem(itemId);
+        if (item == nullptr || item->definition == nullptr) {
+            return;
+        }
+        const auto* select =
+            std::get_if<settings::SettingsSelectDefinition>(&item->definition->payload);
+        const bool accepted =
+            select != nullptr && runtimeSession.applySelectValue(select->binding, value);
+        if (!accepted) {
+            syncValues();
+        }
+    }
+
+    void applySwitchValue(settings::SettingsSwitchBinding binding, bool checked) {
+        if (synchronizingValues) {
+            return;
+        }
+        if (!runtimeSession.applySwitchValue(binding, checked)) {
+            syncValues();
+        }
+    }
+
+    void applyIntegerValue(settings::SettingsIntegerBinding binding, int value) {
+        if (!runtimeSession.applyIntegerValue(binding, value)) {
+            syncValues();
+        }
+    }
+
+    void triggerAction(const QString& itemId) {
+        RuntimeItem* item = runtimeItem(itemId);
+        if (item == nullptr || item->definition == nullptr || item->modal != nullptr) {
+            return;
+        }
+        const auto* action =
+            std::get_if<settings::SettingsActionDefinition>(&item->definition->payload);
+        if (action == nullptr) {
+            return;
+        }
+        QString filePath;
+        if (action->fileOpen.has_value()) {
+            filePath =
+                QFileDialog::getOpenFileName(&q, action->fileOpen->dialogTitle.translated(),
+                                             QString(), action->fileOpen->fileFilter.translated());
+            if (filePath.isEmpty()) {
+                return;
+            }
+        }
+        const auto runAction = [this, binding = action->binding, filePath]() {
+            if (!runtimeSession.triggerAction(binding, filePath)) {
+                syncValues();
+            }
+        };
+        if (!action->confirmation.has_value()) {
+            runAction();
+            return;
+        }
+        confirmItemAction(*item, *action->confirmation, runAction);
+    }
+
+    void confirmItemAction(RuntimeItem& item,
+                           const settings::SettingsConfirmationDefinition& confirmation,
+                           const std::function<void()>& acceptedAction) {
+        auto* modal = new adqt::widgets::AdModal(&q);
+        item.modal = modal;
+        modal->setObjectName(
+            settings::generatedObjectName(QStringLiteral("settings-modal"), item.definition->id));
+        modal->setMode(adqt::widgets::AdModal::Mode::Window);
+        modal->setOwnerWindow(q.window());
+        modal->setPreset(adqt::widgets::AdModal::Preset::Confirm);
+        modal->setWindowTitle(confirmation.title.translated());
+        modal->setText(confirmation.message.translated());
+        modal->setAcceptText(confirmation.acceptText.translated());
+        modal->setRejectText(confirmation.rejectText.translated());
+        modal->setAcceptAccentRole(adqt::widgets::AdButton::AccentRole::Danger);
+        modal->setStandardButtons(adqt::widgets::AdModal::StandardButton::Ok |
+                                  adqt::widgets::AdModal::StandardButton::Cancel);
+        QObject::connect(modal, &adqt::widgets::AdModal::accepted, &q, acceptedAction);
+        QObject::connect(modal, &adqt::widgets::AdModal::finished, &q,
+                         [this, itemId = item.definition->id](adqt::widgets::AdModal::DialogCode) {
+                             RuntimeItem* finishedItem = runtimeItem(itemId);
+                             if (finishedItem != nullptr && finishedItem->modal != nullptr) {
+                                 finishedItem->modal->deleteLater();
+                                 finishedItem->modal = nullptr;
+                             }
+                         });
+        modal->setOpen(true);
+    }
+
+    void resetSection(settings::SettingsSectionReset reset) {
+        if (!runtimeSession.reset(reset)) {
+            syncValues();
+        }
+    }
+
+    QList<adqt::widgets::AdSelect::Option> selectOptions(const RuntimeItem& runtime) const {
+        const auto& definition =
+            std::get<settings::SettingsSelectDefinition>(runtime.definition->payload);
+        QList<adqt::widgets::AdSelect::Option> options;
+        for (const settings::SettingsOptionDefinition& option : definition.options) {
+            options.push_back(selectOption(option.value, option.label.translated()));
+        }
+        const bool isFont = definition.binding == settings::SettingsSelectBinding::AppFont;
+        if (!isFont || runtime.fontOptionsLoaded) {
+            for (const settings::SettingsRuntimeOption& option :
+                 runtimeSession.dynamicSelectOptions(definition.binding)) {
+                options.push_back(selectOption(option.value, option.label));
+            }
+        }
+        if (isFont) {
+            const QString current = runtimeSession.selectValue(definition.binding).toString();
+            if (!current.isEmpty() &&
+                std::none_of(options.cbegin(), options.cend(), [&current](const auto& option) {
+                    return option.value.toString() == current;
+                })) {
+                options.push_back(selectOption(current, current));
+            }
+            std::sort(options.begin(), options.end(), [](const auto& first, const auto& second) {
+                if (first.value.toString().isEmpty() != second.value.toString().isEmpty()) {
+                    return first.value.toString().isEmpty();
+                }
+                return QString::compare(first.label, second.label, Qt::CaseInsensitive) < 0;
+            });
+        }
+        return options;
+    }
+
+    void syncField(RuntimeItem& runtime,
+                   const settings::SettingsFieldState* providedState = nullptr) {
+        const QScopedValueRollback<bool> synchronizationGuard(synchronizingValues, true);
+        if (runtime.definition == nullptr) {
+            return;
+        }
+        const QString fieldId =
+            runtime.descriptor != nullptr ? runtime.descriptor->id : runtime.definition->id;
+        const settings::SettingsFieldState sessionState =
+            providedState != nullptr ? *providedState : runtimeSession.state(fieldId);
+        const bool fieldEnabled = sessionState.enabled;
+        if (runtime.anchor != nullptr) {
+            runtime.anchor->setVisible(sessionState.visible);
+        }
+        QWidget* stateTarget =
+            runtime.focusTarget != nullptr ? runtime.focusTarget : runtime.anchor;
+        if (stateTarget != nullptr) {
+            bool changed = false;
+            const auto setProperty = [&](const char* name, const QVariant& value) {
+                if (stateTarget->property(name) != value) {
+                    stateTarget->setProperty(name, value);
+                    changed = true;
+                }
+            };
+            setProperty("settingsDirty", sessionState.dirty);
+            setProperty("settingsPending", sessionState.busy);
+            setProperty("settingsConflicted", sessionState.conflicted);
+            setProperty("settingsError", sessionState.error);
+            if (changed && stateTarget->testAttribute(Qt::WA_WState_Polished)) {
+                stateTarget->style()->unpolish(stateTarget);
+                stateTarget->style()->polish(stateTarget);
+                stateTarget->update();
+            }
+        }
+
+        {
+            if (runtime.select != nullptr) {
+                const QSignalBlocker blocker(runtime.select);
+                const auto* definition =
+                    std::get_if<settings::SettingsSelectDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    if (definition->binding == settings::SettingsSelectBinding::AppFont) {
+                        setOptions(runtime, selectOptions(runtime));
+                    }
+                    runtime.select->setCurrentValue(
+                        runtimeSession.selectValue(definition->binding));
+                }
+                runtime.select->setEnabled(fieldEnabled);
+            }
+            if (runtime.multiSelect != nullptr) {
+                const QSignalBlocker blocker(runtime.multiSelect);
+                const auto* definition = std::get_if<settings::SettingsMultiSelectDefinition>(
+                    &runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.multiSelect->setSelectedValues(
+                        runtimeSession.multiSelectValue(definition->binding));
+                }
+                runtime.multiSelect->setEnabled(fieldEnabled);
+            }
+            if (runtime.switchControl != nullptr) {
+                // AdSwitch refreshes its rendered thumb from toggled; the sync guard prevents
+                // this programmatic update from being written back as a user change.
+                const auto* definition =
+                    std::get_if<settings::SettingsSwitchDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.switchControl->setChecked(
+                        runtimeSession.switchValue(definition->binding));
+                    runtime.switchControl->setEnabled(
+                        fieldEnabled && definition != nullptr &&
+                        runtimeSession.switchEnabled(definition->binding));
+                    const QString hint = runtimeSession.switchHint(definition->binding);
+                    runtime.switchControl->setToolTip(hint);
+                    if (runtime.description)
+                        runtime.description->setText(
+                            hint.isEmpty() ? runtime.definition->description.translated() : hint);
+                }
+            }
+            if (runtime.integerControl != nullptr) {
+                const QSignalBlocker blocker(runtime.integerControl);
+                const auto* definition =
+                    std::get_if<settings::SettingsIntegerDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.integerControl->setValue(
+                        runtimeSession.integerValue(definition->binding));
+                }
+                runtime.integerControl->setEnabled(fieldEnabled);
+            }
+            if (runtime.sliderControl != nullptr) {
+                const QSignalBlocker blocker(runtime.sliderControl);
+                const auto* definition =
+                    std::get_if<settings::SettingsSliderDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    const int value = runtimeSession.sliderValue(definition->binding);
+                    runtime.sliderControl->setValue(value);
+                    runtime.sliderValue->setText(
+                        QStringLiteral("%1%2").arg(value).arg(definition->suffix.translated()));
+                }
+                runtime.sliderControl->setEnabled(fieldEnabled);
+            }
+            if (runtime.colorControl != nullptr) {
+                const QSignalBlocker blocker(runtime.colorControl);
+                const auto* definition =
+                    std::get_if<settings::SettingsColorDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.colorControl->setValue(adqt::widgets::AdColorValue::solid(
+                        runtimeSession.colorValue(definition->binding)));
+                }
+                runtime.colorControl->setDisabled(!fieldEnabled);
+            }
+            if (runtime.radioGroup != nullptr) {
+                const QSignalBlocker blocker(runtime.radioGroup);
+                const auto* definition =
+                    std::get_if<settings::SettingsRadioDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    const QVariant current = runtimeSession.radioValue(definition->binding);
+                    runtime.radioGroup->setCheckedId(
+                        static_cast<int>(runtime.radioValues.indexOf(current)));
+                }
+                for (adqt::widgets::AdRadio* button : std::as_const(runtime.radioButtons)) {
+                    button->setEnabled(fieldEnabled);
+                }
+            }
+            if (runtime.filePathControl != nullptr) {
+                const QSignalBlocker blocker(runtime.filePathControl);
+                const auto* definition =
+                    std::get_if<settings::SettingsFilePathDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.filePathControl->setText(
+                        runtimeSession.filePathValue(definition->binding));
+                }
+                runtime.filePathControl->setEnabled(fieldEnabled);
+            }
+            if (runtime.directoryPathControl != nullptr) {
+                const QSignalBlocker blocker(runtime.directoryPathControl);
+                const auto* definition = std::get_if<settings::SettingsDirectoryPathDefinition>(
+                    &runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.directoryPathControl->setText(
+                        runtimeSession.directoryPathValue(definition->binding));
+                }
+                runtime.directoryPathControl->setEnabled(fieldEnabled);
+            }
+            if (runtime.textControl != nullptr) {
+                const QSignalBlocker blocker(runtime.textControl);
+                const auto* definition =
+                    std::get_if<settings::SettingsTextDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.textControl->setText(runtimeSession.textValue(definition->binding));
+                }
+                runtime.textControl->setEnabled(fieldEnabled);
+            }
+            if (runtime.shortcutControl != nullptr) {
+                const auto* definition = std::get_if<settings::SettingsShortcutActionDefinition>(
+                    &runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.shortcutControl->setRegistrationState(
+                        runtimeSession.shortcutState(definition->shortcutAction));
+                    if (definition->adjustment ==
+                        settings::SettingsShortcutAdjustment::ScreenshotDelaySeconds) {
+                        runtime.shortcutControl->setDelaySeconds(runtimeSession.integerValue(
+                            settings::SettingsIntegerBinding::ScreenshotDelaySeconds));
+                    }
+                    runtime.shortcutControl->setEnabled(fieldEnabled);
+                }
+                const auto* local = std::get_if<settings::SettingsLocalShortcutDefinition>(
+                    &runtime.definition->payload);
+                if (local != nullptr) {
+                    snow_shot::presentation::GlobalShortcutRegistrationState state;
+                    state.shortcuts =
+                        runtimeSession.localShortcuts(local->scope, local->shortcutId);
+                    state.status = state.shortcuts.isEmpty()
+                                       ? snow_shot::presentation::GlobalShortcutStatus::Unset
+                                       : snow_shot::presentation::GlobalShortcutStatus::Registered;
+                    runtime.shortcutControl->setRegistrationState(state);
+                    runtime.shortcutControl->setEnabled(fieldEnabled);
+                }
+            }
+            if (runtime.globalMouseControl != nullptr) {
+                const auto* definition = std::get_if<settings::SettingsGlobalMouseActionDefinition>(
+                    &runtime.definition->payload);
+                if (definition != nullptr) {
+                    runtime.globalMouseControl->setCombination(
+                        runtimeSession.globalMouseCombination(definition->action));
+                    runtime.globalMouseControl->setEnabled(fieldEnabled);
+                }
+            }
+            if (runtime.actionControl != nullptr) {
+                const auto* definition =
+                    std::get_if<settings::SettingsActionDefinition>(&runtime.definition->payload);
+                if (definition != nullptr) {
+                    const settings::SettingsActionState state =
+                        runtimeSession.actionState(definition->binding);
+                    runtime.actionControl->setBusy(state.busy);
+                    runtime.actionControl->setEnabled(state.enabled);
+                    if (!state.label.isEmpty())
+                        runtime.actionControl->setText(state.label);
+                    runtime.actionControl->setToolTip(state.hint);
+                    if (!state.label.isEmpty())
+                        runtime.actionControl->setAccentRole(
+                            state.successAccent ? adqt::widgets::AdButton::AccentRole::Success
+                                                : adqt::widgets::AdButton::AccentRole::Neutral);
+                    if (!state.hint.isEmpty() && runtime.description)
+                        runtime.description->setText(state.hint);
+                }
+            }
+            if (runtime.permissionControl != nullptr) {
+                syncPermissionButton(runtime);
+            }
+        }
+    }
+
+    void syncPermissionButton(RuntimeItem& runtime) {
+        if (runtime.permissionControl == nullptr || !runtime.permission.has_value()) {
+            return;
+        }
+        auto* service = runtimeSession.appPermissions();
+        const auto permission = runtime.permission.value();
+        const auto status = service != nullptr
+                                ? service->snapshot().status(permission)
+                                : snow_shot::presentation::AppPermissionStatus::Error;
+        const bool checking = status == snow_shot::presentation::AppPermissionStatus::Checking;
+        const bool granted = status == snow_shot::presentation::AppPermissionStatus::Granted;
+        auto* button = runtime.permissionControl;
+        if (checking) {
+            button->setText(q.tr("Checking…"));
+            button->setAccentRole(adqt::widgets::AdButton::AccentRole::Neutral);
+        } else if (granted) {
+            button->setText(q.tr("Authorized"));
+            button->setAccentRole(adqt::widgets::AdButton::AccentRole::Success);
+        } else {
+            button->setText(q.tr("Go to Settings"));
+            button->setAccentRole(permission == snow_shot::presentation::AppPermission::Microphone
+                                      ? adqt::widgets::AdButton::AccentRole::Orange
+                                      : adqt::widgets::AdButton::AccentRole::Danger);
+        }
+        const bool actionable = service != nullptr && !checking && !granted;
+        button->setAttribute(Qt::WA_TransparentForMouseEvents, !actionable);
+        button->setFocusPolicy(actionable ? Qt::TabFocus : Qt::NoFocus);
+        button->setAccessibleName(button->text() + QStringLiteral(": ") +
+                                  runtime.definition->title.translated());
+        button->setAccessibleDescription(runtime.definition->description.translated());
+    }
+
+    void syncPermissionButtons() {
+        for (RuntimeItem& runtime : items) {
+            syncPermissionButton(runtime);
+        }
+    }
+
+    void observePermissionPage(bool visible) {
+#ifdef Q_OS_MACOS
+        if (page != nullptr && page->id == QStringLiteral("app-permissions")) {
+            if (auto* service = runtimeSession.appPermissions()) {
+                service->observe(&q, visible);
+            }
+        }
+#else
+        Q_UNUSED(visible);
+#endif
+    }
+
+    snow_shot::presentation::AppPermissions relevantMissingPermissions() const {
+        auto* service = runtimeSession.appPermissions();
+        return service
+                   ? service->missing(snow_shot::presentation::pagePermissions(
+                         page->id == QStringLiteral("global-mouse"), service->microphoneEnabled(),
+                         runtimeSession.switchValue(
+                             settings::SettingsSwitchBinding::TranslationPageEnabled)))
+                   : snow_shot::presentation::AppPermissions{};
+    }
+    void syncMousePermission() {
+        if (!permissionBanner)
+            return;
+        const auto missing = relevantMissingPermissions();
+        const bool bannerVisible = !missing.isEmpty();
+        const QMargins margins = contentLayout->contentsMargins();
+        contentLayout->setContentsMargins(margins.left(),
+                                          bannerVisible ? colorScheme.metricAlias.paddingLG
+                                                        : contentTopMarginWithoutPermissionBanner,
+                                          margins.right(), margins.bottom());
+        QStringList names;
+        for (auto permission : missing)
+            names.append(snow_shot::presentation::appPermissionName(permission));
+        permissionBanner->setText(q.tr("Permissions needed"));
+        if (page->id == QStringLiteral("global-mouse")) {
+            permissionBanner->setInformativeText(
+                q.tr("Global mouse actions need access to: %1.").arg(names.join(q.tr(", "))));
+        } else {
+            QStringList actions;
+            using Permission = snow_shot::presentation::AppPermission;
+            if (missing.contains(Permission::ScreenRecording))
+                actions.append(q.tr("screenshots and screen recording"));
+            if (missing.contains(Permission::Accessibility))
+                actions.append(q.tr("selected-text translation"));
+            if (missing.contains(Permission::Microphone))
+                actions.append(q.tr("microphone recording"));
+            permissionBanner->setInformativeText(
+                q.tr("To use %1, review access to: %2.")
+                    .arg(actions.join(q.tr(", ")), names.join(q.tr(", "))));
+        }
+        permissionBanner->setVisible(bannerVisible);
+    }
+
+    void setOptions(RuntimeItem& item, const QVector<adqt::widgets::AdSelect::Option>& options) {
+        const auto sameOption = [](const auto& first, const auto& second) {
+            return first.value == second.value && first.label == second.label &&
+                   first.disabled == second.disabled && first.group == second.group &&
+                   first.metadata == second.metadata;
+        };
+        if (item.presentedOptions.size() == options.size() &&
+            std::equal(options.cbegin(), options.cend(), item.presentedOptions.cbegin(),
+                       sameOption)) {
+            return;
+        }
+        item.presentedOptions = options;
+        if (item.select != nullptr) {
+            const auto* definition =
+                std::get_if<settings::SettingsSelectDefinition>(&item.definition->payload);
+            if (definition != nullptr &&
+                definition->binding == settings::SettingsSelectBinding::AppFont) {
+                // Populate before attaching so each font does not rebuild the live selector.
+                auto* model = new QStandardItemModel(item.select);
+                for (const auto& option : options) {
+                    auto* row = new QStandardItem(option.label);
+                    row->setData(option.label, adqt::widgets::AdSelect::DefaultLabelRole);
+                    row->setData(option.value, adqt::widgets::AdSelect::DefaultValueRole);
+                    if (!option.value.toString().isEmpty()) {
+                        row->setData(QFont(option.value.toString()), Qt::FontRole);
+                    }
+                    model->appendRow(row);
+                }
+                auto* previousModel = item.select->model();
+                item.select->setModel(model);
+                item.select->setCurrentValue(runtimeSession.selectValue(definition->binding));
+                if (previousModel != nullptr) {
+                    previousModel->deleteLater();
+                }
+            } else {
+                item.select->setOptions(options);
+            }
+        }
+        if (item.multiSelect != nullptr) {
+            item.multiSelect->setOptions(options);
+        }
+    }
+
+    void syncValues(int firstItem = 0) {
+        const auto storageStatus = runtimeSession.storageStatus();
+        for (int index = firstItem; index < items.size(); ++index) {
+            syncField(items[index]);
+        }
+        for (RuntimeSection& runtime : sections) {
+            if (runtime.reset != settings::SettingsSectionReset::None) {
+                const bool historyPolicyUpdate =
+                    runtime.reset == settings::SettingsSectionReset::HistoryPolicy &&
+                    storageStatus.historyPolicyUpdating;
+                runtime.header->setResetEnabled(storageStatus.writeAvailable &&
+                                                !historyPolicyUpdate);
+            }
+        }
+    }
+
+    void retranslateUi(int firstItem = 0) {
+        if (firstItem == 0) {
+            for (RuntimeSection& runtime : sections) {
+                runtime.header->setTitle(runtime.definition->title.translated());
+                runtime.list->setAccessibleName(runtime.definition->title.translated());
+            }
+        }
+        for (int runtimeIndex = firstItem; runtimeIndex < items.size(); ++runtimeIndex) {
+            RuntimeItem& runtime = items[runtimeIndex];
+            const settings::SettingsItemDefinition& definition = *runtime.definition;
+            const QString title = definition.title.translated();
+            const QString description = definition.description.translated();
+            if (runtime.title != nullptr) {
+                runtime.title->setText(title);
+            }
+            if (runtime.description != nullptr) {
+                runtime.description->setText(description);
+            }
+            if (runtime.focusTarget != nullptr) {
+                runtime.focusTarget->setAccessibleName(title);
+                runtime.focusTarget->setAccessibleDescription(description);
+            }
+            if (runtime.select != nullptr) {
+                const auto* select =
+                    std::get_if<settings::SettingsSelectDefinition>(&definition.payload);
+                Q_ASSERT(select != nullptr);
+                const QSignalBlocker blocker(runtime.select);
+                setOptions(runtime, selectOptions(runtime));
+            }
+            if (runtime.multiSelect != nullptr) {
+                const auto* multi =
+                    std::get_if<settings::SettingsMultiSelectDefinition>(&definition.payload);
+                Q_ASSERT(multi != nullptr);
+                QVector<adqt::widgets::AdMultiSelect::Option> options;
+                options.reserve(multi->options.size());
+                for (const settings::SettingsOptionDefinition& option : multi->options) {
+                    options.push_back(selectOption(option.value, option.label.translated()));
+                }
+                const QSignalBlocker blocker(runtime.multiSelect);
+                setOptions(runtime, options);
+            }
+            if (runtime.integerControl != nullptr) {
+                const auto* integer =
+                    std::get_if<settings::SettingsIntegerDefinition>(&definition.payload);
+                Q_ASSERT(integer != nullptr);
+                runtime.integerControl->setSuffixText(integer->suffix.translated());
+            }
+            if (runtime.sliderControl != nullptr) {
+                const auto* slider =
+                    std::get_if<settings::SettingsSliderDefinition>(&definition.payload);
+                Q_ASSERT(slider != nullptr);
+                const int value = qRound(runtime.sliderControl->value());
+                runtime.sliderValue->setText(
+                    QStringLiteral("%1%2").arg(value).arg(slider->suffix.translated()));
+                runtime.sliderControl->setTooltipFormatter(
+                    [suffix = slider->suffix](double current) {
+                        return QStringLiteral("%1%2").arg(qRound(current)).arg(suffix.translated());
+                    });
+            }
+            if (runtime.radioGroup != nullptr) {
+                const auto* radio =
+                    std::get_if<settings::SettingsRadioDefinition>(&definition.payload);
+                Q_ASSERT(radio != nullptr);
+                for (int index = 0;
+                     index < radio->options.size() && index < runtime.radioButtons.size();
+                     ++index) {
+                    const QString label = radio->options.at(index).label.translated();
+                    runtime.radioButtons.at(index)->setText(label);
+                    runtime.radioButtons.at(index)->setAccessibleName(label);
+                    runtime.radioButtons.at(index)->setAccessibleDescription(description);
+                }
+            }
+            if (runtime.filePathControl != nullptr) {
+                const auto* filePath =
+                    std::get_if<settings::SettingsFilePathDefinition>(&definition.payload);
+                Q_ASSERT(filePath != nullptr);
+                runtime.filePathControl->setBrowseButtonText(filePath->buttonText.translated());
+                runtime.filePathControl->lineEdit()->setAccessibleName(title);
+                runtime.filePathControl->lineEdit()->setAccessibleDescription(description);
+                runtime.filePathControl->setPlaceholderText(
+                    filePath->fileFilter.translated().section(QStringLiteral(";;"), 0, 0));
+            }
+            if (runtime.directoryPathControl != nullptr) {
+                const auto* directoryPath =
+                    std::get_if<settings::SettingsDirectoryPathDefinition>(&definition.payload);
+                Q_ASSERT(directoryPath != nullptr);
+                runtime.directoryPathControl->setBrowseButtonText(
+                    directoryPath->buttonText.translated());
+                runtime.directoryPathControl->lineEdit()->setAccessibleName(title);
+                runtime.directoryPathControl->lineEdit()->setAccessibleDescription(description);
+            }
+            if (runtime.shortcutControl != nullptr) {
+                runtime.shortcutControl->setTitle(title);
+                runtime.shortcutControl->setAccessibleDescription(description);
+                runtime.shortcutControl->retranslateUi();
+            }
+            if (runtime.globalMouseControl != nullptr) {
+                runtime.globalMouseControl->setTitle(title);
+                runtime.globalMouseControl->retranslateUi();
+            }
+            if (runtime.actionControl != nullptr) {
+                const auto* action =
+                    std::get_if<settings::SettingsActionDefinition>(&definition.payload);
+                Q_ASSERT(action != nullptr);
+                runtime.actionControl->setText(action->buttonText.translated());
+                if (runtime.modal != nullptr && action->confirmation.has_value()) {
+                    runtime.modal->setWindowTitle(action->confirmation->title.translated());
+                    runtime.modal->setText(action->confirmation->message.translated());
+                    runtime.modal->setAcceptText(action->confirmation->acceptText.translated());
+                    runtime.modal->setRejectText(action->confirmation->rejectText.translated());
+                }
+            }
+            if (runtime.customControl != nullptr) {
+                runtime.customControl->retranslateUi();
+            }
+        }
+        if (permissionButton) {
+            permissionButton->setText(q.tr("Review permissions"));
+            permissionButton->setAccessibleName(permissionButton->text());
+            syncMousePermission();
+        }
+        syncValues(firstItem);
+        requestVisibleSectionSync();
+    }
+
+    void applyTheme(const snow_shot::presentation::styles::ThemeColorScheme& scheme,
+                    int firstItem = 0) {
+        colorScheme = scheme;
+        if (firstItem == 0) {
+            for (RuntimeSection& runtime : sections) {
+                // Headers subscribe to ThemeManager themselves.
+                if (!runtime.materialized) {
+                    runtime.list->setFixedHeight(estimatedSectionHeight(runtime));
+                }
+            }
+        }
+        for (int runtimeIndex = firstItem; runtimeIndex < items.size(); ++runtimeIndex) {
+            RuntimeItem& runtime = items[runtimeIndex];
+            if (runtime.title != nullptr && runtime.description != nullptr) {
+                settings_ui::applySettingItemTheme(runtime.title, runtime.description, scheme);
+            }
+            if (runtime.shortcutControl != nullptr) {
+                runtime.shortcutControl->applyTheme(scheme);
+            }
+            if (runtime.globalMouseControl != nullptr) {
+                runtime.globalMouseControl->applyTheme(scheme);
+            }
+            if (runtime.customControl != nullptr) {
+                runtime.customControl->applyTheme(scheme);
+            }
+        }
+        requestVisibleSectionSync();
+        q.update();
+    }
+
+    int sectionTop(const RuntimeSection& section) const {
+        if (section.header == nullptr || contentWidget == nullptr) {
+            return 0;
+        }
+        return section.header->mapTo(contentWidget, QPoint(0, 0)).y();
+    }
+
+    int sectionViewportInset() const {
+        return contentLayout != nullptr ? contentLayout->contentsMargins().top() : 0;
+    }
+
+    QVector<QWidget*> tabWidgets(QWidget* parent) const {
+        QVector<QWidget*> result;
+        QWidget* widget = parent;
+        do {
+            if ((widget == parent || parent->isAncestorOf(widget)) &&
+                (widget->focusPolicy() & Qt::TabFocus) != 0 && widget->focusProxy() == nullptr) {
+                result.push_back(widget);
+            }
+            widget = widget->nextInFocusChain();
+        } while (widget != parent);
+        return result;
+    }
+
+    void rebuildTabOrder() {
+        QWidget* previous = nullptr;
+        for (const RuntimeSection& section : sections) {
+            for (QWidget* parent : {static_cast<QWidget*>(section.header), section.list}) {
+                const auto widgets = tabWidgets(parent);
+                for (QWidget* widget : widgets) {
+                    if (previous != nullptr) {
+                        QWidget::setTabOrder(previous, widget);
+                    }
+                    previous = widget;
+                }
+            }
+        }
+    }
+
+    void materializeCustom(RuntimeItem& item) {
+        if (!item.deferredRenderer.has_value()) {
+            return;
+        }
+        item.customControl = createSettingsCustomWidget(
+            *item.deferredRenderer, registry, *item.definition, runtimeSession, item.anchor);
+        Q_ASSERT(item.customControl != nullptr);
+        item.deferredRenderer.reset();
+        item.anchor->setFocusPolicy(Qt::NoFocus);
+        item.anchor->setMinimumHeight(0);
+        item.anchor->setMaximumHeight(QWIDGETSIZE_MAX);
+        auto* layout = new QVBoxLayout(item.anchor);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->addWidget(item.customControl);
+        item.customControl->show();
+        rebuildTabOrder();
+    }
+
+    void settleLayout() {
+        if (contentWidget == nullptr || scrollArea == nullptr) {
+            return;
+        }
+        // Match AdScrollArea's width-dependent sizing without pumping unrelated
+        // events while controls are being created or a search target is revealed.
+        const int width = scrollArea->viewport()->width();
+        const int fitted = contentLayout->totalHeightForWidth(width);
+        contentWidget->resize(width,
+                              qMax(0, fitted >= 0 ? fitted : contentLayout->sizeHint().height()));
+        contentLayout->activate();
+    }
+
+    void materializeVisibleSections() {
+        if (!q.isVisible() || materializing || scrollArea == nullptr || sections.isEmpty()) {
+            return;
+        }
+        const QScopedValueRollback<bool> guard(materializing, true);
+        settleLayout();
+        auto* bar = scrollArea->verticalScrollBar();
+        const int viewportHeight = scrollArea->viewport()->height();
+        // One control-height of overscan hides creation during ordinary scrolling,
+        // without constructing another entire screen of expensive editors.
+        const int overscan = colorScheme.metricAlias.controlHeight;
+        for (RuntimeSection& section : sections) {
+            if (section.materialized) {
+                continue;
+            }
+            const int top = section.list->y();
+            if (top > bar->value() + viewportHeight + overscan ||
+                top + section.list->height() < bar->value() - overscan) {
+                continue;
+            }
+            // Keep the section currently at the top of the viewport stationary
+            // when an estimated height above it is replaced with its actual height.
+            RuntimeSection* anchor = &sections.first();
+            for (RuntimeSection& candidate : sections) {
+                if (sectionTop(candidate) > bar->value()) {
+                    break;
+                }
+                anchor = &candidate;
+            }
+            const int offset = bar->value() - sectionTop(*anchor);
+            const bool atBottom = bar->maximum() > 0 && bar->value() == bar->maximum();
+            materializeSection(section);
+            settleLayout();
+            bar->setValue(atBottom ? bar->maximum() : sectionTop(*anchor) + offset);
+        }
+        for (RuntimeItem& item : items) {
+            if (!item.deferredRenderer.has_value()) {
+                continue;
+            }
+            const int top = item.anchor->mapTo(contentWidget, QPoint()).y();
+            if (top > bar->value() + viewportHeight + overscan ||
+                top + item.anchor->height() < bar->value() - overscan) {
+                continue;
+            }
+            RuntimeSection* anchor = &sections.first();
+            for (RuntimeSection& candidate : sections) {
+                if (sectionTop(candidate) > bar->value()) {
+                    break;
+                }
+                anchor = &candidate;
+            }
+            const int offset = bar->value() - sectionTop(*anchor);
+            const bool atBottom = bar->maximum() > 0 && bar->value() == bar->maximum();
+            materializeCustom(item);
+            settleLayout();
+            bar->setValue(atBottom ? bar->maximum() : sectionTop(*anchor) + offset);
+        }
+    }
+
+    bool filterEvent(QObject* watched, QEvent* event) {
+        if ((watched == contentWidget && event->type() == QEvent::LayoutRequest) ||
+            (scrollArea != nullptr && watched == scrollArea->viewport() &&
+             event->type() == QEvent::Resize)) {
+            requestVisibleSectionSync();
+        }
+        if (event->type() == QEvent::FocusIn) {
+            for (RuntimeItem& item : items) {
+                if (watched == item.anchor && item.deferredRenderer.has_value()) {
+                    materializeCustom(item);
+                    settleLayout();
+                    focusContent(item.anchor, static_cast<QFocusEvent*>(event)->reason());
+                    return true;
+                }
+            }
+            for (RuntimeSection& section : sections) {
+                if (watched != section.list || section.materialized) {
+                    continue;
+                }
+                const auto reason = static_cast<QFocusEvent*>(event)->reason();
+                materializeSection(section);
+                settleLayout();
+                focusContent(section.list, reason);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void focusContent(QWidget* parent, Qt::FocusReason reason) {
+        const auto widgets = tabWidgets(parent);
+        const bool backwards = reason == Qt::BacktabFocusReason;
+        for (int i = 0; i < widgets.size(); ++i) {
+            QWidget* widget = widgets.at(backwards ? widgets.size() - 1 - i : i);
+            if (widget->isEnabled() && widget->isVisibleTo(&q)) {
+                widget->setFocus(reason);
+                scrollArea->ensureWidgetVisible(widget, scrollMarginX, scrollMarginY);
+                return;
+            }
+        }
+        q.focusNextPrevChild(!backwards);
+    }
+
+    void requestVisibleSectionSync() {
+        if (visibleSectionSyncPending) {
+            return;
+        }
+        visibleSectionSyncPending = true;
+        QTimer::singleShot(0, &q, [this]() {
+            visibleSectionSyncPending = false;
+            materializeVisibleSections();
+            syncVisibleSection();
+        });
+    }
+
+    QString visibleSectionId() const {
+        if (sections.isEmpty() || scrollArea == nullptr ||
+            scrollArea->verticalScrollBar() == nullptr) {
+            return {};
+        }
+
+        const QScrollBar* scrollBar = scrollArea->verticalScrollBar();
+        int activeIndex = 0;
+        if (scrollBar->maximum() > scrollBar->minimum() &&
+            scrollBar->value() >= scrollBar->maximum()) {
+            activeIndex = static_cast<int>(sections.size()) - 1;
+        } else {
+            const int activationLine = scrollBar->value() + sectionViewportInset() + 1;
+            for (int index = 1; index < sections.size(); ++index) {
+                if (sectionTop(sections.at(index)) > activationLine) {
+                    break;
+                }
+                activeIndex = index;
+            }
+        }
+
+        const RuntimeSection& section = sections.at(activeIndex);
+        return section.definition != nullptr ? section.definition->id : QString();
+    }
+
+    void syncVisibleSection() {
+        if (suppressVisibleSectionTracking || scrollArea == nullptr ||
+            scrollArea->verticalScrollBar() == nullptr ||
+            scrollArea->verticalScrollBar()->maximum() <=
+                scrollArea->verticalScrollBar()->minimum()) {
+            return;
+        }
+        const QString sectionId = visibleSectionId();
+        if (sectionId.isEmpty() || sectionId == lastVisibleSectionId) {
+            return;
+        }
+        lastVisibleSectionId = sectionId;
+        emit q.visibleSectionChanged(sectionId);
+    }
+
+    void scrollToSection(const RuntimeSection& section) {
+        if (scrollArea == nullptr || scrollArea->verticalScrollBar() == nullptr) {
+            return;
+        }
+        QScrollBar* scrollBar = scrollArea->verticalScrollBar();
+        const int target = sectionTop(section) - sectionViewportInset();
+        scrollBar->setValue(qBound(scrollBar->minimum(), target, scrollBar->maximum()));
+    }
+
+    void reveal(const settings::SettingsLocation& requested) {
+        if (page == nullptr) {
+            return;
+        }
+        const settings::SettingsLocation location = catalog.resolveLocation(requested);
+        if (location.pageId != page->id || scrollArea == nullptr) {
+            return;
+        }
+        if (!requested.sectionId.isEmpty() || !requested.itemId.isEmpty()) {
+            if (RuntimeSection* section = runtimeSection(location.sectionId)) {
+                materializeSection(*section);
+                if (RuntimeItem* item = runtimeItem(location.itemId)) {
+                    materializeCustom(*item);
+                }
+                settleLayout();
+            }
+        }
+        QWidget* target = nullptr;
+        QWidget* focus = nullptr;
+        RuntimeSection* targetSection = nullptr;
+        const bool pageLevelNavigation =
+            requested.sectionId.isEmpty() && requested.itemId.isEmpty();
+        if (!pageLevelNavigation && !location.itemId.isEmpty()) {
+            if (RuntimeItem* item = runtimeItem(location.itemId)) {
+                target = item->anchor;
+                focus = item->focusTarget;
+            }
+        }
+        if (!pageLevelNavigation && target == nullptr) {
+            targetSection = runtimeSection(location.sectionId);
+            if (targetSection != nullptr) {
+                target = targetSection->header;
+            }
+        }
+        const bool previousSuppression = suppressVisibleSectionTracking;
+        suppressVisibleSectionTracking = true;
+        if (pageLevelNavigation) {
+            QScrollBar* scrollBar = scrollArea->verticalScrollBar();
+            scrollBar->setValue(scrollBar->minimum());
+        } else if (target != nullptr) {
+            if (targetSection != nullptr) {
+                scrollToSection(*targetSection);
+            } else {
+                scrollArea->ensureWidgetVisible(target, scrollMarginX, scrollMarginY);
+            }
+        }
+        // Finish viewport materialization before handing focus to an editor.
+        // A later geometry change must not dismiss a popup opened at the target.
+        materializeVisibleSections();
+        if (targetSection != nullptr) {
+            scrollToSection(*targetSection);
+        } else if (target != nullptr) {
+            scrollArea->ensureWidgetVisible(target, scrollMarginX, scrollMarginY);
+        }
+        if (focus != nullptr) {
+            QWidget* focusWidget = focus->focusProxy() != nullptr ? focus->focusProxy() : focus;
+            if (focusWidget->focusPolicy() != Qt::NoFocus) {
+                focusWidget->setFocus(Qt::ShortcutFocusReason);
+            }
+        }
+        suppressVisibleSectionTracking = previousSuppression;
+        lastVisibleSectionId = visibleSectionId();
+    }
+
+    SettingsPageWidget& q;
+    const settings::SettingsRegistry& registry;
+    const settings::SettingsCatalog& catalog;
+    settings::SettingsRuntimeSession& runtimeSession;
+    const settings::SettingsPagePlan* pagePlan = nullptr;
+    const settings::SettingsPageDefinition* page = nullptr;
+    adqt::widgets::AdScrollArea* scrollArea = nullptr;
+    QWidget* contentWidget = nullptr;
+    QVBoxLayout* contentLayout = nullptr;
+    QVector<RuntimeSection> sections;
+    QVector<RuntimeItem> items;
+    QHash<QString, int> sectionIndexes;
+    QHash<QString, int> itemIndexes;
+    snow_shot::presentation::styles::ThemeColorScheme colorScheme;
+    int scrollMarginX = 0;
+    int scrollMarginY = 0;
+    QString lastVisibleSectionId;
+    bool suppressVisibleSectionTracking = false;
+    bool synchronizingValues = false;
+    bool visibleSectionSyncPending = false;
+    bool initialized = false;
+    bool materializing = false;
+    QPointer<adqt::widgets::AdAlert> permissionBanner;
+    int contentTopMarginWithoutPermissionBanner = 0;
+    QPointer<adqt::widgets::AdButton> permissionButton;
+};
+
+SettingsPageWidget::SettingsPageWidget(
+    const snow_shot::presentation::settings::SettingsRegistry& registry, const QString& pageId,
+    snow_shot::presentation::settings::SettingsRuntimeSession& runtimeSession, QWidget* parent)
+    : QWidget(parent), m_impl(std::make_unique<Impl>(*this, registry, pageId, runtimeSession)) {
+    if (m_impl->scrollArea != nullptr) {
+        m_impl->scrollArea->viewport()->installEventFilter(this);
+        m_impl->contentWidget->installEventFilter(this);
+        for (const auto& section : m_impl->sections) {
+            section.list->installEventFilter(this);
+        }
+        for (const auto& item : m_impl->items) {
+            if (item.deferredRenderer.has_value()) {
+                item.anchor->installEventFilter(this);
+            }
+        }
+    }
+}
+
+SettingsPageWidget::~SettingsPageWidget() = default;
+
+QString SettingsPageWidget::pageId() const {
+    return m_impl->page != nullptr ? m_impl->page->id : QString();
+}
+
+void SettingsPageWidget::reveal(
+    const snow_shot::presentation::settings::SettingsLocation& location) {
+    m_impl->reveal(location);
+}
+
+void SettingsPageWidget::applyTheme(
+    const snow_shot::presentation::styles::ThemeColorScheme& scheme) {
+    m_impl->applyTheme(scheme);
+}
+
+void SettingsPageWidget::retranslateUi() {
+    m_impl->retranslateUi();
+}
+
+void SettingsPageWidget::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::LanguageChange) {
+        retranslateUi();
+    }
+}
+
+void SettingsPageWidget::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    m_impl->runtimeSession.refreshPlatformSettings();
+    m_impl->observePermissionPage(true);
+    m_impl->requestVisibleSectionSync();
+}
+
+bool SettingsPageWidget::eventFilter(QObject* watched, QEvent* event) {
+    if (m_impl != nullptr && m_impl->filterEvent(watched, event)) {
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void SettingsPageWidget::hideEvent(QHideEvent* event) {
+    m_impl->observePermissionPage(false);
+    QWidget::hideEvent(event);
+}

@@ -1,0 +1,167 @@
+name: Snow Shot Static Release
+
+on:
+  push:
+    tags:
+      - "v*_snow-shot"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: snow-shot-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build and draft Snow Shot release
+    runs-on: windows-2025-vs2026
+    env:
+      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select MSVC x64 tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: 14.51
+          vsversion: 18.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          target: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Install Python build helper
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check virtualenv
+
+      - name: Export GitHub Actions cache service
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            snow-crates -> ../build/snow-shot-msvc-release/cargo
+            snow_draw_engine_qt -> ../build/snow-shot-msvc-release/cargo
+            snow_rust_ffi -> ../build/snow-shot-msvc-release/cargo
+          cache-on-failure: true
+
+      - name: Install static project dependencies
+        shell: pwsh
+        run: .\scripts\bootstrap.ps1 -VcpkgVariants Static -SkipQtValidation
+
+      - name: Cache static Qt kit
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}\snow-qt\6.11.1\msvc2026_64-static-system-codecs
+          key: snow-qt-static-system-codecs-v2-6.11.1-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/build-static-qt.ps1', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/x64-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+
+      - name: Prepare Qt 6.11.1 static kit
+        shell: pwsh
+        run: |
+          $prefix = Join-Path $env:RUNNER_TOOL_CACHE "snow-qt\6.11.1\msvc2026_64-static-system-codecs"
+          $dependencies = Join-Path $env:GITHUB_WORKSPACE ".tools\vcpkg\installed\static\x64-windows-static"
+          & "$env:GITHUB_WORKSPACE\scripts\build-static-qt.ps1" -QtVersion 6.11.1 -InstallPrefix $prefix -DependencyPrefix $dependencies
+          if ($LASTEXITCODE -ne 0) { throw "Static Qt bootstrap failed." }
+          $qtDir = Join-Path $prefix "lib\cmake\Qt6"
+          if (-not (Test-Path -LiteralPath (Join-Path $qtDir "Qt6Config.cmake") -PathType Leaf)) {
+            throw "Qt 6.11.1 static CMake package was not found at $qtDir"
+          }
+          "SNOW_QT_STATIC_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "Qt6_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build, audit, and package statically
+        shell: pwsh
+        run: .\scripts\stage-snow-shot-release.ps1
+
+      - name: Verify focused updater and installer behavior
+        shell: pwsh
+        run: |
+          python scripts/test-snow-shot-gitee-release.py
+          if ($LASTEXITCODE -ne 0) { throw "Gitee mirror tests failed." }
+          node scripts/test-macos-installer-parser.js
+          if ($LASTEXITCODE -ne 0) { throw "macOS installer parser tests failed." }
+          & scripts/test-snow-shot-github-release.ps1
+          cargo test --manifest-path snow_shot/rust/snow-shot-updater/Cargo.toml --lib service::tests
+          if ($LASTEXITCODE -ne 0) { throw "Updater fallback tests failed." }
+          cargo test --manifest-path snow_shot/rust/snow-shot-updater/Cargo.toml --lib github::tests
+          if ($LASTEXITCODE -ne 0) { throw "GitHub transport tests failed." }
+          cargo test --manifest-path snow_shot/rust/snow-shot-updater/Cargo.toml --lib gitee::tests
+          if ($LASTEXITCODE -ne 0) { throw "Gitee transport tests failed." }
+          & scripts/test-snow-shot-ocr-release-runtime.ps1
+          & scripts/test-snow-shot-release-symbols.ps1 -ReleaseHelperPath build/snow-shot-msvc-release/snow_shot/Release/snow-shot-updater.exe
+          & scripts/test-snow-shot-installer.ps1
+          & scripts/test-snow-shot-installer-i18n.ps1
+          . scripts/snow-build-environment.ps1
+          $null = Set-SnowBuildEnvironment -Preset 'snow-shot-msvc-release'
+          cmake --preset snow-shot-msvc-release -DSNOW_SHOT_BUILD_UPDATE_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw "Updater test configuration failed." }
+          cmake --build --preset build-snow-shot-msvc-release --target snow-shot-update-adapter-tests snow-shot-macos-update-tests snow-shot-update-about-tests snow-shot-update-settings-tests --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "Updater test build failed." }
+          ctest --test-dir build/snow-shot-msvc-release/snow_shot -C Release -R '^snow-shot-(update-(adapter-tests|about-tests|settings-tests)|macos-update-tests)$' --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Updater tests failed." }
+          & scripts/test-snow-shot-update-helper.ps1
+
+      - name: Verify tag and locate package
+        id: package
+        shell: pwsh
+        run: |
+          $version = [regex]::Match((Get-Content -Raw CMakeLists.txt), 'set\(SNOW_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
+          if ($env:GITHUB_REF_NAME -cne "v${version}_snow-shot") {
+            throw "Unexpected release tag: $env:GITHUB_REF_NAME"
+          }
+          $names = @()
+          foreach ($variant in @('online', 'offline')) {
+            $base = "snow-shot-$version-windows-x64-$variant"
+            $names += @("$base.exe", "$base.exe.sha256", "$base.manifest.json",
+              "$base-update.zip", "$base-update.zip.sha256", "$base-update.manifest.json")
+          }
+          $base = "snow-shot-$version-windows-x64-portable"
+          $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
+          $runtime = (Get-Content -Raw snow_shot/packaging/snow-shot-ocr-asset-manifest.json | ConvertFrom-Json).runtime.version
+          $base = "snow-ocr-runtime-$runtime-windows-x64"
+          $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
+          $packages = @($names | ForEach-Object { Get-Item -LiteralPath "build/snow-shot-msvc-release/$_" -ErrorAction Stop })
+          $assets = ($packages | ForEach-Object { $_.FullName }) -join "`n"
+          "assets<<SNOW_ASSETS" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $assets | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "SNOW_ASSETS" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Preserve matching release symbols separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: snow-shot-symbols-${{ github.ref_name }}
+          path: |
+            build/snow-shot-msvc-release/snow-shot-symbols-windows-x64.zip
+            build/snow-shot-msvc-release/snow-shot-symbols-windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      # Local publisher signs latest-version.json, verifies all assets, and publishes the draft.
+      # CI never receives the private release signing key.
+      - name: Create draft release for local signing and finalization
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = "${{ steps.package.outputs.assets }}" -split "`n" | Where-Object { $_ }
+          $version = [regex]::Match((Get-Content -Raw CMakeLists.txt), 'set\(SNOW_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
+          $releaseFlags = @()
+          if (($version -split '\+')[0].Contains('-')) { $releaseFlags += '--prerelease' }
+          gh release create $env:GITHUB_REF_NAME @assets `
+            --draft `
+            @releaseFlags `
+            --generate-notes `
+            --title "Snow Shot $env:GITHUB_REF_NAME"

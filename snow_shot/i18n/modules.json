@@ -1,0 +1,109 @@
+{
+  "core": [
+    "AboutPageWidget",
+    "ApplicationRestart",
+    "DiagnosticsService",
+    "LanguageCatalog",
+    "MainContentHeaderWidget",
+    "MainWindow",
+    "McpDocumentService",
+    "QObject",
+    "SectionHeaderWidget",
+    "SidebarWidget",
+    "SnowShotApiClient",
+    "SystemTrayController",
+    "TitleBarWidget",
+    "snow_shot::app::ApplicationController",
+    "snow_shot::presentation::SystemTrayController"
+  ],
+  "settings": [
+    "AdministratorLaunch",
+    "AppPermissions",
+    "CustomAiModelsSettingsWidget",
+    "DrawingToolbarEditorSettingsWidget",
+    "GlobalMouseRow",
+    "LoginItemService",
+    "PermissionGuide",
+    "PinnedToolbarEditorSettingsWidget",
+    "ScreenshotMcpSettings",
+    "ScreenshotToolbarEditorSettingsWidget",
+    "SettingsBackend",
+    "SettingsCatalog",
+    "SettingsPageWidget",
+    "ShortcutKeyRow",
+    "StorageDirectoryChange",
+    "StorageStatusSettingsWidget",
+    "TextTranslationSettingsWidget",
+    "snow_shot::presentation::GlobalMouseManager",
+    "snow_shot::storage::ApplicationStorage",
+    "snow_shot::storage::ConfigurationArchive",
+    "snow_shot::storage::ConfigurationStore"
+  ],
+  "capture": [
+    "DirectCaptureController",
+    "ScreenshotAutoFilterController",
+    "ScreenshotQrController",
+    "ScreenshotCaptureCoordinator",
+    "ScreenshotController",
+    "ScreenshotMcpServer",
+    "ScreenshotOverlayWindow",
+    "ScreenshotRegionTypeControl",
+    "ScreenshotSelectionResizeModalContent",
+    "ScreenshotSelectionResizeWorkflow",
+    "ScreenshotSelectionToolbarWidget",
+    "ScreenshotShortcutHintsWidget",
+    "snow_shot::app::mcp::ScreenshotMcpServer",
+    "snow_shot::app::mcp::ScreenshotMcpSession",
+    "snow_shot::presentation::DirectCaptureController"
+  ],
+  "annotation": [
+    "snow_shot::presentation::GlobalCanvasController",
+    "ScreenshotToolPalette"
+  ],
+  "export": [
+    "ScreenshotClipboardService",
+    "ScreenshotExportArtifact",
+    "ScreenshotImageFileService",
+    "ScreenshotPdfExport",
+    "ScreenshotRecognitionFileExport",
+    "ScreenshotSaveAsFileDialog",
+    "ScreenshotSavePreviewCanvas"
+  ],
+  "recording": [
+    "RecordingEffectPreview",
+    "RecordingKeyboardLabels",
+    "ScreenRecordingController"
+  ],
+  "recognition": [
+    "ScreenshotImageConversionController",
+    "ScreenshotImageConversionView",
+    "ScreenshotOcrController",
+    "ScreenshotRecognitionWindow",
+    "ScreenshotRecognitionSessionController",
+    "ScreenshotTableEditor"
+  ],
+  "translation": [
+    "ScreenshotTranslationSettingsDialog",
+    "TranslationLanguages",
+    "TranslationPageWidget",
+    "TranslationService",
+    "snow_shot::presentation::StandaloneTranslationWindow",
+    "snow_shot::presentation::TranslationPageController",
+    "snow_shot::translation::TranslationJob",
+    "snow_shot::translation::TranslationService"
+  ],
+  "history": [
+    "HistoryEntryWidget",
+    "PinnedWindowManagementPageWidget",
+    "ScreenshotHistoryPageWidget",
+    "ScreenshotPinnedWindow",
+    "WindowGroupSwitcher",
+    "snow_shot::presentation::PinnedWindowGroupManager",
+    "snow_shot::presentation::WindowGroupSwitcherController"
+  ],
+  "updates": [
+    "UpdateErrors",
+    "UpdateService",
+    "snow_shot::update::UpdateService"
+  ]
+}

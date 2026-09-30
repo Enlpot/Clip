@@ -1,0 +1,462 @@
+#include "snow_shot/shortcuts/shortcutbinding.h"
+#include "snow_shot/presentation/screenshotoverlayshortcutcontroller.h"
+
+#include "snow_shot/presentation/screenshotinteractionstate.h"
+#include "snow_shot/presentation/screenshotintelligentselectionmodel.h"
+#include "snow_shot/presentation/screenshotregiontypeshortcut.h"
+#include "snow_shot/presentation/windowshortcutmanager.h"
+#include "snow_shot/storage/applicationstorage.h"
+#include "snow_shot/storage/configurationstore.h"
+#include "snow_shot/storage/settingsadapters.h"
+
+#include <QKeyEvent>
+#include <QKeySequence>
+#include <QMap>
+
+#include <utility>
+
+namespace {
+using ShortcutManager = snow_shot::presentation::WindowShortcutManager;
+using BindingHandle = ShortcutManager::BindingHandle;
+
+bool recognitionTool(ScreenshotActiveTool tool) {
+    return isScreenshotRecognitionTool(tool);
+}
+
+QList<QKeyCombination> anyModifierCombinations(Qt::Key key) {
+    QList<QKeyCombination> combinations;
+    constexpr Qt::KeyboardModifier modifiers[] = {
+        Qt::ShiftModifier, Qt::ControlModifier, Qt::AltModifier,
+        Qt::MetaModifier,  Qt::KeypadModifier,
+    };
+    constexpr int combinationCount = 1 << 5;
+    combinations.reserve(combinationCount);
+    for (int mask = 0; mask < combinationCount; ++mask) {
+        Qt::KeyboardModifiers combination;
+        for (int index = 0; index < 5; ++index) {
+            if ((mask & (1 << index)) != 0) {
+                combination |= modifiers[index];
+            }
+        }
+        combinations.push_back(QKeyCombination(combination, key));
+    }
+    return combinations;
+}
+
+ShortcutManager::Binding fixedBinding(QString id, QList<QKeyCombination> combinations, int priority,
+                                      std::function<bool()> canActivate,
+                                      std::function<bool()> activate) {
+    ShortcutManager::Binding binding;
+    binding.id = std::move(id);
+    binding.keyCombinations = std::move(combinations);
+    binding.priority = priority;
+    binding.canActivate = [canActivate = std::move(canActivate)](const auto&) {
+        return !canActivate || canActivate();
+    };
+    binding.activate = [activate = std::move(activate)](const auto&) {
+        return activate && activate();
+    };
+    return binding;
+}
+
+} // namespace
+
+struct ScreenshotOverlayShortcutController::Impl {
+    Impl(ScreenshotOverlayShortcutController& owner, ShortcutManager& manager,
+         ScreenshotOverlayInputHandler& handler, ScreenshotInteractionState& interactionState,
+         ScreenshotIntelligentSelectionModel& intelligent,
+         ScreenshotOverlayInputActions inputActions)
+        : q(owner), shortcutManager(manager), inputHandler(handler), interaction(interactionState),
+          intelligentSelection(intelligent), actions(std::move(inputActions)) {
+        registerFixedBindings();
+        registerConfiguredBindings();
+        reloadConfiguredShortcuts();
+
+        auto& storage = snow_shot::storage::ApplicationStorage::instance();
+        if (storage.isInitialized()) {
+            QObject::connect(&storage.configuration(),
+                             &snow_shot::storage::ConfigurationStore::valueChanged, &q,
+                             [this](const QString& key, const QJsonValue&) {
+                                 if (key.startsWith(QStringLiteral("screenshot_shortcuts/")) ||
+                                     key.startsWith(QStringLiteral("drawing_shortcuts/"))) {
+                                     reloadConfiguredShortcuts();
+                                 }
+                             });
+        }
+    }
+
+    [[nodiscard]] bool toolbarToolShortcutState() const {
+        return !inputHandler.externalDragActive() && !inputHandler.regionOperationActive() &&
+               actions.localShortcutInputAllowed() &&
+               (interaction.selecting() ? inputHandler.canPrepareSelectionForToolbarShortcut()
+                                        : actions.mainToolbarVisible());
+    }
+
+    bool activateToolbarShortcut(const QString& id, bool drawing) {
+        if (!inputHandler.acceptInput()) {
+            return false;
+        }
+        const auto activate = [&] {
+            return drawing ? actions.activateDrawingShortcut(id)
+                           : actions.activateScreenshotShortcut(id);
+        };
+        if (interaction.selecting()) {
+            const bool available = drawing ? actions.canActivateDrawingShortcut(id)
+                                           : actions.canActivateScreenshotShortcut(id);
+            return available && inputHandler.activateToolbarShortcutForSelection(activate);
+        }
+        return activate();
+    }
+
+    [[nodiscard]] bool cursorMovementShortcutState() const {
+        if (!actions.physicalCursorMovementAvailable()) {
+            return false;
+        }
+        if (inputHandler.canvasColorSamplingActive()) {
+            return true;
+        }
+        return interaction.cursorMovementEnabled() && actions.localShortcutInputAllowed();
+    }
+
+    bool navigateHistory(bool previous) {
+        if (interaction.manualSelecting()) {
+            if (interaction.dragging()) {
+                interaction.cancelDrag();
+            }
+            inputHandler.confirmSelection();
+        }
+        inputHandler.resetTransientShortcuts();
+        actions.pauseIntelligentSelection();
+        intelligentSelection.clearPress();
+        return previous ? actions.navigateHistoryPrevious() : actions.navigateHistoryNext();
+    }
+
+    void registerFixedBindings() {
+#ifdef Q_OS_MACOS
+        QList<QKeyCombination> closeKeys;
+        for (const auto& sequence : QKeySequence::keyBindings(QKeySequence::Close))
+            closeKeys.append(sequence[0]);
+        auto close = fixedBinding(QStringLiteral("screenshot.close"), std::move(closeKeys),
+                                  ShortcutManager::StandardPriority::WindowCommand, {},
+                                  [this] { return actions.cancelCaptureViaShortcut(); });
+        // Retire the complete capture, including every display and the toolbar, after
+        // key release. Text editing must not suppress this standard window command.
+        close.activationTrigger = ShortcutManager::Binding::ActivationTrigger::Release;
+        static_cast<void>(shortcutManager.addBinding(&q, std::move(close)));
+#endif
+        for (bool reverse : {false, true}) {
+            static_cast<void>(shortcutManager.addBinding(
+                &q, fixedBinding(
+                        reverse ? QStringLiteral("screenshot.region_previous")
+                                : QStringLiteral("screenshot.region_next"),
+                        {screenshotRegionTypeCycleKey(reverse)},
+                        ShortcutManager::StandardPriority::WindowCommand,
+                        [this] {
+                            return actions.localShortcutInputAllowed() &&
+                                   (interaction.selecting() || interaction.moveToolActive());
+                        },
+                        [this, reverse] { return inputHandler.cycleRegionType(reverse); })));
+        }
+        static_cast<void>(shortcutManager.addBinding(
+            &q, fixedBinding(
+                    QStringLiteral("screenshot.region_remove_vertex"),
+                    {QKeyCombination(Qt::Key_Backspace)},
+                    ShortcutManager::StandardPriority::WindowCommand,
+                    [this] {
+                        return actions.localShortcutInputAllowed() &&
+                               inputHandler.customRegionInputActive();
+                    },
+                    [this] { return inputHandler.removeRegionVertex(); })));
+        QList<QKeyCombination> confirmationKeys = anyModifierCombinations(Qt::Key_Return);
+        confirmationKeys.append(anyModifierCombinations(Qt::Key_Enter));
+        static_cast<void>(shortcutManager.addBinding(
+            &q, fixedBinding(
+                    QStringLiteral("screenshot.confirm_selection"), std::move(confirmationKeys),
+                    ShortcutManager::StandardPriority::WindowCommand,
+                    [this]() {
+                        return !inputHandler.externalDragActive() &&
+                               !recognitionTool(interaction.activeTool()) &&
+                               interaction.selecting() && !interaction.dragging() &&
+                               actions.localShortcutInputAllowed();
+                    },
+                    [this]() {
+                        if (!inputHandler.acceptInput())
+                            return false;
+                        inputHandler.confirmSelection();
+                        return true;
+                    })));
+
+        static_cast<void>(shortcutManager.addBinding(
+            &q, fixedBinding(
+                    QStringLiteral("screenshot.cycle_color_format"),
+                    {QKeyCombination(Qt::ShiftModifier, Qt::Key_Shift)},
+                    ShortcutManager::StandardPriority::ContextualFallback,
+                    [this]() {
+                        return !inputHandler.externalDragActive() && interaction.moveToolActive() &&
+                               !interaction.dragging() && actions.localShortcutInputAllowed();
+                    },
+                    [this]() {
+                        return inputHandler.acceptInput() && actions.cycleColorPickerFormat();
+                    })));
+    }
+
+    void registerConfiguredBindings() {
+        const QStringList screenshotIds = {
+            QStringLiteral("move_tool"),
+            QStringLiteral("move_cursor_up"),
+            QStringLiteral("move_cursor_down"),
+            QStringLiteral("move_cursor_left"),
+            QStringLiteral("move_cursor_right"),
+            QStringLiteral("move_entire_selection"),
+            QStringLiteral("keep_selection_width_and_height_consistent"),
+            QStringLiteral("switch_selection_between_window_and_window_sub_element"),
+            QStringLiteral("previous_screenshot_history"),
+            QStringLiteral("next_screenshot_history"),
+            QStringLiteral("select_previously_selected_area"),
+            QStringLiteral("recapture"),
+            QStringLiteral("copy_color"),
+            QStringLiteral("toggle_coordinate_mode"),
+            QStringLiteral("table_recognition"),
+            QStringLiteral("qr_code_recognition"),
+            QStringLiteral("video_recording"),
+            QStringLiteral("text_recognition"),
+            QStringLiteral("text_translation"),
+            QStringLiteral("scrolling_screenshot"),
+            QStringLiteral("quick_save"),
+            QStringLiteral("save_as_file"),
+            QStringLiteral("pin_to_screen"),
+            QStringLiteral("cancel_screenshot"),
+            QStringLiteral("copy_to_clipboard"),
+            QStringLiteral("undo"),
+            QStringLiteral("redo"),
+        };
+        for (const QString& actionId : screenshotIds) {
+            ShortcutManager::Binding binding;
+            binding.id = QStringLiteral("screenshot.configured.") + actionId;
+            if (actionId == QStringLiteral("cancel_screenshot")) {
+                binding.activationTrigger = ShortcutManager::Binding::ActivationTrigger::Release;
+            }
+            binding.priority = ShortcutManager::StandardPriority::ScreenshotShortcut;
+            binding.autoRepeat = actionId.startsWith(QStringLiteral("move_cursor_"));
+            binding.canActivate = [this, actionId](const auto&) {
+                if (inputHandler.externalDragActive() &&
+                    actionId != QStringLiteral("move_entire_selection") &&
+                    actionId != QStringLiteral("keep_selection_width_and_height_consistent") &&
+                    actionId != QStringLiteral("cancel_screenshot")) {
+                    return false;
+                }
+                if (inputHandler.regionOperationActive() &&
+                    actionId != QStringLiteral("cancel_screenshot") &&
+                    !actionId.startsWith(QStringLiteral("move_cursor_")))
+                    return false;
+                if (actionId == QStringLiteral("cancel_screenshot")) {
+                    // Session cancellation remains available while a text editor owns input.
+                    return true;
+                }
+                if (actionId == QStringLiteral("previous_screenshot_history") ||
+                    actionId == QStringLiteral("next_screenshot_history")) {
+                    return !recognitionTool(interaction.activeTool()) &&
+                           (interaction.selecting() || interaction.movingSelection()) &&
+                           !interaction.modifyingSelection() && actions.localShortcutInputAllowed();
+                }
+                if (actionId ==
+                    QStringLiteral("switch_selection_between_window_and_window_sub_element")) {
+                    return interaction.intelligentSelecting() &&
+                           intelligentSelection.smartSelectionEnabled() &&
+                           actions.localShortcutInputAllowed();
+                }
+                if (actionId == QStringLiteral("move_entire_selection")) {
+                    return (interaction.movingSelection() || interaction.modifyingSelection() ||
+                            interaction.manualSelecting()) &&
+                           actions.localShortcutInputAllowed();
+                }
+                if (actionId == QStringLiteral("keep_selection_width_and_height_consistent")) {
+                    // Includes intelligent selection so the key can be held in
+                    // advance, before the pointer drag creates a selection.
+                    return (interaction.movingSelection() || interaction.modifyingSelection() ||
+                            interaction.manualSelecting() || interaction.editing() ||
+                            interaction.intelligentSelecting()) &&
+                           !recognitionTool(interaction.activeTool()) &&
+                           actions.localShortcutInputAllowed();
+                }
+                if (actionId == QStringLiteral("select_previously_selected_area")) {
+                    return interaction.moveToolActive() && !interaction.dragging() &&
+                           !interaction.scrollingCapture() && actions.localShortcutInputAllowed();
+                }
+                if (actionId == QStringLiteral("recapture")) {
+                    return interaction.moveToolActive() && !interaction.dragging() &&
+                           !interaction.scrollingCapture() && actions.localShortcutInputAllowed() &&
+                           actions.recaptureAvailable();
+                }
+                if (actionId == QStringLiteral("copy_color") ||
+                    actionId == QStringLiteral("toggle_coordinate_mode")) {
+                    return interaction.moveToolActive() && actions.localShortcutInputAllowed();
+                }
+                if (actionId.startsWith(QStringLiteral("move_cursor_"))) {
+                    return cursorMovementShortcutState();
+                }
+                return toolbarToolShortcutState();
+            };
+            if (actionId.startsWith(QStringLiteral("move_cursor_"))) {
+                binding.canActivateOutsideScope = [this](const auto&) {
+                    return inputHandler.canvasColorSamplingActive();
+                };
+            }
+            binding.activate = [this, actionId](const auto& context) {
+                if (actionId != QStringLiteral("cancel_screenshot") && !inputHandler.acceptInput())
+                    return false;
+                if (actionId == QStringLiteral("move_cursor_up")) {
+                    return actions.moveCursorOnePixel(
+                        snow_shot::platform::PhysicalCursorDirection::Up);
+                }
+                if (actionId == QStringLiteral("move_cursor_down")) {
+                    return actions.moveCursorOnePixel(
+                        snow_shot::platform::PhysicalCursorDirection::Down);
+                }
+                if (actionId == QStringLiteral("move_cursor_left")) {
+                    return actions.moveCursorOnePixel(
+                        snow_shot::platform::PhysicalCursorDirection::Left);
+                }
+                if (actionId == QStringLiteral("move_cursor_right")) {
+                    return actions.moveCursorOnePixel(
+                        snow_shot::platform::PhysicalCursorDirection::Right);
+                }
+                if (actionId == QStringLiteral("move_entire_selection")) {
+                    return inputHandler.activateMoveEntireSelectionShortcut();
+                }
+                if (actionId == QStringLiteral("keep_selection_width_and_height_consistent")) {
+                    const Qt::KeyboardModifiers eventModifiers =
+                        context.event != nullptr ? context.event->modifiers() : Qt::NoModifier;
+                    const bool plainShiftColorFormatFallback =
+                        context.event != nullptr &&
+                        snow_shot::shortcuts::commandKey(*context.event) == Qt::Key_Shift &&
+                        (eventModifiers == Qt::NoModifier || eventModifiers == Qt::ShiftModifier) &&
+                        interaction.moveToolActive();
+                    return inputHandler.activateKeepSelectionAspectRatioShortcut(
+                        plainShiftColorFormatFallback);
+                }
+                if (actionId ==
+                    QStringLiteral("switch_selection_between_window_and_window_sub_element")) {
+                    return inputHandler.toggleIntelligentSelectionTargetShortcut();
+                }
+                if (actionId == QStringLiteral("previous_screenshot_history")) {
+                    return navigateHistory(true);
+                }
+                if (actionId == QStringLiteral("next_screenshot_history")) {
+                    return navigateHistory(false);
+                }
+                if (actionId == QStringLiteral("select_previously_selected_area")) {
+                    const bool selected = actions.selectPreviousSelection();
+                    if (selected) {
+                        actions.pauseIntelligentSelection();
+                        intelligentSelection.clearPress();
+                    }
+                    return selected;
+                }
+                if (actionId == QStringLiteral("toggle_coordinate_mode")) {
+                    return actions.toggleColorPickerCoordinateMode();
+                }
+                if (actionId == QStringLiteral("copy_color")) {
+                    if (!actions.copyColorPickerColorToClipboard()) {
+                        return false;
+                    }
+                    actions.cancelCapture();
+                    return true;
+                }
+                if (actionId == QStringLiteral("cancel_screenshot")) {
+                    return inputHandler.cancelRegionOperation() ||
+                           actions.cancelCaptureViaShortcut();
+                }
+                return activateToolbarShortcut(actionId, false);
+            };
+            if (actionId == QStringLiteral("move_entire_selection")) {
+                binding.allowedAdditionalModifiers = Qt::ShiftModifier;
+                binding.cancel = [this] {
+                    static_cast<void>(inputHandler.releaseMoveEntireSelectionShortcut());
+                };
+                binding.release = [this](const auto&) {
+                    return inputHandler.releaseMoveEntireSelectionShortcut();
+                };
+            } else if (actionId == QStringLiteral("keep_selection_width_and_height_consistent")) {
+                binding.cancel = [this] { inputHandler.cancelKeepSelectionAspectRatioShortcut(); };
+                binding.release = [this](const auto&) {
+                    return inputHandler.releaseKeepSelectionAspectRatioShortcut();
+                };
+            }
+            if (binding.release) {
+                // The initiating global mouse modifiers may still be held. Only these
+                // two held selection controls tolerate them, and only during that drag.
+                auto externalBinding = binding;
+                externalBinding.id += QStringLiteral(".external_drag");
+                externalBinding.allowedAdditionalModifiers =
+                    Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier;
+                externalBinding.canActivate = [this, eligible =
+                                                         binding.canActivate](const auto& context) {
+                    return inputHandler.externalDragActive() && eligible(context);
+                };
+                externalBindings.insert(actionId,
+                                        shortcutManager.addBinding(&q, std::move(externalBinding)));
+            }
+            screenshotBindings.insert(actionId, shortcutManager.addBinding(&q, std::move(binding)));
+        }
+
+        const auto drawingShortcuts = snow_shot::storage::DrawingShortcutSettings().allShortcuts();
+        for (auto tool = drawingShortcuts.cbegin(); tool != drawingShortcuts.cend(); ++tool) {
+            ShortcutManager::Binding binding;
+            binding.id = QStringLiteral("drawing.configured.") + tool.key();
+            binding.priority = ShortcutManager::StandardPriority::DrawingShortcut;
+            binding.canActivate = [this](const auto&) { return toolbarToolShortcutState(); };
+            binding.activate = [this, toolId = tool.key()](const auto&) {
+                return activateToolbarShortcut(toolId, true);
+            };
+            drawingBindings.insert(tool.key(), shortcutManager.addBinding(&q, std::move(binding)));
+        }
+    }
+
+    void reloadConfiguredShortcuts() {
+        const snow_shot::storage::ScreenshotShortcutSettings screenshotSettings;
+        for (auto binding = screenshotBindings.cbegin(); binding != screenshotBindings.cend();
+             ++binding) {
+            static_cast<void>(shortcutManager.setShortcuts(
+                binding.value(), screenshotSettings.shortcuts(binding.key())));
+        }
+
+        for (auto binding = externalBindings.cbegin(); binding != externalBindings.cend();
+             ++binding) {
+            static_cast<void>(shortcutManager.setShortcuts(
+                binding.value(), screenshotSettings.shortcuts(binding.key())));
+        }
+
+        const snow_shot::storage::DrawingShortcutSettings drawingSettings;
+        for (auto binding = drawingBindings.cbegin(); binding != drawingBindings.cend();
+             ++binding) {
+            static_cast<void>(shortcutManager.setShortcuts(
+                binding.value(), drawingSettings.shortcuts(binding.key())));
+        }
+    }
+
+    ScreenshotOverlayShortcutController& q;
+    ShortcutManager& shortcutManager;
+    ScreenshotOverlayInputHandler& inputHandler;
+    ScreenshotInteractionState& interaction;
+    ScreenshotIntelligentSelectionModel& intelligentSelection;
+    ScreenshotOverlayInputActions actions;
+    QMap<QString, BindingHandle> screenshotBindings;
+    QMap<QString, BindingHandle> externalBindings;
+    QMap<QString, BindingHandle> drawingBindings;
+};
+
+ScreenshotOverlayShortcutController::ScreenshotOverlayShortcutController(
+    ShortcutManager& shortcutManager, ScreenshotOverlayInputHandler& inputHandler,
+    ScreenshotInteractionState& interaction,
+    ScreenshotIntelligentSelectionModel& intelligentSelection,
+    ScreenshotOverlayInputActions actions, QObject* parent)
+    : QObject(parent),
+      m_impl(std::make_unique<Impl>(*this, shortcutManager, inputHandler, interaction,
+                                    intelligentSelection, std::move(actions))) {}
+
+ScreenshotOverlayShortcutController::~ScreenshotOverlayShortcutController() = default;
+
+void ScreenshotOverlayShortcutController::reloadConfiguredShortcuts() {
+    m_impl->reloadConfiguredShortcuts();
+}

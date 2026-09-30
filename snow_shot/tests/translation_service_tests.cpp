@@ -1,0 +1,216 @@
+#include "translation_test_support.h"
+#include "snow_shot/translation/translationservice.h"
+#include "snow_shot/storage/configurationstore.h"
+#include <QTemporaryDir>
+#include <memory>
+
+using namespace translation_tests;
+using namespace snow_shot::translation;
+using snow_shot::storage::ConfigurationStore;
+
+namespace {
+void customModelsStayAvailableAndInvalidateTogether(const QString& directory) {
+    Server builtIn;
+    builtIn.holdModels = true;
+    Server custom;
+    custom.streamPath = QByteArrayLiteral("/v1/chat/completions");
+    snow_shot::CustomAiModelConfiguration model{
+        QStringLiteral("11111111-1111-4111-8111-111111111111"),
+        QStringLiteral("Local model"),
+        custom.url() + QStringLiteral("/v1"),
+        QStringLiteral("test-key"),
+        QStringLiteral("provider-model"),
+        true};
+    ConfigurationStore settings(directory + QStringLiteral("/custom.json"), true, true, 60000);
+    const QString key = QStringLiteral("api_configuration/custom_models");
+    require(settings.setValue(key, snow_shot::customAiModelsToJson({model})),
+            "save custom configuration");
+    SnowShotApiClient client(builtIn.url());
+    auto& service = TranslationService::forClient(client, settings, QLocale::English);
+    require(&service == &TranslationService::forClient(client, settings, QLocale::English),
+            "consumers share the catalog and settings owner");
+    require(service.models().size() == 1 && service.models().first().supportsVision &&
+                service.preferences().modelId == model.selectionId(),
+            "custom vision model is immediately eligible");
+    {
+        QObject fixedOwner;
+        auto preferences = service.preferences();
+        preferences.sourceLanguage = QStringLiteral("en");
+        preferences.targetLanguage = QStringLiteral("ja");
+        auto* fixed = service.createJob({QStringLiteral(" ")}, preferences, &fixedOwner);
+        const auto global = service.preferences();
+        fixed->start();
+        fixed->retry();
+        require(
+            fixed->preferences() == preferences && service.preferences() == global,
+            "explicit per-job preferences survive start/retry without changing global settings");
+    }
+    service.refreshModels();
+    service.refreshModels();
+    QObject owner;
+    auto* first = service.createJob({QStringLiteral("same input")}, &owner);
+    auto* second = service.createJob({QStringLiteral("same input")}, &owner);
+    first->start();
+    second->start();
+    waitUntil([&] { return custom.streams.size() == 2 && builtIn.modelRequests == 1; },
+              "custom streams do not wait for coalesced builtin discovery");
+    require(custom.streams[0].body == custom.streams[1].body &&
+                custom.streams[0].body.value(QStringLiteral("model")) == model.model &&
+                custom.streams[0].headers.contains("Authorization: Bearer test-key") &&
+                !custom.streams[0].headers.contains(model.selectionId().toUtf8()),
+            "consumers produce identical provider requests with scoped custom credentials");
+    custom.delta(0, QStringLiteral("first output"));
+    custom.delta(1, QStringLiteral("second output"));
+    waitUntil(
+        [&] {
+            return !first->units().first().text.isEmpty() &&
+                   !second->units().first().text.isEmpty();
+        },
+        "both jobs receive text");
+    model.name = QStringLiteral("Renamed model");
+    model.supportsVision = false;
+    require(settings.setValue(key, snow_shot::customAiModelsToJson({model})),
+            "rename and change vision capability");
+    require(first->busy() && second->busy() && service.models().first().name == model.name,
+            "display metadata edits preserve text translation");
+    custom.finish(0);
+    waitUntil([&] { return !first->busy(); }, "cache one completed result");
+    model.apiKey = QStringLiteral("updated-key");
+    require(settings.setValue(key, snow_shot::customAiModelsToJson({model})),
+            "edit connection settings");
+    waitUntil([&] { return custom.disconnected(1); }, "connection edit aborts affected stream");
+    require(first->state() == TranslationJob::State::Invalidated &&
+                second->state() == TranslationJob::State::Invalidated &&
+                first->units().first().text.isEmpty() && second->units().first().text.isEmpty() &&
+                custom.streams.size() == 2,
+            "completed and running results invalidate without automatic restart");
+    second->retry();
+    waitUntil([&] { return custom.streams.size() == 3; },
+              "explicit retry starts updated connection");
+    require(custom.streams.last().headers.contains("Authorization: Bearer updated-key"),
+            "retry uses new credentials");
+    builtIn.respondModels();
+    waitUntil([&] { return !service.loadingModels(); }, "finish builtin discovery");
+    require(settings.setValue(key, QJsonArray{}), "delete selected custom model");
+    require(second->state() == TranslationJob::State::Invalidated &&
+                service.preferences().modelId == QStringLiteral("general") &&
+                custom.streams.size() == 3 && builtIn.streams.isEmpty(),
+            "deletion selects shared fallback without sending another translation");
+}
+
+void failuresAndOwnerLifetimes(const QString& directory) {
+    Server server;
+    ConfigurationStore settings(directory + QStringLiteral("/lifecycle.json"), true, true, 60000);
+    auto client = std::make_unique<SnowShotApiClient>(server.url());
+    auto& service = TranslationService::forClient(*client, settings, QLocale::English);
+    QObject owner;
+    auto* empty = service.createJob({QStringLiteral("   ")}, &owner);
+    empty->start();
+    require(empty->state() == TranslationJob::State::Completed && server.modelRequests == 0,
+            "empty source does not perform discovery");
+    auto* job = service.createJob({QStringLiteral("hello")}, &owner);
+    job->start();
+    waitUntil([&] { return server.streams.size() == 1; }, "prepare nonempty input");
+    server.finish(0);
+    waitUntil([&] { return !job->busy(); }, "empty response finishes");
+    require(job->state() == TranslationJob::State::Failed && !job->errorText().isEmpty(),
+            "empty model response is an actionable error");
+    job->retry();
+    waitUntil([&] { return server.streams.size() == 2; }, "retry empty response");
+    server.delta(1, QStringLiteral("partial"));
+    waitUntil([&] { return !job->units().first().text.isEmpty(); }, "deliver partial response");
+    server.fail(1);
+    waitUntil([&] { return !job->busy(); }, "fail partial response");
+    require(job->units().first().text == QStringLiteral("partial"),
+            "ordinary errors retain partial output");
+    job->retry();
+    waitUntil([&] { return server.streams.size() == 3; }, "start before client destruction");
+    client.reset();
+    require(!job->busy() && !job->errorText().isEmpty(),
+            "provider destruction settles the job safely");
+}
+void serverChangesRefreshModelsAndPreserveStreams(const QString& directory) {
+    Server first, second, custom;
+    second.holdModels = true;
+    custom.streamPath = QByteArrayLiteral("/v1/chat/completions");
+    ConfigurationStore settings(directory + QStringLiteral("/servers.json"), true, true, 60000);
+    const QString serverKey = QStringLiteral("api_configuration/server_url");
+    const snow_shot::CustomAiModelConfiguration customModel{
+        QStringLiteral("11111111-1111-4111-8111-111111111111"),
+        QStringLiteral("Custom"),
+        custom.url() + QStringLiteral("/v1"),
+        QStringLiteral("test-key"),
+        QStringLiteral("provider-model"),
+        true};
+    require(settings.setValue(QStringLiteral("api_configuration/custom_models"),
+                              snow_shot::customAiModelsToJson({customModel})),
+            "save custom model");
+    SnowShotApiClient client(first.url());
+    auto& service = TranslationService::forClient(client, settings, QLocale::English);
+    service.refreshModels();
+    waitUntil([&] { return !service.loadingModels(); }, "initial server catalog loaded");
+    auto preferences = service.preferences();
+    preferences.modelId = QStringLiteral("vision");
+    require(service.savePreferences(preferences), "select model that exists on both servers");
+    QObject receiver;
+    bool originalDone = false;
+    SnowShotTranslationRequest input;
+    input.model = QStringLiteral("general");
+    input.text = QStringLiteral("hello");
+    require(client.streamTranslation(
+                input, &receiver, [](const QString&) {}, [&](auto) { originalDone = true; }) != 0,
+            "start original server stream");
+    waitUntil([&] { return first.streams.size() == 1; }, "original stream is active");
+    require(settings.setValue(serverKey, second.url()), "save replacement server");
+    waitUntil([&] { return second.modelRequests == 1; }, "new server catalog refresh starts");
+    require(service.loadingModels() && service.preferences().modelId == QStringLiteral("vision") &&
+                !client.hasBuiltInModels(QLocale(QLocale::English).name()),
+            "old catalog is cleared without prematurely replacing selected model");
+    first.delta(0, QStringLiteral("old output"));
+    first.finish(0);
+    waitUntil([&] { return originalDone; }, "old stream finishes after switch");
+    second.respondModels();
+    waitUntil([&] { return !service.loadingModels(); }, "replacement catalog loaded");
+    require(service.preferences().modelId == QStringLiteral("vision"),
+            "shared selected model survives server change");
+    require(client.streamTranslation(
+                input, &receiver, [](const QString&) {}, [](auto) {}) != 0,
+            "new built-in stream starts");
+    waitUntil([&] { return second.streams.size() == 1; }, "new stream reaches replacement server");
+    input.model = customModel.selectionId();
+    require(client.streamTranslation(
+                input, &receiver, [](const QString&) {}, [](auto) {}) != 0,
+            "custom stream starts");
+    waitUntil([&] { return custom.streams.size() == 1; }, "custom provider retains own address");
+    second.finish(0);
+    custom.finish(0);
+
+    // A second switch while discovery is pending must retire the first refresh.
+    first.holdModels = true;
+    require(settings.setValue(serverKey, first.url()), "start another held discovery");
+    waitUntil([&] { return first.modelRequests == 2; }, "discovery is in flight");
+    second.models =
+        QJsonArray{QJsonObject{{QStringLiteral("model"), QStringLiteral("replacement")},
+                               {QStringLiteral("name"), QStringLiteral("Replacement")}}};
+    require(settings.setValue(serverKey, second.url()), "switch during discovery");
+    waitUntil([&] { return second.modelRequests == 2; }, "latest discovery is in flight");
+    second.respondModels();
+    waitUntil([&] { return !service.loadingModels(); }, "latest discovery finishes");
+    first.respondModels();
+    flushEvents();
+    require(service.preferences().modelId != QStringLiteral("vision") &&
+                client.baseUrl() == second.url() &&
+                client.cachedChatModels().first().id == QStringLiteral("replacement"),
+            "missing selection falls back and retired refresh cannot overwrite latest catalog");
+}
+} // namespace
+
+int main(int argc, char** argv) {
+    QCoreApplication application(argc, argv);
+    QTemporaryDir directory;
+    require(directory.isValid(), "isolated translation service settings");
+    customModelsStayAvailableAndInvalidateTogether(directory.path());
+    failuresAndOwnerLifetimes(directory.path());
+    serverChangesRefreshModelsAndPreserveStreams(directory.path());
+    return 0;
+}
