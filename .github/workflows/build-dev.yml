@@ -1,0 +1,70 @@
+name: Build Clip (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: "CMake preset to build"
+        required: true
+        default: "windows-msvc-debug"
+        type: string
+  push:
+    branches:
+      - "build/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-clip-dev-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Clip (${{ inputs.preset || 'windows-msvc-debug' }})
+    runs-on: windows-2025-vs2026
+    env:
+      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select MSVC x64 tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: 14.51
+          vsversion: 18.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          target: x86_64-pc-windows-msvc
+
+      - name: Install Python build helper
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check virtualenv
+
+      - name: Bootstrap project dependencies
+        shell: pwsh
+        run: .\scripts\bootstrap.ps1
+
+      - name: Build Snow Shot target
+        shell: pwsh
+        run: >
+          .\scripts\build.ps1
+          -Preset "${{ inputs.preset || 'windows-msvc-debug' }}"
+          -Target snow_shot
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: clip-dev-${{ github.run_number }}
+          path: |
+            build/**/snow_shot/**/*.exe
+            build/**/snow_shot/**/*.dll
+          if-no-files-found: error
+          retention-days: 30
