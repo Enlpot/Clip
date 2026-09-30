@@ -2799,7 +2799,6 @@ QVector<SettingsPageDefinition> builtInPages() {
                     SettingsSectionReset::SystemSettings,
                     {applicationPriorityItem()},
                 },
-                {
             },
         },
 #ifdef Q_OS_MACOS
