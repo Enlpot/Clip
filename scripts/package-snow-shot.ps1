@@ -312,11 +312,11 @@ if (-not (Test-Path -LiteralPath $mainExecutable)) {
 $versionInfo = (Get-Item -LiteralPath $mainExecutable).VersionInfo
 $expectedBinaryMetadata = @{
     CompanyName = "Snow Apps"
-    FileDescription = "Snow Shot screenshot utility"
+    FileDescription = "Clip screenshot utility"
     InternalName = "snow_shot"
     LegalCopyright = "Copyright (C) 2025-2026 mg-chao"
     OriginalFilename = "snow_shot.exe"
-    ProductName = "Snow Shot"
+    ProductName = "Clip"
 }
 foreach ($property in $expectedBinaryMetadata.Keys) {
     if ($versionInfo.$property -ne $expectedBinaryMetadata[$property]) {
@@ -649,8 +649,8 @@ if (-not (Test-Path -LiteralPath $cpackConfig)) {
 $cpackConfiguration = Get-Content -LiteralPath $cpackConfig -Raw
 $requiredCpackSettings = @{
     CPACK_CREATE_DESKTOP_LINKS = "snow_shot"
-    CPACK_PACKAGE_EXECUTABLES = "snow_shot;Snow Shot"
-    CPACK_PACKAGE_HOMEPAGE_URL = "https://snowshot.top"
+    CPACK_PACKAGE_EXECUTABLES = "snow_shot;Clip"
+    CPACK_PACKAGE_HOMEPAGE_URL = "https://github.com/Enlpot/Clip"
     CPACK_PACKAGE_INSTALL_DIRECTORY = "SnowShot"
     CPACK_PACKAGE_INSTALL_REGISTRY_KEY = "SnowShot"
     CPACK_NSIS_INSTALLED_ICON_NAME = "bin\\snow_shot.exe"
@@ -1285,12 +1285,12 @@ string(REPLACE "snow-shot-$packageVersion-windows-x64.exe" "$packageBaseName.exe
     $installerVersionInfo = (Get-Item -LiteralPath $packagePath).VersionInfo
     $expectedInstallerMetadata = @{
         CompanyName = "Snow Apps"
-        FileDescription = "Snow Shot installer"
+        FileDescription = "Clip installer"
         FileVersion = "$packageVersionNumeric.0"
         InternalName = "snow-shot-installer"
         LegalCopyright = "Copyright (C) 2025-2026 mg-chao"
         OriginalFilename = "$packageBaseName.exe"
-        ProductName = "Snow Shot"
+        ProductName = "Clip"
         ProductVersion = $packageVersion
     }
     foreach ($property in $expectedInstallerMetadata.Keys) {
