@@ -102,8 +102,8 @@ int main(int argc, char** argv) {
     require(backend.resetSection(settings::SettingsSectionReset::SystemGeneral) &&
                 backend.switchValue(binding) &&
                 backend.selectValue(settings::SettingsSelectBinding::UpdateMode).toString() ==
-                    u"check",
-            "reset restores native startup and macOS automatic check defaults");
+                    u"manual",
+            "reset restores native startup and the macOS manual update default");
     const int beforeRefresh = changes;
     native.status = LoginItemStatus::Unregistered;
     backend.refreshPlatformSettings();

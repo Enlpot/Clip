@@ -228,7 +228,7 @@ void builtInCatalogIsCompleteAndValid() {
                                 select.options[0].value == QStringLiteral("manual") &&
                                 select.options[1].value == QStringLiteral("check") &&
                                 storage::ConfigurationSchema::defaultValue(item.configurationKey) ==
-                                    QStringLiteral("check"),
+                                    QStringLiteral("manual"),
                             "macOS exposes only manual and automatic checks");
                     const auto migrated = storage::ConfigurationSchema::normalize(
                         item.configurationKey, QStringLiteral("download"));
@@ -243,8 +243,8 @@ void builtInCatalogIsCompleteAndValid() {
                             select.options[1].value == QStringLiteral("check") &&
                             select.options[2].value == QStringLiteral("download") &&
                             storage::ConfigurationSchema::defaultValue(item.configurationKey) ==
-                                QStringLiteral("download"),
-                        "update policy exposes all three modes with automatic download default");
+                                QStringLiteral("manual"),
+                        "update policy exposes all three modes with manual updates default");
 #endif
                     foundUpdates = true;
                 }

@@ -320,8 +320,8 @@ void updatePolicyAndUnavailableCopy() {
     settings::BuiltInSettingsBackend backend(shortcuts);
     const auto binding = settings::SettingsSelectBinding::UpdateMode;
 #ifdef Q_OS_MACOS
-    require(backend.selectValue(binding).toString() == QStringLiteral("check"),
-            "macOS defaults to automatic checks");
+    require(backend.selectValue(binding).toString() == QStringLiteral("manual"),
+            "macOS defaults to manual checks");
     for (const QString& value : {QStringLiteral("manual"), QStringLiteral("check")}) {
         require(backend.applySelectValue(binding, value) &&
                     backend.selectValue(binding).toString() == value,
@@ -364,8 +364,8 @@ void updatePolicyAndUnavailableCopy() {
     action->click();
     require(opened.last() == status.downloadUrl, "About opens the exact Gitee release");
 #else
-    require(backend.selectValue(binding).toString() == QStringLiteral("download"),
-            "automatic download is the default update policy");
+    require(backend.selectValue(binding).toString() == QStringLiteral("manual"),
+            "manual checks are the default update policy");
     for (const QString& value :
          {QStringLiteral("manual"), QStringLiteral("check"), QStringLiteral("download")}) {
         require(backend.applySelectValue(binding, value) &&
