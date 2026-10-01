@@ -77,7 +77,10 @@ function Start-Fixture {
 }
 
 . (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-$null = Set-SnowBuildEnvironment -Preset "windows-msvc-debug"
+# This test compiles a plain Win32 fixture and drives NSIS installers.
+# It needs the MSVC toolchain only; resolving a Qt kit would require
+# Debug libraries that the release workflow does not prepare.
+Add-SnowMsvcToolsToPath | Out-Null
 & cl /nologo /std:c++20 /W4 /WX /O2 /MT /DUNICODE /D_UNICODE "/Fe:$fixture" "/Fo:$testRoot\fixture.obj" `
     "$repoRoot\snow_shot\tests\installer_process_fixture.cpp" /link /SUBSYSTEM:WINDOWS user32.lib
 if ($LASTEXITCODE -ne 0) { throw "Fixture compilation failed." }
