@@ -1,0 +1,95 @@
+[package]
+name = "clip-recording-runtime"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+clip-memory = { path = "../clip-memory" }
+tempfile.workspace = true
+clip-media = { path = "../clip-media" }
+clip-recording-effects = { path = "../clip-recording-effects" }
+clip-core = { path = "../clip-core" }
+clip-pipeline = { path = "../clip-pipeline" }
+clip-capture = { path = "../clip-capture" }
+clip-cursor = { path = "../clip-cursor" }
+clip-audio-recorder = { path = "../clip-audio-recorder" }
+clip-recording-model = { path = "../clip-recording-model" }
+clip-recording-export = { path = "../clip-recording-export" }
+crossbeam-channel.workspace = true
+ffmpeg-next.workspace = true
+rayon.workspace = true
+num_cpus.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+clip-d3d11 = { path = "../clip-d3d11" }
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+] }
+
+[dev-dependencies]
+clip-recording-effects = { path = "../clip-recording-effects", features = ["bench-experiments"] }
+clip-recording-export = { path = "../clip-recording-export", features = ["bench-experiments"] }
+anyhow.workspace = true
+proptest = "1.11.0"
+
+# Drives the overlays without OS input injection; skipped entirely in builds
+# that do not opt into the bench feature.
+[[example]]
+name = "realtime_recording_benchmark"
+required-features = ["bench-synthetic-input"]
+
+[[example]]
+name = "deferred_recording_benchmark"
+required-features = ["bench-synthetic-input"]
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = [
+    "Win32_Media_MediaFoundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+] }
+
+[features]
+# Compile-time metric groups for the realtime recording benchmark. Each group
+# is independently selectable so one measurement is not perturbed by the
+# instrumentation overhead of the others, and production builds (which enable
+# none of them) compile every marker to nothing.
+#
+# Forwards clip-capture's per-backend capture stage instrumentation; direct
+# recording sessions then enable `CaptureOptions::record_stage_timings` and
+# aggregate the per-frame stage breakdown into `DirectRecordingReport`.
+bench-stage-timing = ["clip-capture/stage-timing"]
+# Times each overlay compositing stage (resize, trail, clicks, cursor,
+# keyboard) for every composited frame.
+bench-compositor-timing = ["clip-recording-effects/bench-timing"]
+# Measures per-frame pipeline latency (queue dwell, compose, encode push,
+# capture-to-encode end to end), counts synthetic overlay frames, and copies
+# capture stream statistics into the report.
+bench-pipeline-timing = ["clip-capture/stage-timing", "clip-recording-export/bench-timing"]
+# Lets the realtime recording benchmark drive a direct session's overlay
+# inputs (cursor, clicks, keys) with synthetic observations instead of OS
+# input injection. Sessions opt in explicitly; production builds that enable
+# none of the bench features compile the hooks-only path unchanged.
+bench-synthetic-input = ["clip-recording-effects/bench-synthetic-input", "clip-recording-effects/bench-experiments", "clip-recording-export/bench-experiments"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+clip-macos = { path = "../clip-macos" }

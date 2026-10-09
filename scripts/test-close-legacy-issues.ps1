@@ -5,7 +5,7 @@ function Assert([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-$testDirectory = Join-Path ([IO.Path]::GetTempPath()) "snow-apps-legacy-issues-test-$([guid]::NewGuid().ToString('N'))"
+$testDirectory = Join-Path ([IO.Path]::GetTempPath()) "clip-apps-legacy-issues-test-$([guid]::NewGuid().ToString('N'))"
 $null = New-Item -ItemType Directory -Path $testDirectory
 $mockGh = Join-Path $testDirectory 'gh-mock.ps1'
 $logFile = Join-Path $testDirectory 'calls.jsonl'
@@ -14,42 +14,42 @@ $postedReplyFile = Join-Path $testDirectory 'posted-reply.md'
 $expectedReply = @(
     '**简体中文**',
     '',
-    '抱歉，这个项目已经有很长一段时间没有维护了。Snow Shot 现已使用 Qt 重写，性能更好，功能也更加丰富。目前我没有精力逐一查看并解决这些旧问题。如果您在新版本中遇到类似问题，请提交一个新 issue。',
+    '抱歉，这个项目已经有很长一段时间没有维护了。Clip 现已使用 Qt 重写，性能更好，功能也更加丰富。目前我没有精力逐一查看并解决这些旧问题。如果您在新版本中遇到类似问题，请提交一个新 issue。',
     '',
     '**English**',
     '',
-    "Sorry, this project has not been maintained for quite some time. Snow Shot has now been rewritten using Qt, with better performance and more features. I currently don’t have the capacity to review and address the old issues one by one. If you encounter a similar problem in the new version, please open a new issue."
+    "Sorry, this project has not been maintained for quite some time. Clip has now been rewritten using Qt, with better performance and more features. I currently don’t have the capacity to review and address the old issues one by one. If you encounter a similar problem in the new version, please open a new issue."
 ) -join "`n"
 
 $mockSource = @'
 param([Parameter(ValueFromRemainingArguments)][string[]]$GhArguments)
 $GhArguments = @($GhArguments)
-Add-Content -LiteralPath $env:SNOW_TEST_GH_LOG -Value (ConvertTo-Json -InputObject @{ arguments = $GhArguments } -Compress)
+Add-Content -LiteralPath $env:CLIP_TEST_GH_LOG -Value (ConvertTo-Json -InputObject @{ arguments = $GhArguments } -Compress)
 $call = $GhArguments -join ' '
-if ($call -like 'api --paginate repos/mg-chao/snow-apps/issues?state=open&per_page=100*') {
+if ($call -like 'api --paginate repos/mg-chao/clip-apps/issues?state=open&per_page=100*') {
     '1022', '1021', '62', '61'
     exit 0
 }
-if ($call -like 'api repos/mg-chao/snow-apps/issues/61 *' -or
-    $call -like 'api repos/mg-chao/snow-apps/issues/1021 *') {
+if ($call -like 'api repos/mg-chao/clip-apps/issues/61 *' -or
+    $call -like 'api repos/mg-chao/clip-apps/issues/1021 *') {
     'open'
     exit 0
 }
-if ($call -like 'api repos/mg-chao/snow-apps/issues/62 *') {
+if ($call -like 'api repos/mg-chao/clip-apps/issues/62 *') {
     'closed'
     exit 0
 }
-if ($call -like 'api --paginate --slurp repos/mg-chao/snow-apps/issues/61/comments*') {
+if ($call -like 'api --paginate --slurp repos/mg-chao/clip-apps/issues/61/comments*') {
     '[[]]'
     exit 0
 }
-if ($call -like 'api --paginate --slurp repos/mg-chao/snow-apps/issues/1021/comments*') {
-    $body = Get-Content -LiteralPath $env:SNOW_TEST_EXPECTED_REPLY -Raw -Encoding utf8
+if ($call -like 'api --paginate --slurp repos/mg-chao/clip-apps/issues/1021/comments*') {
+    $body = Get-Content -LiteralPath $env:CLIP_TEST_EXPECTED_REPLY -Raw -Encoding utf8
     '[[' + (ConvertTo-Json -InputObject @{ body = $body } -Compress) + ']]'
     exit 0
 }
 if ($GhArguments[0] -eq 'issue' -and $GhArguments[1] -eq 'comment') {
-    Copy-Item -LiteralPath $GhArguments[6] -Destination $env:SNOW_TEST_POSTED_REPLY
+    Copy-Item -LiteralPath $GhArguments[6] -Destination $env:CLIP_TEST_POSTED_REPLY
     exit 0
 }
 if ($GhArguments[0] -eq 'issue' -and $GhArguments[1] -eq 'close') { exit 0 }
@@ -59,9 +59,9 @@ throw "Unexpected GitHub CLI call: $call"
 try {
     [IO.File]::WriteAllText($mockGh, $mockSource, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($expectedReplyFile, $expectedReply, [Text.UTF8Encoding]::new($false))
-    $env:SNOW_TEST_GH_LOG = $logFile
-    $env:SNOW_TEST_EXPECTED_REPLY = $expectedReplyFile
-    $env:SNOW_TEST_POSTED_REPLY = $postedReplyFile
+    $env:CLIP_TEST_GH_LOG = $logFile
+    $env:CLIP_TEST_EXPECTED_REPLY = $expectedReplyFile
+    $env:CLIP_TEST_POSTED_REPLY = $postedReplyFile
     $script = Join-Path $PSScriptRoot 'close-legacy-issues.ps1'
 
     $preview = & $script -GhExecutable $mockGh | Out-String
@@ -87,7 +87,7 @@ try {
     Assert ($postedReply -ceq $expectedReply) 'The posted bilingual reply differs from the requested text.'
     Write-Output 'Legacy issue script test passed.'
 } finally {
-    Remove-Item Env:SNOW_TEST_GH_LOG, Env:SNOW_TEST_EXPECTED_REPLY, Env:SNOW_TEST_POSTED_REPLY -ErrorAction SilentlyContinue
+    Remove-Item Env:CLIP_TEST_GH_LOG, Env:CLIP_TEST_EXPECTED_REPLY, Env:CLIP_TEST_POSTED_REPLY -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $mockGh, $logFile, $expectedReplyFile, $postedReplyFile -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $testDirectory -Force -ErrorAction SilentlyContinue
 }

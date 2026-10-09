@@ -148,7 +148,7 @@ Use `cacheStatistics()` for exact entry/byte/hit/miss/eviction counters. `trimCa
 renderer (or `trimIconCache(target)` for the shared default renderer; a negative target trims back
 to the configured limit) reclaims whole least-recently-used entries and returns an
 `IconCacheReclaimReport` with before/after bytes, entry counts, reclaimed bytes, and the new
-generation. `clearCache()` is the hard reset. Snow Shot trims the shared cache to 512 KiB when the
+generation. `clearCache()` is the hard reset. Clip trims the shared cache to 512 KiB when the
 application is hidden or capture resources become idle.
 
 The renderer coalesces concurrent requests for the same cache key. `clearCache()`, trim operations,

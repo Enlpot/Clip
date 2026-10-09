@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#ifndef SNOW_TEST_SUPPORT_MEMORY_SNAPSHOT_H
-#define SNOW_TEST_SUPPORT_MEMORY_SNAPSHOT_H
+#ifndef CLIP_TEST_SUPPORT_MEMORY_SNAPSHOT_H
+#define CLIP_TEST_SUPPORT_MEMORY_SNAPSHOT_H
 
 #include <cstdint>
 
@@ -19,7 +19,7 @@
 #include <unistd.h>
 #endif
 
-namespace snow::test_support {
+namespace clip::test_support {
 struct MemorySnapshot {
     std::uint64_t residentBytes = 0;
     // macOS physical footprint; Windows private committed bytes. These measure
@@ -62,5 +62,5 @@ inline MemorySnapshot memorySnapshot() {
 #endif
     return snapshot;
 }
-} // namespace snow::test_support
+} // namespace clip::test_support
 #endif

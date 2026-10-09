@@ -5,10 +5,10 @@ if(VCPKG_TARGET_IS_OSX AND
     # this in LTO's override-stack-alignment module flag, which conflicts with
     # the app's 16-byte ABI when LLVM merges the modules. Emit native x264
     # objects while preserving its stack alignment, assembly, and optimization.
-    foreach(_snow_x264_flags IN ITEMS
+    foreach(_clip_x264_flags IN ITEMS
         VCPKG_C_FLAGS VCPKG_CXX_FLAGS VCPKG_LINKER_FLAGS
         VCPKG_C_FLAGS_DEBUG VCPKG_CXX_FLAGS_DEBUG VCPKG_LINKER_FLAGS_DEBUG
         VCPKG_C_FLAGS_RELEASE VCPKG_CXX_FLAGS_RELEASE VCPKG_LINKER_FLAGS_RELEASE)
-        string(APPEND ${_snow_x264_flags} " -fno-lto")
+        string(APPEND ${_clip_x264_flags} " -fno-lto")
     endforeach()
 endif()

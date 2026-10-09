@@ -54,8 +54,8 @@
 #include <utility>
 #include <vector>
 
-#include <snow/image/io.h>
-#include <snow/image/service.h>
+#include <clip/image/io.h>
+#include <clip/image/service.h>
 
 namespace adqt::widgets {
 
@@ -133,7 +133,7 @@ struct DecodedImage {
   QString errorString;
 };
 
-QString snowStatusText(const snow::image::Status& status) {
+QString clipStatusText(const clip::image::Status& status) {
   QString message = QString::fromStdString(status.message).trimmed();
   if (message.isEmpty()) {
     message = QStringLiteral("Failed to decode image data");
@@ -195,20 +195,20 @@ QString dataUrlNameHint(const QUrl& source) {
   return QStringLiteral("image.bin");
 }
 
-snow::image::Result<snow::image::Input> makeSnowInput(const QUrl& source,
+clip::image::Result<clip::image::Input> makeClipInput(const QUrl& source,
                                                       const QByteArray& suppliedBytes) {
   if (!suppliedBytes.isEmpty()) {
-    return snow::image::memory_input(sharedBytes(suppliedBytes),
+    return clip::image::memory_input(sharedBytes(suppliedBytes),
                                      sourceNameHint(source).toUtf8().toStdString());
   }
 
   QByteArray dataBytes;
   if (source.scheme().compare(QStringLiteral("data"), Qt::CaseInsensitive) == 0) {
     if (!decodeDataUrl(source, &dataBytes)) {
-      return snow::image::Status::error(snow::image::ErrorCode::invalid_argument,
+      return clip::image::Status::error(clip::image::ErrorCode::invalid_argument,
                                         "The data URL payload is invalid.");
     }
-    return snow::image::memory_input(sharedBytes(dataBytes),
+    return clip::image::memory_input(sharedBytes(dataBytes),
                                      dataUrlNameHint(source).toUtf8().toStdString());
   }
 
@@ -220,20 +220,20 @@ snow::image::Result<snow::image::Input> makeSnowInput(const QUrl& source,
             : source.toString();
     QFile resource(resourcePath);
     if (!resource.open(QIODevice::ReadOnly)) {
-      return snow::image::Status::error(snow::image::ErrorCode::io_error,
+      return clip::image::Status::error(clip::image::ErrorCode::io_error,
                                         "Could not open the image resource.");
     }
     const QByteArray resourceBytes = resource.readAll();
     if (resourceBytes.isEmpty()) {
-      return snow::image::Status::error(snow::image::ErrorCode::io_error,
+      return clip::image::Status::error(clip::image::ErrorCode::io_error,
                                         "The image resource is empty.");
     }
-    return snow::image::memory_input(sharedBytes(resourceBytes),
+    return clip::image::memory_input(sharedBytes(resourceBytes),
                                      sourceNameHint(source).toUtf8().toStdString());
   }
 
   if (isRemoteSource(source)) {
-    return snow::image::Status::error(snow::image::ErrorCode::invalid_argument,
+    return clip::image::Status::error(clip::image::ErrorCode::invalid_argument,
                                       "A remote image response was not provided.");
   }
 
@@ -245,17 +245,17 @@ snow::image::Result<snow::image::Input> makeSnowInput(const QUrl& source,
   } else if (source.scheme().isEmpty()) {
     path = sourceToString(source);
   } else {
-    return snow::image::Status::error(snow::image::ErrorCode::invalid_argument,
+    return clip::image::Status::error(clip::image::ErrorCode::invalid_argument,
                                       "The image URL scheme is unsupported.");
   }
-  return snow::image::file_input(std::filesystem::path(path.toStdU16String()));
+  return clip::image::file_input(std::filesystem::path(path.toStdU16String()));
 }
 
-QImage imageFromSnow(const snow::image::Image& source, QString* error) {
+QImage imageFromClip(const clip::image::Image& source, QString* error) {
   if (source.width() == 0 || source.height() == 0 ||
       source.width() > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
       source.height() > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
-      source.format() != snow::image::kRgba8) {
+      source.format() != clip::image::kRgba8) {
     if (error) {
       *error = QStringLiteral("The decoded image format or dimensions are not supported by Qt.");
     }
@@ -289,15 +289,15 @@ QImage imageFromSnow(const snow::image::Image& source, QString* error) {
 DecodedImage decodeImage(const QUrl& source, const QByteArray& suppliedBytes,
                          const AdImageLoadOptions& options) {
   try {
-    const auto input = makeSnowInput(source, suppliedBytes);
+    const auto input = makeClipInput(source, suppliedBytes);
     if (!input) {
-      return {QImage(), QSize(), snowStatusText(input.error())};
+      return {QImage(), QSize(), clipStatusText(input.error())};
     }
 
-    snow::image::Service service;
-    snow::image::DecodeOptions decodeOptions;
-    decodeOptions.orientation = snow::image::OrientationPolicy::apply;
-    decodeOptions.output_format = snow::image::kRgba8;
+    clip::image::Service service;
+    clip::image::DecodeOptions decodeOptions;
+    decodeOptions.orientation = clip::image::OrientationPolicy::apply;
+    decodeOptions.output_format = clip::image::kRgba8;
     // AdImage exposes a single raster, so animated and multi-image documents decode only
     // their first frame and unused frames are never materialized.
     decodeOptions.frame_index = 0;
@@ -306,7 +306,7 @@ DecodedImage decodeImage(const QUrl& source, const QByteArray& suppliedBytes,
     if (options.targetPixelSize.isValid() && !options.targetPixelSize.isEmpty()) {
       const auto inspected = service.inspect(input.value(), decodeOptions);
       if (!inspected) {
-        return {QImage(), QSize(), snowStatusText(inspected.error())};
+        return {QImage(), QSize(), clipStatusText(inspected.error())};
       }
       if (inspected.value().canvas_width >
               static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
@@ -325,7 +325,7 @@ DecodedImage decodeImage(const QUrl& source, const QByteArray& suppliedBytes,
 
     const auto decoded = service.decode(input.value(), decodeOptions);
     if (!decoded) {
-      return {QImage(), QSize(), snowStatusText(decoded.error())};
+      return {QImage(), QSize(), clipStatusText(decoded.error())};
     }
     if (decoded.value().frames.empty()) {
       return {QImage(), naturalSize,
@@ -341,7 +341,7 @@ DecodedImage decodeImage(const QUrl& source, const QByteArray& suppliedBytes,
     }
 
     QString conversionError;
-    QImage image = imageFromSnow(decoded.value().frames.front().image, &conversionError);
+    QImage image = imageFromClip(decoded.value().frames.front().image, &conversionError);
     if (image.isNull()) {
       return {QImage(), naturalSize, conversionError};
     }

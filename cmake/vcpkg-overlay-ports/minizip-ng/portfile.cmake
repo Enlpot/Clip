@@ -1,6 +1,6 @@
 if(VCPKG_TARGET_IS_WINDOWS)
     vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
-    # Snow Shot links the static Qt kit and therefore uses the static CRT even
+    # Clip links the static Qt kit and therefore uses the static CRT even
     # in its debug preset. minizip is linked into that executable directly.
     set(VCPKG_CRT_LINKAGE static)
 endif()

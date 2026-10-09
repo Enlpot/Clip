@@ -1,19 +1,19 @@
-# Building Snow Shot on macOS
+# Building Clip on macOS
 
 The app presets target macOS 15 or newer, with separate Apple Silicon (`arm64`)
 and Intel (`x64`) builds. Each build uses one architecture throughout CMake,
 vcpkg and Cargo; universal builds are not supported by these presets.
 
-## Snow Shot Mini
+## Clip Mini
 
-Apple Silicon presets build both `snow_shot` and `snow_shot_mini` from the same
-configuration. Intel presets build Snow Shot only; Snow Shot Mini requires
-`arm64` on macOS. `SNOW_APPS_BUILD_SNOW_SHOT_MINI` controls the additional target
+Apple Silicon presets build both `clip_shot` and `clip_shot_mini` from the same
+configuration. Intel presets build Clip only; Clip Mini requires
+`arm64` on macOS. `CLIP_APPS_BUILD_CLIP_SHOT_MINI` controls the additional target
 and defaults to `ON` in the Apple Silicon presets. Use an explicit `--target`
 to build one edition, or configure with this option `OFF` for a full-only build.
 The build wrappers select the enabled editions automatically. Paired CMake build
 presets retain both target names, so a direct build with Mini disabled must use
-`cmake --build --preset build-<preset> --target snow_shot`. Apple Silicon release
+`cmake --build --preset build-<preset> --target clip_shot`. Apple Silicon release
 packaging requires both editions and rejects a Mini-disabled cache.
 
 Mini removes QR, table, Markdown, HTML, LaTeX, translation, Extended Features,
@@ -24,54 +24,54 @@ the default Small V6 model; Mini downloads the selected model on first use and
 reuses its verified cache afterward.
 
 ```sh
-scripts/build.sh snow-shot-macos-arm64-debug --target snow_shot_mini
-scripts/run-snow-shot.sh snow-shot-macos-arm64-debug --edition mini
-scripts/package-snow-shot.sh snow-shot-macos-arm64-release
-bash install-snow-shot-macos.sh --edition mini --lang en
+scripts/build.sh clip-shot-macos-arm64-debug --target clip_shot_mini
+scripts/run-clip-shot.sh clip-shot-macos-arm64-debug --edition mini
+scripts/package-clip-shot.sh clip-shot-macos-arm64-release
+bash install-clip-shot-macos.sh --edition mini --lang en
 ```
 
 The Apple Silicon package command produces both
-`snow-shot-<version>-macos-arm64.dmg` and
-`snow-shot-mini-<version>-macos-arm64.dmg`, each with a `.sha256` sidecar.
-Mini installs as `Snow Shot Mini.app`, with executable `snow_shot_mini` and
-bundle ID `com.snowshot.snow_shot_mini`. Its settings, launch-at-login entry,
+`clip-shot-<version>-macos-arm64.dmg` and
+`clip-shot-mini-<version>-macos-arm64.dmg`, each with a `.sha256` sidecar.
+Mini installs as `Clip Mini.app`, with executable `clip_shot_mini` and
+bundle ID `com.clipshot.clip_shot_mini`. Its settings, launch-at-login entry,
 MCP discovery, and installer state use separate product identities. For direct
-staging, use `cmake --install build/<preset> --component SnowShotMini --prefix
+staging, use `cmake --install build/<preset> --component ClipShotMini --prefix
 /path/to/staging`. Both editions share a version and release tag.
 
 ## Homebrew installation
 
-The project tap is `mg-chao/homebrew-tap`. Stable releases update `snow-shot`;
-beta releases update `snow-shot@beta`, independently of the stable channel.
-Tags accept `v<version>` with an optional `_snow-shot` suffix; beta versions use
+The project tap is `mg-chao/homebrew-tap`. Stable releases update `clip-shot`;
+beta releases update `clip-shot@beta`, independently of the stable channel.
+Tags accept `v<version>` with an optional `_clip-shot` suffix; beta versions use
 `-beta` or `-beta.<number>`. Other prerelease versions are not supported.
 Homebrew installation supports Apple Silicon and Intel on macOS 15 or later
 when the matching release includes that architecture. Historical releases may
-contain only Apple Silicon packages. Snow Shot Mini remains Apple Silicon-only.
+contain only Apple Silicon packages. Clip Mini remains Apple Silicon-only.
 Keep Homebrew current with `brew update`.
 
 ```sh
 brew update
-brew install --cask mg-chao/tap/snow-shot
-brew upgrade --cask snow-shot
-brew uninstall --cask snow-shot
+brew install --cask mg-chao/tap/clip-shot
+brew upgrade --cask clip-shot
+brew uninstall --cask clip-shot
 ```
 
-For beta releases, use `brew install --cask mg-chao/tap/snow-shot@beta` and
-`brew upgrade --cask snow-shot@beta`. Quit the app and uninstall the current cask
-before switching channels because both install `Snow Shot.app`. User data and
+For beta releases, use `brew install --cask mg-chao/tap/clip-shot@beta` and
+`brew upgrade --cask clip-shot@beta`. Quit the app and uninstall the current cask
+before switching channels because both install `Clip.app`. User data and
 the signing identity are retained. Each release needs its versioned DMG and a
 GitHub SHA-256 digest or matching `.sha256` asset. When both are present, both
 must match; the workflow packages only verified release assets.
 
-If Homebrew says `Casks/snow-shot.rb` does not exist and suggests only
-`snow-shot@beta`, its local tap checkout has not received the stable cask yet.
+If Homebrew says `Casks/clip-shot.rb` does not exist and suggests only
+`clip-shot@beta`, its local tap checkout has not received the stable cask yet.
 Refresh the tap before retrying:
 
 ```sh
 brew update
-brew info --cask mg-chao/tap/snow-shot
-brew install --cask mg-chao/tap/snow-shot
+brew info --cask mg-chao/tap/clip-shot
+brew install --cask mg-chao/tap/clip-shot
 ```
 
 Homebrew may defer automatic updates, and `HOMEBREW_NO_AUTO_UPDATE` disables
@@ -82,10 +82,10 @@ checkout and its remote before changing or removing it:
 tap_dir="$(brew --repository mg-chao/tap)"
 git -C "$tap_dir" status --short --branch
 git -C "$tap_dir" remote -v
-ls "$tap_dir/Casks/snow-shot.rb"
+ls "$tap_dir/Casks/clip-shot.rb"
 ```
 
-Finish recordings and quit Snow Shot before upgrading or uninstalling. Homebrew
+Finish recordings and quit Clip before upgrading or uninstalling. Homebrew
 owns the final application placement and removal; the cask's preflight verifies
 and locally signs a staged copy. The archive includes the DMG, its checksum, and
 the installer from the matching release source. Its SHA-256 is pinned in the tap.
@@ -94,7 +94,7 @@ latest-package URL.
 
 The first installation may request login Keychain access or code-signing trust.
 The same local identity and designated requirement used by the standalone
-installer are retained under `~/Library/Application Support/Snow Shot/Installer`.
+installer are retained under `~/Library/Application Support/Clip/Installer`.
 Use the same installing account for upgrades. Uninstall does not delete the
 identity, installer state, settings, or captures; there is no destructive `zap`
 rule. Local signing is not Developer ID notarization and does not guarantee that
@@ -102,8 +102,8 @@ macOS will retain Screen Recording or Accessibility consent.
 
 ### Migrating an existing installation
 
-Quit Snow Shot and move `/Applications/Snow Shot.app` (or the legacy
-`/Applications/snow_shot.app`) to a backup folder outside Applications before
+Quit Clip and move `/Applications/Clip.app` (or the legacy
+`/Applications/clip_shot.app`) to a backup folder outside Applications before
 running `brew install`. Keep the installer state directory and original Keychain
 identity. Do not use `--force` to overwrite an existing app. Confirm that the new
 copy launches and can capture before deleting the backup. If installation fails,
@@ -113,7 +113,7 @@ A custom destination is supported through Homebrew's standard option:
 
 ```sh
 mkdir -p "$HOME/Applications"
-brew install --cask --appdir="$HOME/Applications" mg-chao/tap/snow-shot
+brew install --cask --appdir="$HOME/Applications" mg-chao/tap/clip-shot
 ```
 
 If signing fails, follow the identity recovery instructions below; do not delete
@@ -124,7 +124,7 @@ previous app backup and original identity until the installation is working.
 
 ### Installer staging interface
 
-`install-snow-shot-macos.sh --dmg PATH --prepare-app /absolute/New.app` validates
+`install-clip-shot-macos.sh --dmg PATH --prepare-app /absolute/New.app` validates
 and signs a local DMG into a fresh `.app` directory. The adjacent `PATH.sha256`
 is mandatory. The destination's parent must already exist, and an existing output
 or symlink is rejected. This mode saves the validated signing requirement but
@@ -135,9 +135,9 @@ when `--prepare-app` is absent.
 Focused checks:
 
 ```sh
-python3 scripts/test-snow-shot-homebrew.py
+python3 scripts/test-clip-shot-homebrew.py
 python3 scripts/test-macos-installer.py
-bash -n scripts/install-snow-shot-macos.sh
+bash -n scripts/install-clip-shot-macos.sh
 ```
 
 Native release qualification uses a disposable macOS desktop account with
@@ -153,19 +153,19 @@ checks and requires real release assets and interactive Keychain/privacy consent
 
 The standalone installer supports macOS 15+, Apple Silicon (including a terminal
 running under Rosetta), and Intel. It uses only macOS system tools. After the
-release assets are published, choose a Snow Shot release tag and run its installer
+release assets are published, choose a Clip release tag and run its installer
 asset as your normal desktop user:
 
 ```sh
 curl --fail --location --proto '=https' --proto-redir '=https' \
-  --output install-snow-shot-macos.sh \
-  "https://github.com/mg-chao/snow-apps/releases/download/v<version>_snow-shot/install-snow-shot-macos.sh"
-bash install-snow-shot-macos.sh --lang en
+  --output install-clip-shot-macos.sh \
+  "https://github.com/mg-chao/clip-apps/releases/download/v<version>_clip-shot/install-clip-shot-macos.sh"
+bash install-clip-shot-macos.sh --lang en
 ```
 
 The installer verifies the downloaded package, creates or reuses a local signing
-identity, gracefully closes Snow Shot, and installs `/Applications/Snow Shot.app`.
-Existing `/Applications/snow_shot.app` installations migrate to the new name,
+identity, gracefully closes Clip, and installs `/Applications/Clip.app`.
+Existing `/Applications/clip_shot.app` installations migrate to the new name,
 with the old path restored if installation fails.
 It asks for administrator access only when installation requires it. Do not run
 the whole command as root; an invocation through `sudo` hands execution back to
@@ -187,11 +187,11 @@ the installed application.
 命令下载安装脚本后，以日常桌面用户运行：
 
 ```sh
-bash install-snow-shot-macos.sh --lang zh-CN
+bash install-clip-shot-macos.sh --lang zh-CN
 ```
 
 脚本会自动识别芯片架构，并行检查 GitHub 和 Gitee Releases，优先使用先完成验证的渠道，
-验证后安装到 `/Applications/Snow Shot.app`（已有旧路径安装会迁移到新名称）。仅在替换应用需要管理员权限时请求密码，
+验证后安装到 `/Applications/Clip.app`（已有旧路径安装会迁移到新名称）。仅在替换应用需要管理员权限时请求密码，
 无需在命令前添加 `sudo`。首次创建签名身份时，系统可能要求确认钥匙串访问或代码签名信任。
 首次安装或从旧签名迁移后，仍需按系统提示授予屏幕录制和辅助功能权限。
 以后请继续使用此脚本更新，以复用本地签名身份；跨 macOS 版本的权限保留尚未完成实机验证，
@@ -206,12 +206,12 @@ bash install-snow-shot-macos.sh --lang zh-CN
 使用上面的 `curl` 命令下載指令碼後，以日常桌面使用者執行：
 
 ```sh
-bash install-snow-shot-macos.sh --lang zh-TW
+bash install-clip-shot-macos.sh --lang zh-TW
 ```
 
 不需要 Homebrew、Python、Xcode 或 Apple 開發者會員。指令碼會自動辨識晶片架構，
 並行檢查 GitHub 與 Gitee Releases，優先使用先完成驗證的管道，驗證後安裝到
-`/Applications/Snow Shot.app`（既有舊路徑安裝會遷移至新名稱）。不必加上 `sudo`；需要管理員權限時才會要求密碼。
+`/Applications/Clip.app`（既有舊路徑安裝會遷移至新名稱）。不必加上 `sudo`；需要管理員權限時才會要求密碼。
 首次建立簽署身分時，系統可能要求確認鑰匙圈存取或程式碼簽署信任。首次安裝或從舊簽署遷移後，
 請依系統提示授予螢幕錄製和輔助使用權限。之後請繼續使用此指令碼更新，以保留本機簽署身分；
 跨 macOS 版本的權限保留尚未完成實機驗證，系統仍可能要求授權。
@@ -221,15 +221,15 @@ bash install-snow-shot-macos.sh --lang zh-TW
 
 ### Installer publishing contract
 
-The local publisher includes `install-snow-shot-macos.sh`, a versioned DMG,
+The local publisher includes `install-clip-shot-macos.sh`, a versioned DMG,
 and its matching `.sha256` asset in the GitHub release when macOS packaging
 is configured. The Gitee release workflow mirrors these exact bytes after
 GitHub publication.
 
 | Architecture | Release asset |
 | --- | --- |
-| Apple Silicon | `snow-shot-<version>-macos-arm64.dmg` |
-| Intel | `snow-shot-<version>-macos-x86_64.dmg` |
+| Apple Silicon | `clip-shot-<version>-macos-arm64.dmg` |
+| Intel | `clip-shot-<version>-macos-x86_64.dmg` |
 
 Append `.sha256` for each checksum asset. A sidecar has exactly one nonempty
 line beginning with the 64-character SHA-256 digest. The standalone installer
@@ -240,23 +240,23 @@ names and release download URLs. The first ready channel provides the package;
 if download or validation fails, the installer tries the same version on the
 other channel. The checksum and DMG come from one channel over HTTPS.
 
-The DMG contains `Snow Shot.app` at its root (the installer also accepts legacy
-`snow_shot.app` packages), with bundle ID
-`com.snowshot.snow_shot`, executable `snow_shot`, a minimum macOS version, and a
+The DMG contains `Clip.app` at its root (the installer also accepts legacy
+`clip_shot.app` packages), with bundle ID
+`com.clipshot.clip_shot`, executable `clip_shot`, a minimum macOS version, and a
 valid bundle signature (ad-hoc is supported). Publishing these assets and this
 installer remains a separate release operation. Nothing is uploaded by the script.
 
 ### DMG installation window
 
-The release DMG opens a branded Finder window with Snow Shot on the left, an
+The release DMG opens a branded Finder window with Clip on the left, an
 Applications shortcut on the right, and drag-to-install instructions in English,
 Simplified Chinese, and Traditional Chinese. Finder backgrounds are static images,
 so all three languages appear together rather than selecting the packaging
 machine’s language. Native privacy prompts use macOS language selection. Drag the
-app to Applications, eject the image, and open Snow Shot from Applications.
+app to Applications, eject the image, and open Clip from Applications.
 The bundle includes its icon, full release version, copyright, Productivity
 category, supported languages, and localized macOS privacy prompts. The internal
-executable and settings identifier remain `snow_shot`.
+executable and settings identifier remain `clip_shot`.
 
 Packaging uses Finder through AppleScript to save the disk image layout. Run it
 in a logged-in macOS desktop session; macOS may request permission for the
@@ -274,7 +274,7 @@ normal Keychain authorization. Temporary private-key files are removed after
 import or on failure. macOS requires a nonempty PKCS#12 import passphrase; the
 installer generates a one-time random value, which the `security` CLI briefly
 exposes as a process argument during import. State is stored under
-`~/Library/Application Support/Snow Shot/Installer`; retain this directory and
+`~/Library/Application Support/Clip/Installer`; retain this directory and
 the original Keychain identity across reinstalls. The installer signs only the
 outer bundle/main executable, preserving embedded helper signatures and the OCR
 manifest. It checks the saved designated requirement before replacing the app.
@@ -283,7 +283,7 @@ If signing fails, unlock the login Keychain and retry. If the saved identity is
 missing or expired, restore the original certificate **and private key** from
 your backup; the installer deliberately does not create a replacement. An
 interrupted first-time identity creation leaves a `creating` marker. Inspect
-Keychain Access for the `Snow Shot Local Installer ...` identity: restore its
+Keychain Access for the `Clip Local Installer ...` identity: restore its
 user code-signing trust if needed, then save its 40-character SHA-1 fingerprint
 (without colons) as the `identity` file in the state directory and remove the
 `creating` marker. Do not change an existing identity fingerprint to another
@@ -314,7 +314,7 @@ of its quarantine attribute; Gatekeeper and TCC remain enabled.
 Run only the focused installer checks for changes to this flow:
 
 ```sh
-/bin/bash -n scripts/install-snow-shot-macos.sh
+/bin/bash -n scripts/install-clip-shot-macos.sh
 python3 scripts/test-macos-installer.py
 ```
 
@@ -348,7 +348,7 @@ Set `Qt6_DIR` if Qt is not at `$HOME/Qt/6.12.0/macos/lib/cmake/Qt6`:
 export Qt6_DIR=/path/to/Qt/6.12.0/macos/lib/cmake/Qt6
 scripts/bootstrap-macos.sh
 scripts/build.sh
-scripts/run-snow-shot.sh
+scripts/run-clip-shot.sh
 ```
 
 Bootstrap checks the host tools, installs the matching Rust target, bootstraps
@@ -357,7 +357,7 @@ manifest dependency set. `build.sh` validates that setup before configuring and
 automatically refreshes a stale CMake cache; pass `--skip-bootstrap` only after
 provisioning the selected preset. `--clean` removes that preset's build tree,
 matching the Windows wrapper, and `--parallel N` controls build concurrency.
-The run script rebuilds the `snow_shot` target before launching by default; pass
+The run script rebuilds the `clip_shot` target before launching by default; pass
 `--no-build` to launch an existing build or `--clean` to request a clean rebuild.
 CMake installs native dependencies from the manifest. The first run builds
 FFmpeg, image codecs, OpenCV, and CPU ONNX Runtime and can take considerable time.
@@ -370,27 +370,27 @@ installs the static libpng/zlib packages used by Qt as well as the application
 dependency closure:
 
 ```sh
-scripts/bootstrap-macos.sh snow-shot-macos-arm64-release --skip-qt-validation
+scripts/bootstrap-macos.sh clip-shot-macos-arm64-release --skip-qt-validation
 scripts/build-static-qt.sh \
   --arch arm64 \
   --install-prefix "$HOME/Qt/6.12.0/macos-static-arm64" \
   --parallel 8
-export SNOW_QT_STATIC_DIR="$HOME/Qt/6.12.0/macos-static-arm64/lib/cmake/Qt6"
-scripts/build.sh snow-shot-macos-arm64-release --parallel 8
+export CLIP_QT_STATIC_DIR="$HOME/Qt/6.12.0/macos-static-arm64/lib/cmake/Qt6"
+scripts/build.sh clip-shot-macos-arm64-release --parallel 8
 ```
 
-`SNOW_QT_STATIC_DIR` takes precedence over `Qt6_DIR` for release and fast builds.
+`CLIP_QT_STATIC_DIR` takes precedence over `Qt6_DIR` for release and fast builds.
 Keep `Qt6_DIR` pointed at the shared kit for Debug and performance builds.
 
 For an Intel build on either Intel or Apple Silicon, provision the x64 static
 dependencies and Qt kit separately:
 
 ```sh
-scripts/bootstrap-macos.sh snow-shot-macos-x64-release --skip-qt-validation
+scripts/bootstrap-macos.sh clip-shot-macos-x64-release --skip-qt-validation
 scripts/build-static-qt.sh --arch x64 \
   --install-prefix "$HOME/Qt/6.12.0/macos-static-x64" --parallel 4
-export SNOW_QT_STATIC_DIR="$HOME/Qt/6.12.0/macos-static-x64/lib/cmake/Qt6"
-scripts/package-snow-shot.sh snow-shot-macos-x64-release --parallel 4
+export CLIP_QT_STATIC_DIR="$HOME/Qt/6.12.0/macos-static-x64/lib/cmake/Qt6"
+scripts/package-clip-shot.sh clip-shot-macos-x64-release --parallel 4
 ```
 
 Apple Silicon x64 builds require Rosetta because Qt build tools and the OCR
@@ -400,7 +400,7 @@ if it is missing, install it with
 disables Qt's implicit cross-compilation mode for this direction and builds its
 own x64 tools. Its fresh configure avoids reusing a failed cross-compilation cache.
 Native Intel builds do not require Rosetta. The resulting package is
-`snow-shot-<version>-macos-x86_64.dmg` with an adjacent `.sha256` file; Mini is
+`clip-shot-<version>-macos-x86_64.dmg` with an adjacent `.sha256` file; Mini is
 not built for Intel.
 
 The Intel static codec build keeps x264's assembly and 64-byte stack alignment,
@@ -408,7 +408,7 @@ but emits native x264 objects to avoid conflicting LLVM LTO module flags. Qt,
 the application, and the other dependencies retain their LTO settings.
 
 The static Qt script pins
-the architecture and Qt's supported 14.4 library deployment target (the Snow Shot
+the architecture and Qt's supported 14.4 library deployment target (the Clip
 app still targets macOS 15.0), enables LTO and system libpng/zlib, installs Qt
 source-license metadata, disables the macOS-27-only `dup3` path for compatibility
 with the supported deployment range, and records an audited build stamp. It
@@ -433,7 +433,7 @@ an older kit when refreshing the audited schema.
 
 ## Presets and targeted checks
 
-Names follow `snow-shot-macos-{arm64|x64}-{debug|performance|release|fast}`.
+Names follow `clip-shot-macos-{arm64|x64}-{debug|performance|release|fast}`.
 The default architecture follows the current shell's `uname -m` (including
 Rosetta); pass a preset explicitly to select another architecture.
 
@@ -445,14 +445,14 @@ Rosetta); pass a preset explicitly to select another architecture.
 | fast | Static Release without app C++ LTO, Cargo release-fast | Disabled | Disabled | Disabled |
 
 ```sh
-scripts/build.sh snow-shot-macos-arm64-debug --target snow-shot-ocr-layout-tests
-ctest --preset test-snow-shot-macos-arm64-debug -R '^snow-shot-ocr-layout-tests$'
-scripts/build.sh snow-shot-macos-arm64-fast --clean
-scripts/build.sh snow-shot-macos-x64-release
-scripts/run-snow-shot.sh snow-shot-macos-arm64-debug -- --help
+scripts/build.sh clip-shot-macos-arm64-debug --target clip-shot-ocr-layout-tests
+ctest --preset test-clip-shot-macos-arm64-debug -R '^clip-shot-ocr-layout-tests$'
+scripts/build.sh clip-shot-macos-arm64-fast --clean
+scripts/build.sh clip-shot-macos-x64-release
+scripts/run-clip-shot.sh clip-shot-macos-arm64-debug -- --help
 python3 scripts/test-macos-build-support.py
 # Optional native bundle/DMG fixture after provisioning Qt and FFmpeg:
-SNOW_TEST_MACOS_BUNDLE=1 python3 scripts/test-macos-build-support.py MacOSBundle
+CLIP_TEST_MACOS_BUNDLE=1 python3 scripts/test-macos-build-support.py MacOSBundle
 ```
 
 The native deployment fixture tests the packaging rules with a small Qt executable
@@ -463,20 +463,20 @@ To validate a production static kit without QtTest or unrelated UI tests, use a
 separate tree with only the shared OCR and crash diagnostics tests enabled:
 
 ```sh
-cmake --preset snow-shot-macos-x64-release \
-  -B build/snow-shot-macos-x64-validation \
-  -DQt6_DIR="$SNOW_QT_STATIC_DIR" \
-  -DSNOW_APPS_BUILD_TESTS=OFF -DSNOW_SHOT_BUILD_RUNTIME_TESTS=ON \
-  -DSNOW_APPS_PACKAGE_SNOW_SHOT=OFF
-cmake --build build/snow-shot-macos-x64-validation --parallel 4 \
-  --target snow-shot-ocr-assets-tests snow-shot-ocr-recognition-service-tests \
-  snow-shot-diagnostics-crash-tests
-ctest --test-dir build/snow-shot-macos-x64-validation --output-on-failure \
+cmake --preset clip-shot-macos-x64-release \
+  -B build/clip-shot-macos-x64-validation \
+  -DQt6_DIR="$CLIP_QT_STATIC_DIR" \
+  -DCLIP_APPS_BUILD_TESTS=OFF -DCLIP_SHOT_BUILD_RUNTIME_TESTS=ON \
+  -DCLIP_APPS_PACKAGE_CLIP_SHOT=OFF
+cmake --build build/clip-shot-macos-x64-validation --parallel 4 \
+  --target clip-shot-ocr-assets-tests clip-shot-ocr-recognition-service-tests \
+  clip-shot-diagnostics-crash-tests
+ctest --test-dir build/clip-shot-macos-x64-validation --output-on-failure \
   --no-tests=error \
-  -R '^(snow-shot-ocr-(assets|managed-runtime|cpu-recognition-service|process-lifecycle|storage-relocation)-tests|snow-shot-diagnostics-crash-tests)$'
+  -R '^(clip-shot-ocr-(assets|managed-runtime|cpu-recognition-service|process-lifecycle|storage-relocation)-tests|clip-shot-diagnostics-crash-tests)$'
 ```
 
-Set `SNOW_QT_STATIC_DIR` to the audited x64 kit first and put the build tools on
+Set `CLIP_QT_STATIC_DIR` to the audited x64 kit first and put the build tools on
 PATH, as for direct CMake use. The x64 test executables run through Rosetta on
 Apple Silicon; passing them does not qualify native Intel hardware. The focused
 option defaults to `OFF` and is independent of the general test option.
@@ -486,7 +486,7 @@ documented that Rosetta 2 crash collection was unsupported in December
 2021](https://groups.google.com/a/chromium.org/g/crashpad-dev/c/kJSzcSaqqoY).
 In the current x64 validation on Apple Silicon with macOS 27.0.1, Crashpad startup
 succeeded but access and abort fixtures produced no minidump; the unchanged
-`snow-shot-diagnostics-crash-tests` failed its one-dump assertion. The same
+`clip-shot-diagnostics-crash-tests` failed its one-dump assertion. The same
 failure occurred with CTest explicitly running as x86_64. This is consistent
 with the documented limitation, although the precise current exception handoff
 failure has not been established. Keep this test enabled and run it on native
@@ -497,29 +497,29 @@ Only run tests covering your change. Test presets exclude Windows-only,
 interactive, end-to-end and benchmark labels. Build a benchmark explicitly with
 `--target` using the performance preset. Running an Intel executable on Apple
 Silicon requires Rosetta. `build.sh` defaults to the application target; use
-`--target snow-all` only when all enabled targets are needed. On Apple Silicon,
-the default application build includes both Snow Shot editions.
+`--target clip-all` only when all enabled targets are needed. On Apple Silicon,
+the default application build includes both Clip editions.
 
 For direct CMake use, put the host tools on PATH and supply `-DQt6_DIR=...`:
-`cmake --preset snow-shot-macos-arm64-debug`, then
-`cmake --build --preset build-snow-shot-macos-arm64-debug`.
+`cmake --preset clip-shot-macos-arm64-debug`, then
+`cmake --build --preset build-clip-shot-macos-arm64-debug`.
 The shell wrapper also sets Xcode libclang discovery for Rust bindgen.
 
 Formatting and lint entry points are `scripts/check-cpp-format.sh [--fix]` and
-`scripts/check-rust.sh PACKAGE [-- CARGO_OPTIONS...]`. The `snow-format` and
-`snow-lint` CMake targets use native shell scripts on macOS; `snow-lint` checks
+`scripts/check-rust.sh PACKAGE [-- CARGO_OPTIONS...]`. The `clip-format` and
+`clip-lint` CMake targets use native shell scripts on macOS; `clip-lint` checks
 the CPU OCR helper. Other changed Rust crates should be linted individually.
 
 ## App bundles and packaging
 
 ```sh
-scripts/package-snow-shot.sh snow-shot-macos-arm64-release
+scripts/package-clip-shot.sh clip-shot-macos-arm64-release
 ```
 
 The release script builds and produces edition DMGs plus SHA-256 checksums under the
 preset's build directory. Pass `--parallel N` to control the build or
 `--skip-build` to package an already validated release cache. CPack installs only
-the corresponding Snow Shot component and verifies the bundle signature. Static packages import
+the corresponding Clip component and verifies the bundle signature. Static packages import
 the Cocoa, macOS style, Secure Transport, SVG, and offscreen Qt plugins at link
 time and reject every non-system Mach-O dependency. The bundle includes the OCR
 helper, shutter audio, and project license notices; the full edition also includes
@@ -527,12 +527,12 @@ QR models. Executable-relative
 asset lookup paths remain under `Contents/MacOS`; deployment moves data into
 `Contents/Resources` and creates relative `assets`/`audios` directory links so
 code signing seals them as resources. Static Qt and vcpkg source-license notices
-are included under `Contents/Resources/snow-shot/licenses/third-party`. A plain
-`cmake --install build/<preset> --component SnowShot --prefix /path/to/staging`
+are included under `Contents/Resources/clip-shot/licenses/third-party`. A plain
+`cmake --install build/<preset> --component ClipShot --prefix /path/to/staging`
 performs the same deployment and static-link audit without a DMG. Shared Debug
 and performance deployments continue to put libraries in `Contents/Frameworks`.
 
-Debug and performance presets automatically create `Snow Shot Development (Local)`,
+Debug and performance presets automatically create `Clip Development (Local)`,
 a self-signed code-signing identity in the user's default keychain. The private key
 is restricted to `/usr/bin/codesign`. CMake signs the raw app executable for direct
 IDE debugging, and the run script uses the same certificate for its deployed copy.
@@ -543,7 +543,7 @@ it is not trusted for distribution. Release and fast presets remain ad-hoc signe
 To use another code-signing certificate from the keychain, pass its name or SHA-1:
 
 ```sh
-scripts/run-snow-shot.sh snow-shot-macos-arm64-debug \
+scripts/run-clip-shot.sh clip-shot-macos-arm64-debug \
   --codesign-identity "Your code-signing certificate name or SHA-1"
 ```
 
@@ -561,16 +561,16 @@ and microphone permissions when using the corresponding capabilities.
 ### Accessibility enabled in Settings but reported missing
 
 Ad-hoc signatures identify a particular build by its code hash. After rebuilding,
-TCC can reject the old grant while System Settings still shows Snow Shot enabled.
+TCC can reject the old grant while System Settings still shows Clip enabled.
 The system log then reports `Failed to match existing code requirement` for
-`com.snowshot.snow_shot` and `kTCCServiceAccessibility`.
+`com.clipshot.clip_shot` and `kTCCServiceAccessibility`.
 
-Quit Snow Shot, remove its old entry from System Settings > Privacy & Security >
+Quit Clip, remove its old entry from System Settings > Privacy & Security >
 Accessibility with the minus button, then add and enable the exact deployed app:
-`build/<preset>/run/snow_shot.app`. Restart that copy with
-`scripts/run-snow-shot.sh <preset> --no-build`. This option launches the existing
+`build/<preset>/run/clip_shot.app`. Restart that copy with
+`scripts/run-clip-shot.sh <preset> --no-build`. This option launches the existing
 deployment without rebuilding, reinstalling, or signing it again. The raw app
-under `build/<preset>/snow_shot` has a different signature and is not the copy
+under `build/<preset>/clip_shot` has a different signature and is not the copy
 launched by the run script. Ad-hoc builds may need this recovery again after a
 rebuild; use the run script's local signing identity for subsequent builds to
 avoid that identity change. Switching from ad-hoc to certificate signing requires
@@ -596,13 +596,13 @@ Fatal/terminate/panic paths also write bounded emergency evidence independently
 of the asynchronous log queue. Forced termination and power loss may leave only
 the prior logs and an unexpected-session-termination marker.
 
-Packaging builds `snow-shot-diagnostics-symbols`, placing UUID-matched application
+Packaging builds `clip-shot-diagnostics-symbols`, placing UUID-matched application
 and OCR worker dSYMs under `build/<preset>/symbols/`. Archive these beside each
 release; they are deliberately outside the shipped app. The same target can be
 built manually for development builds. The handler is deployed and signed with
 the other nested executables before the outer bundle is sealed.
 Run the focused diagnostics checks with
-`ctest --test-dir build/<debug-preset> -R '^snow-shot-diagnostics(-crash)?-tests$' --output-on-failure`.
+`ctest --test-dir build/<debug-preset> -R '^clip-shot-diagnostics(-crash)?-tests$' --output-on-failure`.
 The crash fixtures use temporary storage and intentionally crash isolated children.
 The standalone `bootstrap-macos-media.sh` and `build-macos-media.sh` workflows
 remain available for media harness development.
@@ -637,10 +637,10 @@ ad-hoc signing is not Developer ID signing or notarization.
 Focused deterministic checks (the asset executable needs no worker or real models):
 
 ```sh
-scripts/build.sh snow-shot-macos-arm64-performance --target snow-shot-ocr-assets-tests
-ctest --preset test-snow-shot-macos-arm64-performance -R '^snow-shot-ocr-assets-tests$'
-python3 scripts/test-snow-shot-macos-ocr.py
-scripts/check-rust.sh snow-ocr-process -- --no-default-features --features dynamic-onnx-runtime
+scripts/build.sh clip-shot-macos-arm64-performance --target clip-shot-ocr-assets-tests
+ctest --preset test-clip-shot-macos-arm64-performance -R '^clip-shot-ocr-assets-tests$'
+python3 scripts/test-clip-shot-macos-ocr.py
+scripts/check-rust.sh clip-ocr-process -- --no-default-features --features dynamic-onnx-runtime
 scripts/check-rust.sh rapid-ocr-rs -- --no-default-features --features dynamic-onnx-runtime
 ```
 
@@ -648,13 +648,13 @@ Build the recognition test target and fetch all verified models for the opt-in
 native checks. Use only the performance preset when passing `--measure`:
 
 ```sh
-scripts/build.sh snow-shot-macos-arm64-performance --target snow-shot-ocr-recognition-service-tests
-ctest --preset test-snow-shot-macos-arm64-performance \
-  -R '^snow-shot-ocr-(cpu-recognition-service|process-lifecycle|managed-runtime)-tests$'
-python3 scripts/snow-shot-macos-ocr.py fetch-models --model-root build/ocr-versioned-models
-export SNOW_TEST_OCR_TEXT_FIXTURE="$PWD/snow_shot/tests/baselines/ocr-model-versions.png"
+scripts/build.sh clip-shot-macos-arm64-performance --target clip-shot-ocr-recognition-service-tests
+ctest --preset test-clip-shot-macos-arm64-performance \
+  -R '^clip-shot-ocr-(cpu-recognition-service|process-lifecycle|managed-runtime)-tests$'
+python3 scripts/clip-shot-macos-ocr.py fetch-models --model-root build/ocr-versioned-models
+export CLIP_TEST_OCR_TEXT_FIXTURE="$PWD/clip_shot/tests/baselines/ocr-model-versions.png"
 # Use the recognition test executable emitted by this build:
-OCR_TEST="$PWD/build/snow-shot-macos-arm64-performance/snow_shot/test-bin/snow-shot-ocr-recognition-service-tests"
+OCR_TEST="$PWD/build/clip-shot-macos-arm64-performance/clip_shot/test-bin/clip-shot-ocr-recognition-service-tests"
 "$OCR_TEST" --model-root="$PWD/build/ocr-versioned-models" --measure
 "$OCR_TEST" --resident-text-fixture
 "$OCR_TEST" --model-root="$PWD/build/ocr-versioned-models" --resident-models
@@ -671,19 +671,19 @@ spaces or Unicode and test the exact bundle with the matching shared-runtime
 recognition helper, without modifying its signature:
 
 ```sh
-"$OCR_TEST" --bundle="/path/to/Relocated Snow Shot.app" --offline
-"$OCR_TEST" --bundle="/path/to/Relocated Snow Shot.app" --model=extra_small --cache="/tmp/snow-ocr-cache"
-"$OCR_TEST" --bundle="/path/to/Relocated Snow Shot.app" --model=extra_small --cache="/tmp/snow-ocr-cache" --offline
+"$OCR_TEST" --bundle="/path/to/Relocated Clip.app" --offline
+"$OCR_TEST" --bundle="/path/to/Relocated Clip.app" --model=extra_small --cache="/tmp/clip-ocr-cache"
+"$OCR_TEST" --bundle="/path/to/Relocated Clip.app" --model=extra_small --cache="/tmp/clip-ocr-cache" --offline
 ```
 
 For a static Release package, verify its finalized runtime and startup separately:
 
 ```sh
-python3 scripts/snow-shot-macos-ocr.py verify \
+python3 scripts/clip-shot-macos-ocr.py verify \
   --static-runtime \
-  --runtime-dir="/path/to/Relocated Snow Shot.app/Contents/MacOS" \
-  --app="/path/to/Relocated Snow Shot.app"
-"/path/to/Relocated Snow Shot.app/Contents/MacOS/snow_shot" --startup-probe
+  --runtime-dir="/path/to/Relocated Clip.app/Contents/MacOS" \
+  --app="/path/to/Relocated Clip.app"
+"/path/to/Relocated Clip.app/Contents/MacOS/clip_shot" --startup-probe
 ```
 
 The recognition helper's first run uses a fresh temporary cache and an unreachable
@@ -693,25 +693,25 @@ Run with `DYLD_LIBRARY_PATH`, `DYLD_FALLBACK_LIBRARY_PATH`, and `ORT_DYLIB_PATH`
 Also launch the packaged app through Finder and check its screenshot-to-OCR flow.
 
 For Mini, add `--runtime-only` to the Python verification command and use
-`Snow Shot Mini.app` / `snow_shot_mini` for the app and executable paths. A fresh Mini
+`Clip Mini.app` / `clip_shot_mini` for the app and executable paths. A fresh Mini
 cache needs the selected model download before offline recognition can work;
 repeat recognition with the same cache to verify offline reuse.
 
 ## Screenshots
 
-See [macOS screenshot support and validation](snow_shot/tests/macos_screenshots.md)
+See [macOS screenshot support and validation](clip_shot/tests/macos_screenshots.md)
 for supported workflows, point-based editing, mixed-display export sizing,
 permission recovery, targeted checks and native hardware acceptance steps.
 Screenshot capture uses ScreenCaptureKit; Windows-only backend preferences remain
 stored but are not used on macOS.
 
-See [macOS cursor coordination](snow_shot/tests/macos_cursors.md) for the shared
+See [macOS cursor coordination](clip_shot/tests/macos_cursors.md) for the shared
 screenshot, recording and pinned-window cursor contract and the native checks
 required when upgrading Qt or macOS.
 
 ## Pin to Screen
 
-See [macOS pinned-window validation](snow_shot/tests/macos_pinned_windows.md) for
+See [macOS pinned-window validation](clip_shot/tests/macos_pinned_windows.md) for
 placement semantics, targeted tests, and the hardware qualification checklist.
 Pinned windows use logical desktop pixels for position, size, interaction, and
 restore. A 300×200 selection stays 300×200 on both Retina and non-Retina displays;
@@ -722,28 +722,28 @@ not migrated.
 
 ## Launch at login
 
-A signed Snow Shot app installed under `/Applications` or `~/Applications`
+A signed Clip app installed under `/Applications` or `~/Applications`
 registers itself with macOS on its first eligible normal launch, unless its saved
 startup preference is disabled. Development bundles, disk images, translocated
 copies, and unsigned or invalidly signed apps cannot register. Moving an eligible
 signed copy into Applications allows its initial registration attempt.
 
 Use **Settings > System > General > Launch at login** to enable or disable it.
-If approval is required, choose **Open Login Items Settings** and allow Snow Shot
+If approval is required, choose **Open Login Items Settings** and allow Clip
 in **System Settings > General > Login Items** (the panel name can vary by macOS
 version). Registration awaiting approval is shown as requested, with an explicit
 approval hint; it does not mean macOS will launch the app yet. Turning the setting
 off also removes a pending registration and does not quit the running app.
 
-Snow Shot observes changes made in System Settings when its settings page opens
+Clip observes changes made in System Settings when its settings page opens
 or the app becomes active. It does not re-register on later launches after you
 remove the item or revoke approval. Resetting the General section explicitly
 requests the enabled default again. Login startup stays in the background, but
 missing required permissions still open the existing permission guide.
 
 The one-time initialization marker lives in the current user's Qt generic
-configuration directory as `SnowShot/macos-login-item.ini`, separate from exported
-Snow Shot preferences. A failed automatic registration is not retried on every
+configuration directory as `ClipShot/macos-login-item.ini`, separate from exported
+Clip preferences. A failed automatic registration is not retried on every
 launch; use the toggle to retry after addressing the displayed error. A preference
 write failure does not undo a successful native change: the setting continues to
 show the actual macOS status. Stable bundle identity and signing are important
@@ -755,10 +755,10 @@ Use a signed app in Applications and record its original login-item state before
 checking. Automated tests use injected operations and do not register login items.
 
 1. On a fresh per-user initialization state, launch the installed app; confirm one
-   Snow Shot entry appears in Login Items. Check the approval hint if macOS requires
-   approval, approve it, then return to Snow Shot and verify the refreshed state.
-2. Disable and re-enable through Snow Shot. Disable or remove it in System Settings,
-   return to Snow Shot, then quit and reopen it; confirm it stays disabled or pending
+   Clip entry appears in Login Items. Check the approval hint if macOS requires
+   approval, approve it, then return to Clip and verify the refreshed state.
+2. Disable and re-enable through Clip. Disable or remove it in System Settings,
+   return to Clip, then quit and reopen it; confirm it stays disabled or pending
    approval instead of re-registering automatically.
 3. With launch at login enabled, log out and back in. Confirm one running instance,
    the menu bar icon, and no main window when permissions are granted. With a required

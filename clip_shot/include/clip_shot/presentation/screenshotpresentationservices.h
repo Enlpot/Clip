@@ -1,0 +1,81 @@
+#ifndef CLIP_SHOT_PRESENTATION_SCREENSHOTPRESENTATIONSERVICES_H
+#define CLIP_SHOT_PRESENTATION_SCREENSHOTPRESENTATIONSERVICES_H
+
+#include "clip_shot/presentation/screenshotsmartselectiontransition.h"
+#include "clip_draw_engine_qt/clip_canvas_types.h"
+#include "clip_shot/presentation/screenshotuipreferences.h"
+#include "clip_shot/shortcuts/shortcutbinding.h"
+
+#include <QPoint>
+#include <QPointF>
+#include <QMap>
+#include <QSet>
+#include <QRect>
+#include <QRectF>
+#include <QStringList>
+
+#include <optional>
+#include <functional>
+
+struct ScreenshotCaptureState;
+struct ScreenshotColorPickerContext;
+class ScreenshotDisplaySession;
+class ScreenshotGeometryMapper;
+class ScreenshotInteractionState;
+class ScreenshotIntelligentSelectionModel;
+class ScreenshotOverlayCoordinator;
+class ScreenshotSelectionModel;
+class ScreenshotToolbarPresenter;
+struct ScreenshotToolbarPresentationState;
+
+struct ScreenshotPresentationServicesContext {
+    ScreenshotCaptureState& captureState;
+    ScreenshotOverlayCoordinator& overlayCoordinator;
+    ScreenshotToolbarPresenter& toolbarPresenter;
+    const ScreenshotGeometryMapper& geometry;
+    ScreenshotDisplaySession& displaySession;
+    ScreenshotInteractionState& interaction;
+    ScreenshotSelectionModel& selection;
+    ScreenshotIntelligentSelectionModel& intelligentSelection;
+    QSet<ClipCanvasTool> quickSelectionDisabledTools;
+    std::function<void()> stateChanged = [] {};
+};
+
+class ScreenshotPresentationServices final {
+  public:
+    explicit ScreenshotPresentationServices(ScreenshotPresentationServicesContext context);
+
+    void hideToolbar();
+    void hideMainToolbar();
+    void showToolbar();
+    void showSelectionToolbar();
+    void moveToolbar();
+    void repositionToolbarForContentChange();
+    void raiseToolbarForCanvasInteraction();
+    void setSelectionToolbarHovered(bool hovered);
+    void setUiPreferences(const ScreenshotUiPreferences& preferences);
+    void setGuideLinesVisible(bool visible);
+    void setQuickSelectionDisabledTools(const QSet<ClipCanvasTool>& tools);
+    void reloadConfiguredShortcuts();
+
+    void setSelectionMovementActive(bool active);
+    void updateOverlayState();
+    void updateOverlayCursors() const;
+
+    [[nodiscard]] ScreenshotColorPickerContext colorPickerContext() const;
+
+  private:
+    void presentSelectionFrame(const QRectF& selection);
+    void presentOverlayState(const QRectF& selection) const;
+    [[nodiscard]] ScreenshotToolbarPresentationState toolbarPresentationState() const;
+
+    ScreenshotPresentationServicesContext m_context;
+    ScreenshotSmartSelectionTransition m_smartSelectionTransition;
+    ScreenshotUiPreferences m_uiPreferences;
+    bool m_guideLinesVisible = false;
+    std::optional<clip_shot::shortcuts::ShortcutBindingMap> m_configuredShortcuts;
+    bool m_selectionToolbarHovered = false;
+    bool m_selectionMovementActive = false;
+};
+
+#endif // CLIP_SHOT_PRESENTATION_SCREENSHOTPRESENTATIONSERVICES_H

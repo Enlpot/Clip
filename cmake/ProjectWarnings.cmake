@@ -1,17 +1,17 @@
 include_guard(GLOBAL)
 
-option(SNOW_ENABLE_CLANG_TIDY "Run clang-tidy while compiling C++ targets." OFF)
-option(SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION
-    "Prefer smaller code in explicitly selected cold Snow Shot Release modules." OFF)
+option(CLIP_ENABLE_CLANG_TIDY "Run clang-tidy while compiling C++ targets." OFF)
+option(CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION
+    "Prefer smaller code in explicitly selected cold Clip Release modules." OFF)
 
-function(snow_msvc_arm64_requires_native_codegen output)
+function(clip_msvc_arm64_requires_native_codegen output)
     # MSVC 19.51 ARM64 LTCG emitted GS-cookie epilogues without restoring LR.
     # Keep optimized native objects until the final-image/native regressions
     # verify a repaired backend. Static dependencies must follow the same policy.
     # Standalone libraries may not initialize the workspace architecture cache.
     # Prefer compiler metadata, which describes the target even for cross builds;
     # CMAKE_SYSTEM_PROCESSOR may describe the host and is not a safe fallback.
-    set(_architecture "${SNOW_WINDOWS_ARCHITECTURE}")
+    set(_architecture "${CLIP_WINDOWS_ARCHITECTURE}")
     if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
         set(_architecture "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
     elseif(MSVC_CXX_ARCHITECTURE_ID)
@@ -28,9 +28,9 @@ function(snow_msvc_arm64_requires_native_codegen output)
     endif()
 endfunction()
 
-function(snow_enable_unity_build target)
+function(clip_enable_unity_build target)
     if(NOT TARGET "${target}")
-        message(FATAL_ERROR "snow_enable_unity_build target does not exist: ${target}")
+        message(FATAL_ERROR "clip_enable_unity_build target does not exist: ${target}")
     endif()
     set_target_properties("${target}" PROPERTIES
         UNITY_BUILD ON
@@ -38,9 +38,9 @@ function(snow_enable_unity_build target)
     )
 endfunction()
 
-function(snow_apply_strict_warnings target)
+function(clip_apply_strict_warnings target)
     if(NOT TARGET "${target}")
-        message(FATAL_ERROR "snow_apply_strict_warnings target does not exist: ${target}")
+        message(FATAL_ERROR "clip_apply_strict_warnings target does not exist: ${target}")
     endif()
 
     if(MSVC)
@@ -74,7 +74,7 @@ function(snow_apply_strict_warnings target)
     endif()
 endfunction()
 
-function(_snow_release_compile_options policy output)
+function(_clip_release_compile_options policy output)
     set(_options)
     if(MSVC)
         if(policy STREQUAL "size")
@@ -99,27 +99,27 @@ endfunction()
 # Keep speed as the default for capture, rendering, codecs and native adapters.
 # Callers opt cold modules into the size policy; both retain data stripping.
 # Supported compiler/architecture combinations also retain IPO.
-function(snow_apply_release_options target)
+function(clip_apply_release_options target)
     if(NOT TARGET "${target}")
-        message(FATAL_ERROR "snow_apply_release_options target does not exist: ${target}")
+        message(FATAL_ERROR "clip_apply_release_options target does not exist: ${target}")
     endif()
-    cmake_parse_arguments(PARSE_ARGV 1 _snow "" "POLICY" "")
-    if(_snow_UNPARSED_ARGUMENTS OR _snow_KEYWORDS_MISSING_VALUES)
-        message(FATAL_ERROR "snow_apply_release_options requires POLICY speed or size")
+    cmake_parse_arguments(PARSE_ARGV 1 _clip "" "POLICY" "")
+    if(_clip_UNPARSED_ARGUMENTS OR _clip_KEYWORDS_MISSING_VALUES)
+        message(FATAL_ERROR "clip_apply_release_options requires POLICY speed or size")
     endif()
-    if(NOT DEFINED _snow_POLICY)
-        set(_snow_POLICY speed)
+    if(NOT DEFINED _clip_POLICY)
+        set(_clip_POLICY speed)
     endif()
-    if(NOT _snow_POLICY MATCHES "^(speed|size)$")
-        message(FATAL_ERROR "Unknown release optimization policy: ${_snow_POLICY}")
+    if(NOT _clip_POLICY MATCHES "^(speed|size)$")
+        message(FATAL_ERROR "Unknown release optimization policy: ${_clip_POLICY}")
     endif()
-    set_property(TARGET "${target}" PROPERTY SNOW_RELEASE_OPTIMIZATION_POLICY "${_snow_POLICY}")
+    set_property(TARGET "${target}" PROPERTY CLIP_RELEASE_OPTIMIZATION_POLICY "${_clip_POLICY}")
 
-    if(MSVC AND SNOW_APPS_BUILD_SNOW_SHOT)
+    if(MSVC AND CLIP_APPS_BUILD_CLIP_SHOT)
         target_compile_options("${target}" PRIVATE $<$<CONFIG:Release>:/Z7>)
         target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:/DEBUG:FULL>)
     endif()
-    snow_msvc_arm64_requires_native_codegen(_native_codegen)
+    clip_msvc_arm64_requires_native_codegen(_native_codegen)
     if(_native_codegen)
         set_target_properties("${target}" PROPERTIES
             INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE
@@ -127,15 +127,15 @@ function(snow_apply_release_options target)
         target_compile_options("${target}" PRIVATE
             $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/GL->)
     endif()
-    if(DEFINED SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION AND
-       NOT SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION)
+    if(DEFINED CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION AND
+       NOT CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION)
         return()
     endif()
 
     if(NOT _native_codegen)
         set_property(TARGET "${target}" PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     endif()
-    _snow_release_compile_options("${_snow_POLICY}" _compile_options)
+    _clip_release_compile_options("${_clip_POLICY}" _compile_options)
     target_compile_options("${target}" PRIVATE ${_compile_options})
     if(MSVC)
         target_compile_options("${target}" PRIVATE
@@ -158,7 +158,7 @@ function(snow_apply_release_options target)
             $<$<CONFIG:Release>:-fdata-sections>
         )
         target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:-flto>)
-        if(APPLE AND SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION)
+        if(APPLE AND CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION)
             # Function/data sections alone do not enable the Mach-O linker's
             # dead stripping. Keep it limited to shipping size-optimized builds.
             target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:LINKER:-dead_strip>)
@@ -169,34 +169,34 @@ endfunction()
 # Mixed libraries keep their speed policy. Only these translation units receive
 # size flags, which CMake appends after target options and excludes from unity.
 # They cannot reuse a PCH compiled with the target's different optimization flags.
-function(snow_apply_release_size_sources target)
+function(clip_apply_release_size_sources target)
     if(NOT TARGET "${target}")
-        message(FATAL_ERROR "snow_apply_release_size_sources target does not exist: ${target}")
+        message(FATAL_ERROR "clip_apply_release_size_sources target does not exist: ${target}")
     endif()
-    cmake_parse_arguments(PARSE_ARGV 1 _snow "" "" "SOURCES")
-    if(_snow_UNPARSED_ARGUMENTS OR _snow_KEYWORDS_MISSING_VALUES OR NOT _snow_SOURCES)
-        message(FATAL_ERROR "snow_apply_release_size_sources requires SOURCES")
+    cmake_parse_arguments(PARSE_ARGV 1 _clip "" "" "SOURCES")
+    if(_clip_UNPARSED_ARGUMENTS OR _clip_KEYWORDS_MISSING_VALUES OR NOT _clip_SOURCES)
+        message(FATAL_ERROR "clip_apply_release_size_sources requires SOURCES")
     endif()
-    if(NOT SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION OR
-       (DEFINED SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION AND
-        NOT SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION))
+    if(NOT CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION OR
+       (DEFINED CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION AND
+        NOT CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION))
         return()
     endif()
     get_target_property(_sources "${target}" SOURCES)
-    foreach(_source IN LISTS _snow_SOURCES)
+    foreach(_source IN LISTS _clip_SOURCES)
         if(NOT _source IN_LIST _sources)
             message(FATAL_ERROR "Size-optimized source is absent from ${target}: ${_source}")
         endif()
     endforeach()
-    _snow_release_compile_options(size _compile_options)
-    set_property(SOURCE ${_snow_SOURCES} TARGET_DIRECTORY "${target}"
+    _clip_release_compile_options(size _compile_options)
+    set_property(SOURCE ${_clip_SOURCES} TARGET_DIRECTORY "${target}"
         APPEND PROPERTY COMPILE_OPTIONS ${_compile_options})
-    set_property(SOURCE ${_snow_SOURCES} TARGET_DIRECTORY "${target}"
+    set_property(SOURCE ${_clip_SOURCES} TARGET_DIRECTORY "${target}"
         PROPERTY SKIP_PRECOMPILE_HEADERS ON)
-    set_property(TARGET "${target}" APPEND PROPERTY SNOW_RELEASE_SIZE_SOURCES ${_snow_SOURCES})
+    set_property(TARGET "${target}" APPEND PROPERTY CLIP_RELEASE_SIZE_SOURCES ${_clip_SOURCES})
 endfunction()
 
-function(snow_enable_strict_warnings)
+function(clip_enable_strict_warnings)
     if(MSVC)
         add_compile_options(
             /FS /W4 /WX /permissive- /sdl /utf-8
@@ -228,14 +228,14 @@ function(snow_enable_strict_warnings)
     endif()
 endfunction()
 
-function(snow_enable_clang_tidy)
-    if(NOT SNOW_ENABLE_CLANG_TIDY)
+function(clip_enable_clang_tidy)
+    if(NOT CLIP_ENABLE_CLANG_TIDY)
         return()
     endif()
 
-    find_program(SNOW_CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
+    find_program(CLIP_CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
     set(_command
-        "${SNOW_CLANG_TIDY_EXECUTABLE}"
+        "${CLIP_CLANG_TIDY_EXECUTABLE}"
         "--config-file=${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../.clang-tidy"
     )
     if(MSVC)

@@ -38,7 +38,7 @@ if (VCPKG_TARGET_ARCHITECTURE STREQUAL "x86" OR VCPKG_TARGET_ARCHITECTURE STREQU
 endif()
 
 set(OPTIONS "--enable-pic --disable-doc --enable-runtime-cpudetect --disable-autodetect")
-if("snow-shot-minimal" IN_LIST FEATURES OR "snow-macos-media" IN_LIST FEATURES)
+if("clip-shot-minimal" IN_LIST FEATURES OR "clip-macos-media" IN_LIST FEATURES)
     string(APPEND OPTIONS " --disable-everything")
 endif()
 
@@ -611,7 +611,7 @@ endif()
 
 if ("qsv" IN_LIST FEATURES)
     set(OPTIONS "${OPTIONS} --enable-libvpl --enable-encoder=h264_qsv")
-    if(NOT "snow-shot-minimal" IN_LIST FEATURES)
+    if(NOT "clip-shot-minimal" IN_LIST FEATURES)
         string(APPEND OPTIONS " --enable-decoder=h264_qsv")
     endif()
     set(WITH_VPL ON)
@@ -644,24 +644,24 @@ else()
     set(WITH_RUBBERBAND OFF)
 endif()
 
-if("snow-shot-minimal" IN_LIST FEATURES)
+if("clip-shot-minimal" IN_LIST FEATURES)
     if(NOT VCPKG_TARGET_IS_WINDOWS OR VCPKG_TARGET_IS_UWP)
-        message(FATAL_ERROR "ffmpeg[snow-shot-minimal] currently supports desktop Windows only")
+        message(FATAL_ERROR "ffmpeg[clip-shot-minimal] currently supports desktop Windows only")
     endif()
-    set(SNOW_SHOT_ENCODERS "libx264,libx265,h264_mf,mpeg4,gif,apng,libwebp_anim,aac,mp3_mf")
-    foreach(SNOW_HARDWARE_FEATURE IN ITEMS nvcodec amf qsv)
-        if(SNOW_HARDWARE_FEATURE IN_LIST FEATURES)
-            if(SNOW_HARDWARE_FEATURE STREQUAL "nvcodec")
-                string(APPEND SNOW_SHOT_ENCODERS ",h264_nvenc")
+    set(CLIP_SHOT_ENCODERS "libx264,libx265,h264_mf,mpeg4,gif,apng,libwebp_anim,aac,mp3_mf")
+    foreach(CLIP_HARDWARE_FEATURE IN ITEMS nvcodec amf qsv)
+        if(CLIP_HARDWARE_FEATURE IN_LIST FEATURES)
+            if(CLIP_HARDWARE_FEATURE STREQUAL "nvcodec")
+                string(APPEND CLIP_SHOT_ENCODERS ",h264_nvenc")
             else()
-                string(APPEND SNOW_SHOT_ENCODERS ",h264_${SNOW_HARDWARE_FEATURE}")
+                string(APPEND CLIP_SHOT_ENCODERS ",h264_${CLIP_HARDWARE_FEATURE}")
             endif()
         endif()
     endforeach()
     string(APPEND OPTIONS
         " --disable-network"
         " --enable-decoder=h264,hevc,gif,png,apng,webp,webp_anim,aac,mp3,pcm_s16le,pcm_f32le"
-        " --enable-encoder=${SNOW_SHOT_ENCODERS}"
+        " --enable-encoder=${CLIP_SHOT_ENCODERS}"
         " --enable-muxer=matroska,mp4,avi,gif,apng,webp"
         " --enable-demuxer=matroska,mov,gif,apng,webp,webp_anim"
         " --enable-parser=h264,hevc,aac,mpegaudio,gif"
@@ -671,9 +671,9 @@ if("snow-shot-minimal" IN_LIST FEATURES)
     )
 endif()
 
-if("snow-macos-media" IN_LIST FEATURES)
+if("clip-macos-media" IN_LIST FEATURES)
     if(NOT VCPKG_TARGET_IS_OSX)
-        message(FATAL_ERROR "ffmpeg[snow-macos-media] requires macOS")
+        message(FATAL_ERROR "ffmpeg[clip-macos-media] requires macOS")
     endif()
     string(APPEND OPTIONS
         " --disable-network"
@@ -911,17 +911,17 @@ if (NOT VCPKG_BUILD_TYPE OR VCPKG_BUILD_TYPE STREQUAL "debug")
     z_vcpkg_restore_pkgconfig_path()
 endif()
 
-if("snow-shot-minimal" IN_LIST FEATURES)
-    set(_snow_shot_ffmpeg_components
+if("clip-shot-minimal" IN_LIST FEATURES)
+    set(_clip_shot_ffmpeg_components
         "${CURRENT_BUILDTREES_DIR}/${TARGET_TRIPLET}-rel/config_components.h")
-    if(NOT EXISTS "${_snow_shot_ffmpeg_components}")
+    if(NOT EXISTS "${_clip_shot_ffmpeg_components}")
         message(FATAL_ERROR
-            "The Snow Shot FFmpeg build did not produce config_components.h")
+            "The Clip FFmpeg build did not produce config_components.h")
     endif()
-    file(INSTALL "${_snow_shot_ffmpeg_components}"
+    file(INSTALL "${_clip_shot_ffmpeg_components}"
         DESTINATION "${CURRENT_PACKAGES_DIR}/share/ffmpeg"
-        RENAME snow-shot-config-components.h)
-    unset(_snow_shot_ffmpeg_components)
+        RENAME clip-shot-config-components.h)
+    unset(_clip_shot_ffmpeg_components)
 endif()
 
 if(VCPKG_TARGET_IS_WINDOWS)

@@ -86,7 +86,7 @@ license-shared = { git = '$dependencyUrl', features = ["unused"] }
     $cargoOptions[$manifest] = @('--no-default-features', '--features', 'selected')
 }
 Write-Fixture 'vcpkg/share/native/copyright' 'Native license fixture'
-Write-Fixture 'qt/share/snow-apps/qt-licenses/qt/LICENSE' 'Qt license fixture'
+Write-Fixture 'qt/share/clip-apps/qt-licenses/qt/LICENSE' 'Qt license fixture'
 Write-Fixture 'ant-notice.md' 'Ant notice fixture'
 Write-Fixture 'fallback/Apache-2.0.txt' 'Canonical fallback fixture'
 

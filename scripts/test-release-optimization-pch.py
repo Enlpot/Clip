@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--architecture", default="x64")
     parser.add_argument("--toolset", default="host=x64,version=14.51")
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix="snow-release-pch-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="clip-release-pch-") as temporary:
         source = Path(temporary) / "source"
         source.mkdir()
         (source / "CMakeLists.txt").write_text(
@@ -77,14 +77,14 @@ def main():
             'add_executable(probe main.cpp hot.cpp cold.cpp)\n'
             'target_compile_options(probe PRIVATE /W4 /WX)\n'
             'target_precompile_headers(probe PRIVATE pch.h)\n'
-            'snow_apply_release_options(probe POLICY speed)\n'
-            'snow_apply_release_size_sources(probe SOURCES cold.cpp)\n'
+            'clip_apply_release_options(probe POLICY speed)\n'
+            'clip_apply_release_size_sources(probe SOURCES cold.cpp)\n'
             # Reproduce the original defect independently of the fixed helper.
             'add_executable(inconsistent main.cpp hot.cpp incompatible.cpp)\n'
             'target_compile_options(inconsistent PRIVATE /W4 /WX)\n'
             'target_precompile_headers(inconsistent PRIVATE pch.h)\n'
-            'snow_apply_release_options(inconsistent POLICY speed)\n'
-            '_snow_release_compile_options(size size_options)\n'
+            'clip_apply_release_options(inconsistent POLICY speed)\n'
+            '_clip_release_compile_options(size size_options)\n'
             'set_property(SOURCE incompatible.cpp APPEND PROPERTY COMPILE_OPTIONS ${size_options})\n',
             encoding="utf-8")
         (source / "pch.h").write_text("#pragma once\n#include <array>\n", encoding="utf-8")
@@ -105,8 +105,8 @@ def main():
             build = Path(temporary) / name
             run(["cmake", "-S", str(source), "-B", str(build), "-G", args.generator,
                  "-A", args.architecture, "-T", args.toolset,
-                 f"-DSNOW_APPS_ENABLE_RELEASE_OPTIMIZATION={'ON' if optimization else 'OFF'}",
-                 f"-DSNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION={'ON' if size else 'OFF'}"])
+                 f"-DCLIP_APPS_ENABLE_RELEASE_OPTIMIZATION={'ON' if optimization else 'OFF'}",
+                 f"-DCLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION={'ON' if size else 'OFF'}"])
             if name == "shipping":
                 run(["cmake", "--build", str(build), "--config", "Release", "--target", "inconsistent"],
                     succeeds=False, expected_diagnostic="C4653")

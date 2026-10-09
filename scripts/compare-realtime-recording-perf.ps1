@@ -29,8 +29,8 @@ $ErrorActionPreference = "Stop"
 if (($BaselineAlignCapture -and $BaselineFreeRunningCapture) -or
     ($CandidateAlignCapture -and $CandidateFreeRunningCapture)) { throw 'Choose one pacing override per variant.' }
 if ($StartPair -gt $Pairs) { throw "StartPair cannot exceed Pairs." }
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-Set-SnowBuildEnvironment -Preset windows-msvc-performance | Out-Null
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
+Set-ClipBuildEnvironment -Preset windows-msvc-performance | Out-Null
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $env:Path = "$(Join-Path $repoRoot '.tools/vcpkg/installed/dynamic/x64-windows/bin');$env:Path"
 $Baseline = (Resolve-Path -LiteralPath $Baseline).Path

@@ -8,16 +8,16 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repository = 'mg-chao/snow-apps'
+$repository = 'mg-chao/clip-apps'
 $lastIssue = 1021
 $reply = @(
     '**简体中文**',
     '',
-    '抱歉，这个项目已经有很长一段时间没有维护了。Snow Shot 现已使用 Qt 重写，性能更好，功能也更加丰富。目前我没有精力逐一查看并解决这些旧问题。如果您在新版本中遇到类似问题，请提交一个新 issue。',
+    '抱歉，这个项目已经有很长一段时间没有维护了。Clip 现已使用 Qt 重写，性能更好，功能也更加丰富。目前我没有精力逐一查看并解决这些旧问题。如果您在新版本中遇到类似问题，请提交一个新 issue。',
     '',
     '**English**',
     '',
-    "Sorry, this project has not been maintained for quite some time. Snow Shot has now been rewritten using Qt, with better performance and more features. I currently don’t have the capacity to review and address the old issues one by one. If you encounter a similar problem in the new version, please open a new issue."
+    "Sorry, this project has not been maintained for quite some time. Clip has now been rewritten using Qt, with better performance and more features. I currently don’t have the capacity to review and address the old issues one by one. If you encounter a similar problem in the new version, please open a new issue."
 ) -join "`n"
 
 function Invoke-Gh([string[]]$GhArguments) {
@@ -56,7 +56,7 @@ if (-not $Apply) {
 }
 Write-Output "`nApplying with at least $MutationDelaySeconds seconds between GitHub writes."
 
-$bodyFile = Join-Path ([IO.Path]::GetTempPath()) "snow-apps-legacy-reply-$([guid]::NewGuid().ToString('N')).md"
+$bodyFile = Join-Path ([IO.Path]::GetTempPath()) "clip-apps-legacy-reply-$([guid]::NewGuid().ToString('N')).md"
 [IO.File]::WriteAllText($bodyFile, $reply, [Text.UTF8Encoding]::new($false))
 $commented = 0
 $reused = 0

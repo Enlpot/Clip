@@ -1,0 +1,2463 @@
+use clip_memory::RasterBuffer;
+use std::cell::RefCell;
+use std::ffi::{CStr, CString, c_char, c_void};
+use std::io::Write;
+use std::mem::size_of;
+use std::path::{Path, PathBuf};
+use std::ptr;
+use std::slice;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
+use std::thread::{self, JoinHandle};
+
+use clip_stitch_images::{
+    Frame, MotionDiagnostics, MotionStage, PixelFormat, StitchAxis, StitchBranch, StitchDecision,
+    StitchError, StitchOptions, Stitcher, TiledCanvasSnapshot,
+};
+
+const DEFAULT_MAX_OUTPUT_HEIGHT: u32 = 2_160 * 32;
+
+#[cfg(feature = "perf-instrumentation")]
+#[unsafe(no_mangle)]
+pub extern "C" fn clip_stitch_perf_reset_thread() {
+    clip_stitch_images::perf::reset();
+}
+
+#[cfg(feature = "perf-instrumentation")]
+#[unsafe(no_mangle)]
+/// # Safety
+/// `output` must be null or point to writable storage of `output_size` bytes.
+pub unsafe extern "C" fn clip_stitch_perf_read_thread(
+    output: *mut clip_stitch_images::perf::Snapshot,
+    output_size: usize,
+) -> u8 {
+    if output.is_null() || output_size != size_of::<clip_stitch_images::perf::Snapshot>() {
+        return 0;
+    }
+    unsafe { output.write(clip_stitch_images::perf::snapshot()) };
+    1
+}
+
+#[cfg(all(test, feature = "perf-instrumentation"))]
+mod perf_ffi_tests {
+    use super::*;
+    use clip_stitch_images::perf::{Scope, Snapshot, Stage};
+
+    #[test]
+    fn snapshot_checks_size_and_preserves_counters() {
+        clip_stitch_perf_reset_thread();
+        Scope::new(Stage::FrameFreeze).finish();
+        let mut output = Snapshot::default();
+        assert_eq!(
+            unsafe { clip_stitch_perf_read_thread(ptr::null_mut(), size_of::<Snapshot>()) },
+            0
+        );
+        assert_eq!(unsafe { clip_stitch_perf_read_thread(&mut output, 1) }, 0);
+        assert_eq!(output, Snapshot::default());
+        assert_eq!(
+            unsafe { clip_stitch_perf_read_thread(&mut output, size_of::<Snapshot>()) },
+            1
+        );
+        assert_eq!(output.calls[Stage::FrameFreeze as usize], 1);
+        assert_eq!(output, clip_stitch_images::perf::snapshot());
+    }
+}
+const DEFAULT_MAX_OUTPUT_PIXELS: u64 = 3_840 * 2_160 * 32;
+const DEFAULT_MIN_OVERLAP_ROWS: u32 = 48;
+const DEFAULT_MIN_OVERLAP_RATIO: f32 = 0.15;
+const DEFAULT_ACCEPTED_HISTORY_CAPACITY: usize = 4;
+
+#[derive(Clone, Copy)]
+struct FrameDimensions {
+    width: u32,
+    height: u32,
+}
+
+struct FramePoolInner {
+    dimensions: FrameDimensions,
+    length: usize,
+    capacity: usize,
+    active: AtomicUsize,
+    returned: Mutex<Vec<RasterBuffer>>,
+}
+
+struct RgbaFramePool {
+    inner: Arc<FramePoolInner>,
+}
+
+impl RgbaFramePool {
+    fn new(width: u32, height: u32, capacity: usize) -> Result<Self, StitchError> {
+        if width == 0 || height == 0 || capacity == 0 {
+            return Err(StitchError::InvalidOptions {
+                message: "frame-pool dimensions and capacity must be non-zero".to_owned(),
+            });
+        }
+        let length = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(StitchError::Arithmetic {
+                operation: "calculating RGBA frame-pool buffer length",
+            })?;
+        Ok(Self {
+            inner: Arc::new(FramePoolInner {
+                dimensions: FrameDimensions { width, height },
+                length,
+                capacity,
+                active: AtomicUsize::new(0),
+                returned: Mutex::new(Vec::new()),
+            }),
+        })
+    }
+
+    fn acquire(&self) -> Result<RgbaFrameBuffer, StitchError> {
+        self.acquire_with_clear(true)
+    }
+
+    fn acquire_for_overwrite(&self) -> Result<RgbaFrameBuffer, StitchError> {
+        self.acquire_with_clear(false)
+    }
+
+    fn acquire_with_clear(&self, clear_pixels: bool) -> Result<RgbaFrameBuffer, StitchError> {
+        let mut active = self.inner.active.load(Ordering::Acquire);
+        loop {
+            if active >= self.inner.capacity {
+                return Err(StitchError::InvalidFrame {
+                    message: format!(
+                        "RGBA frame pool is exhausted (capacity {})",
+                        self.inner.capacity
+                    ),
+                });
+            }
+            match self.inner.active.compare_exchange_weak(
+                active,
+                active + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(next) => active = next,
+            }
+        }
+        let data = self
+            .inner
+            .returned
+            .lock()
+            .expect("frame pool mutex poisoned")
+            .pop()
+            .unwrap_or_else(|| RasterBuffer::zeroed(self.inner.length));
+        let mut data = data;
+        if data.len() != self.inner.length {
+            data.resize_for_overwrite(self.inner.length);
+        }
+        if clear_pixels {
+            data.fill(0);
+        }
+        Ok(RgbaFrameBuffer {
+            dimensions: self.inner.dimensions,
+            data: Some(data),
+            pool: Arc::clone(&self.inner),
+        })
+    }
+}
+
+struct RgbaFrameBuffer {
+    dimensions: FrameDimensions,
+    data: Option<RasterBuffer>,
+    pool: Arc<FramePoolInner>,
+}
+
+impl RgbaFrameBuffer {
+    fn dimensions(&self) -> FrameDimensions {
+        self.dimensions
+    }
+
+    fn as_mut_rgba_bytes(&mut self) -> &mut [u8] {
+        self.data
+            .as_mut()
+            .expect("live RGBA frame buffer owns its pixels")
+    }
+
+    fn freeze(mut self) -> Result<Frame, StitchError> {
+        let _perf =
+            clip_stitch_images::perf::Scope::new(clip_stitch_images::perf::Stage::FrameFreeze);
+        let data = self
+            .data
+            .take()
+            .expect("live RGBA frame buffer owns its pixels");
+        let result = Frame::from_buffer(
+            self.dimensions.width,
+            self.dimensions.height,
+            PixelFormat::Rgba8,
+            data.clone(),
+        );
+        self.pool
+            .returned
+            .lock()
+            .expect("frame pool mutex poisoned")
+            .push(data);
+        result
+    }
+}
+
+impl Drop for RgbaFrameBuffer {
+    fn drop(&mut self) {
+        if let Some(data) = self.data.take() {
+            self.pool
+                .returned
+                .lock()
+                .expect("frame pool mutex poisoned")
+                .push(data);
+        }
+        self.pool.active.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct ExternalRgbaPixels {
+    bytes: *const u8,
+    length: usize,
+    context: *mut c_void,
+    release: unsafe extern "C" fn(*mut c_void),
+}
+
+// The external-frame ABI requires immutable pixels and a release callback that
+// may run on any thread. No mutable slice is ever exposed for this storage.
+unsafe impl Send for ExternalRgbaPixels {}
+unsafe impl Sync for ExternalRgbaPixels {}
+
+impl AsRef<[u8]> for ExternalRgbaPixels {
+    fn as_ref(&self) -> &[u8] {
+        // Construction validates the slice; the owner's callback keeps it live.
+        unsafe { slice::from_raw_parts(self.bytes, self.length) }
+    }
+}
+
+impl Drop for ExternalRgbaPixels {
+    fn drop(&mut self) {
+        unsafe { (self.release)(self.context) };
+    }
+}
+
+#[derive(Clone)]
+struct RgbaImage {
+    frame: Frame,
+}
+
+impl RgbaImage {
+    fn width(&self) -> u32 {
+        self.frame.width()
+    }
+
+    fn height(&self) -> u32 {
+        self.frame.height()
+    }
+
+    fn as_rgba_bytes(&self) -> &[u8] {
+        self.frame.pixels()
+    }
+}
+
+#[derive(Clone)]
+struct StitchImageSnapshot {
+    canvas: TiledCanvasSnapshot,
+}
+
+impl StitchImageSnapshot {
+    fn width(&self) -> u32 {
+        self.canvas.width()
+    }
+
+    fn height(&self) -> u32 {
+        self.canvas.height()
+    }
+
+    fn rgba_len(&self) -> Result<usize, StitchError> {
+        self.width()
+            .checked_mul(self.height())
+            .and_then(|pixels| pixels.checked_mul(4))
+            .and_then(|length| usize::try_from(length).ok())
+            .ok_or(StitchError::Arithmetic {
+                operation: "calculating snapshot RGBA length",
+            })
+    }
+
+    fn slice_rows(&self, top: u32, bottom: u32) -> Result<Self, StitchError> {
+        if top >= bottom || bottom > self.height() {
+            return Err(StitchError::InvalidFrame {
+                message: format!(
+                    "row range {top}..{bottom} is outside snapshot height {}",
+                    self.height()
+                ),
+            });
+        }
+        Ok(Self {
+            canvas: self.canvas.slice_rows(top, bottom)?,
+        })
+    }
+
+    fn slice_axis(&self, start: u32, end: u32) -> Result<Self, StitchError> {
+        Ok(Self {
+            canvas: self.canvas.slice_axis(start, end)?,
+        })
+    }
+
+    fn materialize(&self) -> Result<RgbaImage, StitchError> {
+        Ok(RgbaImage {
+            frame: self.canvas.materialize()?,
+        })
+    }
+
+    fn render_scaled(&self, width: u32, height: u32) -> Result<RgbaImage, StitchError> {
+        Ok(RgbaImage {
+            frame: self.canvas.render_scaled(width, height)?,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct StitchLimits {
+    max_output_height: u32,
+    max_output_pixels: u64,
+}
+
+#[derive(Clone)]
+struct StitchConfig {
+    axis: StitchAxis,
+    limits: StitchLimits,
+    min_overlap_rows: u32,
+    min_overlap_ratio: f32,
+    accepted_history_capacity: usize,
+}
+
+impl Default for StitchConfig {
+    fn default() -> Self {
+        Self {
+            axis: StitchAxis::Vertical,
+            limits: StitchLimits {
+                max_output_height: DEFAULT_MAX_OUTPUT_HEIGHT,
+                max_output_pixels: DEFAULT_MAX_OUTPUT_PIXELS,
+            },
+            min_overlap_rows: DEFAULT_MIN_OVERLAP_ROWS,
+            min_overlap_ratio: DEFAULT_MIN_OVERLAP_RATIO,
+            accepted_history_capacity: DEFAULT_ACCEPTED_HISTORY_CAPACITY,
+        }
+    }
+}
+
+impl StitchConfig {
+    fn validate(&self) -> Result<(), StitchError> {
+        if self.limits.max_output_height == 0 || self.limits.max_output_pixels == 0 {
+            return Err(StitchError::InvalidOptions {
+                message: "output limits must be greater than zero".to_owned(),
+            });
+        }
+        if self.min_overlap_rows == 0
+            || !(0.0..=0.5).contains(&self.min_overlap_ratio)
+            || !(1..=8).contains(&self.accepted_history_capacity)
+        {
+            return Err(StitchError::InvalidOptions {
+                message: "invalid compatibility stitching configuration".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FrameEvent {
+    Initial,
+    ExtendedTop,
+    ExtendedBottom,
+    ExtendedLeft,
+    ExtendedRight,
+    Covered,
+    Duplicate,
+    Unmatched,
+}
+
+#[derive(Clone, Copy)]
+enum UnmatchedReason {
+    InsufficientOverlap,
+    LowInformation,
+    Ambiguous,
+    ConflictingReferences,
+    FixedContentDominated,
+    VerificationFailed,
+}
+
+#[derive(Clone, Copy, Default)]
+struct MatchMetrics {
+    score: f32,
+    second_score: f32,
+    content_coverage: f32,
+    fixed_coverage: f32,
+    inlier_ratio: f32,
+    feature_support: u32,
+    reference_count: u32,
+}
+
+#[derive(Clone, Copy)]
+struct FrameOutcome {
+    event: FrameEvent,
+    matched_reference_offset: Option<i32>,
+    unmatched_reason: Option<UnmatchedReason>,
+    metrics: MatchMetrics,
+    added_extent: u32,
+    output_dimensions: FrameDimensions,
+    delta_start: u32,
+    delta_extent: u32,
+}
+
+struct StitchSession {
+    config: StitchConfig,
+    stitcher: Stitcher,
+}
+
+impl StitchSession {
+    fn new(config: StitchConfig) -> Result<Self, StitchError> {
+        config.validate()?;
+        let axis = config.axis;
+        Ok(Self {
+            config,
+            stitcher: Stitcher::new(StitchOptions {
+                axis,
+                record_decisions: true,
+                ..StitchOptions::default()
+            })?,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.stitcher.reset();
+    }
+
+    fn push_owned_frame(
+        &mut self,
+        frame: Result<Frame, StitchError>,
+    ) -> Result<FrameOutcome, StitchError> {
+        let frame = frame?;
+        let initial = self.stitcher.input_count() == 0;
+        let decision = self.stitcher.push(frame)?;
+        let (width, height) = self
+            .stitcher
+            .image_dimensions()
+            .expect("a successful push initializes the stitcher");
+        let pixels = u64::from(width) * u64::from(height);
+        let output_extent = self.config.axis.primary_extent(width, height);
+        if output_extent > self.config.limits.max_output_height
+            || pixels > self.config.limits.max_output_pixels
+        {
+            return Err(StitchError::InvalidFrame {
+                message: format!(
+                    "stitched output {}x{} exceeds configured limits",
+                    width, height
+                ),
+            });
+        }
+        let dimensions = FrameDimensions { width, height };
+        if initial {
+            return Ok(FrameOutcome {
+                event: FrameEvent::Initial,
+                matched_reference_offset: None,
+                unmatched_reason: None,
+                metrics: MatchMetrics::default(),
+                added_extent: output_extent,
+                output_dimensions: dimensions,
+                delta_start: 0,
+                delta_extent: output_extent,
+            });
+        }
+        let outcome = decision
+            .as_ref()
+            .map(|event| frame_outcome(event, dimensions, self.config.axis))
+            .ok_or_else(|| StitchError::InvalidFrame {
+                message: "incremental stitcher did not emit a decision record".to_owned(),
+            })?;
+        self.stitcher.clear_decisions();
+        Ok(outcome)
+    }
+
+    fn copy_rows(&self, top: u32, rows: u32, destination: &mut [u8]) -> Result<(), StitchError> {
+        let (width, height) = self
+            .stitcher
+            .image_dimensions()
+            .ok_or(StitchError::EmptyInput)?;
+        let bottom = top.checked_add(rows).ok_or(StitchError::Arithmetic {
+            operation: "calculating copied row range",
+        })?;
+        if bottom > height {
+            return Err(StitchError::InvalidFrame {
+                message: "copied row range is outside the stitched image".to_owned(),
+            });
+        }
+        let row_bytes = width as usize * 4;
+        let expected = rows as usize * row_bytes;
+        if destination.len() != expected {
+            return Err(StitchError::InvalidFrame {
+                message: format!("row copy needs {expected} bytes, got {}", destination.len()),
+            });
+        }
+        self.stitcher.copy_rows(top, rows, destination)
+    }
+
+    fn snapshot(&self, top: u32, bottom: u32) -> Result<StitchImageSnapshot, StitchError> {
+        Ok(StitchImageSnapshot {
+            canvas: self.stitcher.snapshot_axis(top, bottom)?,
+        })
+    }
+
+    fn materialize_rows(&self, top: u32, bottom: u32) -> Result<RgbaImage, StitchError> {
+        Ok(RgbaImage {
+            frame: self.stitcher.materialize_rows(top, bottom)?,
+        })
+    }
+
+    fn materialize_axis(&self, start: u32, end: u32) -> Result<RgbaImage, StitchError> {
+        Ok(RgbaImage {
+            frame: self.stitcher.materialize_axis(start, end)?,
+        })
+    }
+
+    fn render_scaled_rows(
+        &self,
+        top: u32,
+        rows: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage, StitchError> {
+        Ok(RgbaImage {
+            frame: self.stitcher.render_scaled_rows(top, rows, width, height)?,
+        })
+    }
+
+    fn render_scaled_axis(
+        &self,
+        start: u32,
+        span: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage, StitchError> {
+        Ok(RgbaImage {
+            frame: self
+                .stitcher
+                .render_scaled_axis(start, span, width, height)?,
+        })
+    }
+}
+
+fn frame_outcome(
+    event: &StitchDecision,
+    dimensions: FrameDimensions,
+    axis: StitchAxis,
+) -> FrameOutcome {
+    let frame_event = match (axis, event.branch) {
+        (StitchAxis::Vertical, StitchBranch::Append) => FrameEvent::ExtendedBottom,
+        (StitchAxis::Vertical, StitchBranch::Prepend) => FrameEvent::ExtendedTop,
+        (StitchAxis::Horizontal, StitchBranch::Append) => FrameEvent::ExtendedRight,
+        (StitchAxis::Horizontal, StitchBranch::Prepend) => FrameEvent::ExtendedLeft,
+        (_, StitchBranch::Contained) => FrameEvent::Covered,
+        (_, StitchBranch::Skip) => FrameEvent::Duplicate,
+        (_, StitchBranch::NoMovement) => FrameEvent::Unmatched,
+    };
+    let unmatched_reason = (event.branch == StitchBranch::NoMovement)
+        .then(|| unmatched_reason(event.motion_diagnostics.as_ref()));
+    let metrics = event
+        .motion_diagnostics
+        .as_ref()
+        .map(|diagnostics| match_metrics(event.confidence, diagnostics))
+        .unwrap_or_default();
+    let band = event.canvas_band_height.unwrap_or(0);
+    let delta_start = match event.branch {
+        StitchBranch::Append => event
+            .before
+            .canvas_height
+            .saturating_sub(band.saturating_sub(event.growth)),
+        StitchBranch::Prepend => 0,
+        StitchBranch::Contained | StitchBranch::Skip | StitchBranch::NoMovement => 0,
+    };
+    FrameOutcome {
+        event: frame_event,
+        matched_reference_offset: event.accepted_offset,
+        unmatched_reason,
+        metrics,
+        added_extent: event.growth,
+        output_dimensions: dimensions,
+        delta_start,
+        delta_extent: band,
+    }
+}
+
+fn unmatched_reason(diagnostics: Option<&MotionDiagnostics>) -> UnmatchedReason {
+    match diagnostics.map(|diagnostics| diagnostics.stage) {
+        Some(MotionStage::InputTooSmall | MotionStage::EmptyDescriptors) => {
+            UnmatchedReason::LowInformation
+        }
+        Some(MotionStage::NoMatches) => UnmatchedReason::InsufficientOverlap,
+        Some(MotionStage::NoCandidates) => UnmatchedReason::ConflictingReferences,
+        Some(MotionStage::LowConfidence) => UnmatchedReason::Ambiguous,
+        Some(MotionStage::SceneCut) => UnmatchedReason::FixedContentDominated,
+        Some(MotionStage::SelectedNoMotion) => UnmatchedReason::VerificationFailed,
+        Some(MotionStage::IdenticalInterior | MotionStage::Selected) | None => {
+            UnmatchedReason::VerificationFailed
+        }
+    }
+}
+
+fn match_metrics(confidence: Option<f32>, diagnostics: &MotionDiagnostics) -> MatchMetrics {
+    let selected = diagnostics.selected_offset.and_then(|offset| {
+        diagnostics
+            .candidates
+            .iter()
+            .find(|candidate| candidate.offset == offset)
+    });
+    let mut scores = diagnostics
+        .candidates
+        .iter()
+        .map(|candidate| candidate.score)
+        .collect::<Vec<_>>();
+    scores.sort_by(|left, right| right.total_cmp(left));
+    let total_tiles = diagnostics.regions.fixed_tiles
+        + diagnostics.regions.scrolling_tiles
+        + diagnostics.regions.dynamic_tiles
+        + diagnostics.regions.neutral_tiles;
+    MatchMetrics {
+        score: confidence.unwrap_or_default(),
+        second_score: scores.get(1).copied().unwrap_or_default(),
+        content_coverage: selected.map_or(0.0, |candidate| candidate.spatial_coverage),
+        fixed_coverage: if total_tiles == 0 {
+            0.0
+        } else {
+            diagnostics.regions.fixed_tiles as f32 / total_tiles as f32
+        },
+        inlier_ratio: selected.map_or(0.0, |candidate| candidate.weighted_inlier_share),
+        feature_support: selected.map_or(0, |candidate| candidate.raw_inliers),
+        reference_count: 1,
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+enum PngCompression {
+    #[default]
+    Fast,
+    Balanced,
+    Best,
+}
+
+#[derive(Clone, Copy)]
+enum PngExportStage {
+    Preparing,
+    Encoding,
+    Committing,
+}
+
+#[derive(Clone, Copy)]
+struct PngExportProgress {
+    stage: PngExportStage,
+    rows_written: u32,
+    total_rows: u32,
+    percent: f32,
+}
+
+struct PngExportRequest {
+    output_path: PathBuf,
+    compression: PngCompression,
+    overwrite: bool,
+}
+
+#[derive(Debug)]
+enum PngExportError {
+    Canceled,
+    Failed(String),
+}
+
+impl std::fmt::Display for PngExportError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Canceled => formatter.write_str("PNG export canceled"),
+            Self::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
+struct PngExportTask {
+    cancel: Arc<AtomicBool>,
+    progress: Receiver<PngExportProgress>,
+    join: Option<JoinHandle<Result<(), PngExportError>>>,
+}
+
+impl PngExportTask {
+    fn spawn(
+        snapshot: StitchImageSnapshot,
+        request: PngExportRequest,
+    ) -> Result<Self, StitchError> {
+        if request.output_path.as_os_str().is_empty() {
+            return Err(StitchError::InvalidOptions {
+                message: "PNG output path must not be empty".to_owned(),
+            });
+        }
+        if request.output_path.exists() && !request.overwrite {
+            return Err(StitchError::InvalidFrame {
+                message: format!(
+                    "PNG output already exists: {}",
+                    request.output_path.display()
+                ),
+            });
+        }
+        let parent = request
+            .output_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        if !parent.is_dir() {
+            return Err(StitchError::InvalidFrame {
+                message: format!("PNG output directory does not exist: {}", parent.display()),
+            });
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        let (progress_tx, progress) = sync_channel(16);
+        let join = thread::Builder::new()
+            .name("clip-stitch-png-export".to_owned())
+            .spawn(move || {
+                clip_core::qos::apply_current_thread();
+                export_png(snapshot, request, worker_cancel, progress_tx)
+            })
+            .map_err(|error| StitchError::InvalidFrame {
+                message: format!("failed to spawn PNG export worker: {error}"),
+            })?;
+        Ok(Self {
+            cancel,
+            progress,
+            join: Some(join),
+        })
+    }
+
+    fn cancel(&self) {
+        self.cancel.store(true, Ordering::Release);
+    }
+
+    fn try_progress(&self) -> Result<PngExportProgress, TryRecvError> {
+        self.progress.try_recv()
+    }
+
+    fn is_finished(&self) -> bool {
+        self.join.as_ref().is_some_and(JoinHandle::is_finished)
+    }
+
+    fn wait(mut self) -> Result<(), PngExportError> {
+        self.join
+            .take()
+            .expect("live export task has a worker")
+            .join()
+            .map_err(|_| PngExportError::Failed("PNG export worker panicked".to_owned()))?
+    }
+}
+
+impl Drop for PngExportTask {
+    fn drop(&mut self) {
+        self.cancel();
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+impl StitchImageSnapshot {
+    fn export_png(&self, request: PngExportRequest) -> Result<PngExportTask, StitchError> {
+        PngExportTask::spawn(self.clone(), request)
+    }
+}
+
+fn export_png(
+    snapshot: StitchImageSnapshot,
+    request: PngExportRequest,
+    cancel: Arc<AtomicBool>,
+    progress: SyncSender<PngExportProgress>,
+) -> Result<(), PngExportError> {
+    let emit = |stage, rows_written| {
+        let total_rows = snapshot.height();
+        let percent = rows_written as f32 * 100.0 / total_rows as f32;
+        let _ = progress.try_send(PngExportProgress {
+            stage,
+            rows_written,
+            total_rows,
+            percent,
+        });
+    };
+    if cancel.load(Ordering::Acquire) {
+        return Err(PngExportError::Canceled);
+    }
+    emit(PngExportStage::Preparing, 0);
+
+    let parent = request
+        .output_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".clip-shot-")
+        .suffix(".png.tmp")
+        .tempfile_in(parent)
+        .map_err(|error| PngExportError::Failed(error.to_string()))?;
+    {
+        let mut encoder =
+            png::Encoder::new(temporary.as_file_mut(), snapshot.width(), snapshot.height());
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_filter(png::Filter::Adaptive);
+        encoder.set_compression(match request.compression {
+            PngCompression::Fast => png::Compression::Fast,
+            PngCompression::Balanced => png::Compression::Balanced,
+            PngCompression::Best => png::Compression::High,
+        });
+        let mut writer = encoder
+            .write_header()
+            .map_err(|error| PngExportError::Failed(error.to_string()))?;
+        {
+            let mut stream = writer
+                .stream_writer_with_size(64 * 1024)
+                .map_err(|error| PngExportError::Failed(error.to_string()))?;
+            let row_bytes = (snapshot.width() as usize)
+                .checked_mul(4)
+                .ok_or_else(|| PngExportError::Failed("PNG row length overflow".to_owned()))?;
+            let strip_rows = snapshot.height().min(64);
+            let strip_bytes = row_bytes
+                .checked_mul(strip_rows as usize)
+                .ok_or_else(|| PngExportError::Failed("PNG strip length overflow".to_owned()))?;
+            let mut strip = RasterBuffer::zeroed(strip_bytes);
+            let mut rows_written = 0;
+            while rows_written < snapshot.height() {
+                if cancel.load(Ordering::Acquire) {
+                    return Err(PngExportError::Canceled);
+                }
+                let rows = strip_rows.min(snapshot.height() - rows_written);
+                let chunk = &mut strip[..row_bytes * rows as usize];
+                snapshot
+                    .canvas
+                    .copy_rows(rows_written, rows, chunk)
+                    .map_err(|error| PngExportError::Failed(error.to_string()))?;
+                stream
+                    .write_all(chunk)
+                    .map_err(|error| PngExportError::Failed(error.to_string()))?;
+                rows_written += rows;
+                emit(PngExportStage::Encoding, rows_written);
+            }
+            stream
+                .finish()
+                .map_err(|error| PngExportError::Failed(error.to_string()))?;
+        }
+        writer
+            .finish()
+            .map_err(|error| PngExportError::Failed(error.to_string()))?;
+    }
+    temporary
+        .as_file_mut()
+        .flush()
+        .map_err(|error| PngExportError::Failed(error.to_string()))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|error| PngExportError::Failed(error.to_string()))?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(PngExportError::Canceled);
+    }
+    emit(PngExportStage::Committing, snapshot.height());
+    if request.overwrite {
+        temporary.persist(&request.output_path)
+    } else {
+        temporary.persist_noclobber(&request.output_path)
+    }
+    .map_err(|error| PngExportError::Failed(error.error.to_string()))?;
+    Ok(())
+}
+
+pub struct ClipStitchFramePoolImpl {
+    pool: RgbaFramePool,
+}
+
+pub struct ClipStitchFrameBufferImpl {
+    buffer: Option<RgbaFrameBuffer>,
+}
+
+pub struct ClipStitchSessionImpl {
+    session: StitchSession,
+}
+
+pub struct ClipStitchSnapshotImpl {
+    snapshot: StitchImageSnapshot,
+}
+
+pub struct ClipStitchOwnedImageImpl {
+    image: RgbaImage,
+}
+
+pub struct ClipStitchExportTaskImpl {
+    task: Option<PngExportTask>,
+    status: ClipStitchExportStatus,
+    error: CString,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum ClipStitchFrameEvent {
+    Initial = 0,
+    ExtendedTop = 1,
+    ExtendedBottom = 2,
+    Covered = 3,
+    Duplicate = 4,
+    Unmatched = 5,
+    ExtendedLeft = 6,
+    ExtendedRight = 7,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum ClipStitchAxis {
+    Vertical = 0,
+    Horizontal = 1,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum ClipStitchUnmatchedReason {
+    None = 0,
+    InsufficientOverlap = 1,
+    LowInformation = 2,
+    Ambiguous = 3,
+    ConflictingReferences = 4,
+    FixedContentDominated = 5,
+    VerificationFailed = 6,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClipStitchConfig {
+    struct_size: u32,
+    max_output_height: u32,
+    max_output_pixels: u64,
+    min_overlap_rows: u32,
+    min_overlap_ratio: f32,
+    accepted_history_capacity: u32,
+    axis: u32,
+    reserved: [u32; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClipStitchMatchMetrics {
+    score: f32,
+    second_score: f32,
+    content_coverage: f32,
+    fixed_coverage: f32,
+    inlier_ratio: f32,
+    feature_support: u32,
+    reference_count: u32,
+}
+
+#[repr(C)]
+pub struct ClipStitchMutableImageInfo {
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+    rgba_bytes: *mut u8,
+    rgba_len: usize,
+}
+
+#[repr(C)]
+pub struct ClipStitchImageInfo {
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+    rgba_bytes: *const u8,
+    rgba_len: usize,
+}
+
+#[repr(C)]
+pub struct ClipStitchFrameOutcome {
+    event: ClipStitchFrameEvent,
+    unmatched_reason: ClipStitchUnmatchedReason,
+    matched_reference_offset_y: i32,
+    has_matched_reference_offset_y: u8,
+    reserved: [u8; 3],
+    metrics: ClipStitchMatchMetrics,
+    added_rows: u32,
+    output_width: u32,
+    output_height: u32,
+    delta_top: u32,
+    delta_rows: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum ClipStitchPngCompression {
+    Fast = 0,
+    Balanced = 1,
+    Best = 2,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum ClipStitchExportStage {
+    Preparing = 0,
+    Encoding = 1,
+    Committing = 2,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ClipStitchExportStatus {
+    Running = 0,
+    Complete = 1,
+    Failed = 2,
+    Canceled = 3,
+}
+
+#[repr(C)]
+pub struct ClipStitchPngExportConfig {
+    output_path_utf8: *const c_char,
+    compression: ClipStitchPngCompression,
+    overwrite: u8,
+    reserved: [u8; 31],
+}
+
+#[repr(C)]
+pub struct ClipStitchExportProgress {
+    stage: ClipStitchExportStage,
+    rows_written: u32,
+    total_rows: u32,
+    percent: f32,
+}
+
+thread_local! {
+    static LAST_ERROR: RefCell<CString> = RefCell::new(CString::new("").expect("empty C string"));
+}
+
+fn sanitize_cstring(value: impl AsRef<str>) -> CString {
+    let bytes = value
+        .as_ref()
+        .as_bytes()
+        .iter()
+        .copied()
+        .filter(|byte| *byte != 0)
+        .collect::<Vec<_>>();
+    CString::new(bytes).expect("interior NUL bytes were removed")
+}
+
+fn set_last_error(error: impl ToString) {
+    LAST_ERROR.with(|slot| *slot.borrow_mut() = sanitize_cstring(error.to_string()));
+}
+
+fn clear_last_error() {
+    LAST_ERROR.with(|slot| *slot.borrow_mut() = CString::new("").expect("empty C string"));
+}
+
+fn ffi_config(config: StitchConfig) -> ClipStitchConfig {
+    ClipStitchConfig {
+        struct_size: size_of::<ClipStitchConfig>() as u32,
+        max_output_height: config.limits.max_output_height,
+        max_output_pixels: config.limits.max_output_pixels,
+        min_overlap_rows: config.min_overlap_rows,
+        min_overlap_ratio: config.min_overlap_ratio,
+        accepted_history_capacity: config.accepted_history_capacity as u32,
+        axis: match config.axis {
+            StitchAxis::Vertical => ClipStitchAxis::Vertical as u32,
+            StitchAxis::Horizontal => ClipStitchAxis::Horizontal as u32,
+        },
+        reserved: [0; 8],
+    }
+}
+
+fn rust_config(config: &ClipStitchConfig) -> Result<StitchConfig, String> {
+    if config.struct_size < size_of::<ClipStitchConfig>() as u32 {
+        return Err(format!(
+            "ClipStitchConfig.struct_size is {}, expected at least {}",
+            config.struct_size,
+            size_of::<ClipStitchConfig>()
+        ));
+    }
+    let accepted_history_capacity = usize::try_from(config.accepted_history_capacity)
+        .map_err(|_| "accepted_history_capacity does not fit size_t".to_owned())?;
+    let axis = match config.axis {
+        value if value == ClipStitchAxis::Vertical as u32 => StitchAxis::Vertical,
+        value if value == ClipStitchAxis::Horizontal as u32 => StitchAxis::Horizontal,
+        value => return Err(format!("unknown ClipStitchAxis value {value}")),
+    };
+    let config = StitchConfig {
+        axis,
+        limits: StitchLimits {
+            max_output_height: config.max_output_height,
+            max_output_pixels: config.max_output_pixels,
+        },
+        min_overlap_rows: config.min_overlap_rows,
+        min_overlap_ratio: config.min_overlap_ratio,
+        accepted_history_capacity,
+    };
+    config.validate().map_err(|error| error.to_string())?;
+    Ok(config)
+}
+
+fn ffi_event(event: FrameEvent) -> ClipStitchFrameEvent {
+    match event {
+        FrameEvent::Initial => ClipStitchFrameEvent::Initial,
+        FrameEvent::ExtendedTop => ClipStitchFrameEvent::ExtendedTop,
+        FrameEvent::ExtendedBottom => ClipStitchFrameEvent::ExtendedBottom,
+        FrameEvent::ExtendedLeft => ClipStitchFrameEvent::ExtendedLeft,
+        FrameEvent::ExtendedRight => ClipStitchFrameEvent::ExtendedRight,
+        FrameEvent::Covered => ClipStitchFrameEvent::Covered,
+        FrameEvent::Duplicate => ClipStitchFrameEvent::Duplicate,
+        FrameEvent::Unmatched => ClipStitchFrameEvent::Unmatched,
+    }
+}
+
+fn ffi_unmatched_reason(reason: Option<UnmatchedReason>) -> ClipStitchUnmatchedReason {
+    match reason {
+        None => ClipStitchUnmatchedReason::None,
+        Some(UnmatchedReason::InsufficientOverlap) => {
+            ClipStitchUnmatchedReason::InsufficientOverlap
+        }
+        Some(UnmatchedReason::LowInformation) => ClipStitchUnmatchedReason::LowInformation,
+        Some(UnmatchedReason::Ambiguous) => ClipStitchUnmatchedReason::Ambiguous,
+        Some(UnmatchedReason::ConflictingReferences) => {
+            ClipStitchUnmatchedReason::ConflictingReferences
+        }
+        Some(UnmatchedReason::FixedContentDominated) => {
+            ClipStitchUnmatchedReason::FixedContentDominated
+        }
+        Some(UnmatchedReason::VerificationFailed) => ClipStitchUnmatchedReason::VerificationFailed,
+    }
+}
+
+fn ffi_metrics(metrics: MatchMetrics) -> ClipStitchMatchMetrics {
+    ClipStitchMatchMetrics {
+        score: metrics.score,
+        second_score: metrics.second_score,
+        content_coverage: metrics.content_coverage,
+        fixed_coverage: metrics.fixed_coverage,
+        inlier_ratio: metrics.inlier_ratio,
+        feature_support: metrics.feature_support,
+        reference_count: metrics.reference_count,
+    }
+}
+
+fn ffi_outcome(outcome: FrameOutcome) -> ClipStitchFrameOutcome {
+    ClipStitchFrameOutcome {
+        event: ffi_event(outcome.event),
+        unmatched_reason: ffi_unmatched_reason(outcome.unmatched_reason),
+        matched_reference_offset_y: outcome.matched_reference_offset.unwrap_or_default(),
+        has_matched_reference_offset_y: u8::from(outcome.matched_reference_offset.is_some()),
+        reserved: [0; 3],
+        metrics: ffi_metrics(outcome.metrics),
+        added_rows: outcome.added_extent,
+        output_width: outcome.output_dimensions.width,
+        output_height: outcome.output_dimensions.height,
+        delta_top: outcome.delta_start,
+        delta_rows: outcome.delta_extent,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn clip_stitch_frame_pool_create(
+    width: u32,
+    height: u32,
+    capacity: usize,
+) -> *mut ClipStitchFramePoolImpl {
+    match RgbaFramePool::new(width, height, capacity) {
+        Ok(pool) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchFramePoolImpl { pool }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `pool` must be null or a live handle returned by `clip_stitch_frame_pool_create`
+/// that has not already been destroyed.
+pub unsafe extern "C" fn clip_stitch_frame_pool_destroy(pool: *mut ClipStitchFramePoolImpl) {
+    if !pool.is_null() {
+        drop(unsafe { Box::from_raw(pool) });
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `pool` must be null or point to a live frame pool for the duration of this call.
+pub unsafe extern "C" fn clip_stitch_frame_pool_acquire(
+    pool: *mut ClipStitchFramePoolImpl,
+) -> *mut ClipStitchFrameBufferImpl {
+    unsafe { acquire_frame_buffer(pool, false) }
+}
+
+#[unsafe(no_mangle)]
+/// Acquire initialized pixels without clearing previously returned storage.
+/// The caller must overwrite every packed RGBA byte before submitting the frame.
+///
+/// # Safety
+/// `pool` must be null or point to a live frame pool for the duration of this call.
+pub unsafe extern "C" fn clip_stitch_frame_pool_acquire_for_overwrite(
+    pool: *mut ClipStitchFramePoolImpl,
+) -> *mut ClipStitchFrameBufferImpl {
+    unsafe { acquire_frame_buffer(pool, true) }
+}
+
+unsafe fn acquire_frame_buffer(
+    pool: *mut ClipStitchFramePoolImpl,
+    overwrite: bool,
+) -> *mut ClipStitchFrameBufferImpl {
+    let Some(pool) = (unsafe { pool.as_ref() }) else {
+        set_last_error("RGBA frame pool is null");
+        return ptr::null_mut();
+    };
+    let result = if overwrite {
+        pool.pool.acquire_for_overwrite()
+    } else {
+        pool.pool.acquire()
+    };
+    match result {
+        Ok(buffer) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchFrameBufferImpl {
+                buffer: Some(buffer),
+            }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `frame` must be a live, exclusively accessed frame handle and `out_info`
+/// must point to writable storage for one `ClipStitchMutableImageInfo`.
+pub unsafe extern "C" fn clip_stitch_frame_buffer_info(
+    frame: *mut ClipStitchFrameBufferImpl,
+    out_info: *mut ClipStitchMutableImageInfo,
+) -> u8 {
+    if out_info.is_null() {
+        set_last_error("mutable image info is null");
+        return 0;
+    }
+    let Some(frame) = (unsafe { frame.as_mut() }) else {
+        set_last_error("RGBA frame buffer is null");
+        return 0;
+    };
+    let Some(buffer) = frame.buffer.as_mut() else {
+        set_last_error("RGBA frame buffer was already consumed");
+        return 0;
+    };
+    let dimensions = buffer.dimensions();
+    let bytes = buffer.as_mut_rgba_bytes();
+    unsafe {
+        *out_info = ClipStitchMutableImageInfo {
+            width: dimensions.width,
+            height: dimensions.height,
+            stride_bytes: dimensions.width * 4,
+            rgba_bytes: bytes.as_mut_ptr(),
+            rgba_len: bytes.len(),
+        };
+    }
+    clear_last_error();
+    1
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `frame` must be null or a live handle returned by this library that has not
+/// been consumed or previously destroyed.
+pub unsafe extern "C" fn clip_stitch_frame_buffer_destroy(frame: *mut ClipStitchFrameBufferImpl) {
+    if !frame.is_null() {
+        drop(unsafe { Box::from_raw(frame) });
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `out_config` must point to writable storage for one
+/// `ClipStitchConfig`.
+pub unsafe extern "C" fn clip_stitch_config_default(out_config: *mut ClipStitchConfig) -> u8 {
+    if out_config.is_null() {
+        set_last_error("stitch config is null");
+        return 0;
+    }
+    unsafe { *out_config = ffi_config(StitchConfig::default()) };
+    clear_last_error();
+    1
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `config` must point to a readable `ClipStitchConfig` whose
+/// `struct_size` covers the current structure.
+pub unsafe extern "C" fn clip_stitch_session_create(
+    config: *const ClipStitchConfig,
+) -> *mut ClipStitchSessionImpl {
+    let Some(config) = (unsafe { config.as_ref() }) else {
+        set_last_error("stitch config is null");
+        return ptr::null_mut();
+    };
+    let result = rust_config(config)
+        .and_then(|config| StitchSession::new(config).map_err(|error| error.to_string()));
+    match result {
+        Ok(session) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchSessionImpl { session }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must be null or a live session handle that has not already been
+/// destroyed.
+pub unsafe extern "C" fn clip_stitch_session_destroy(session: *mut ClipStitchSessionImpl) {
+    if !session.is_null() {
+        drop(unsafe { Box::from_raw(session) });
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must point to a live, exclusively accessed session.
+pub unsafe extern "C" fn clip_stitch_session_reset(session: *mut ClipStitchSessionImpl) -> u8 {
+    let Some(session) = (unsafe { session.as_mut() }) else {
+        set_last_error("stitch session is null");
+        return 0;
+    };
+    session.session.reset();
+    clear_last_error();
+    1
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must be live and exclusively accessed. `inout_frame` must point
+/// to a live frame-handle slot and `out_outcome` must be writable. The frame
+/// handle is consumed and the caller's slot is nulled even when stitching fails.
+pub unsafe extern "C" fn clip_stitch_session_push_owned(
+    session: *mut ClipStitchSessionImpl,
+    inout_frame: *mut *mut ClipStitchFrameBufferImpl,
+    out_outcome: *mut ClipStitchFrameOutcome,
+) -> u8 {
+    if inout_frame.is_null() || out_outcome.is_null() {
+        set_last_error("owned frame pointer and outcome must be non-null");
+        return 0;
+    }
+    let frame_ptr = unsafe { *inout_frame };
+    unsafe { *inout_frame = ptr::null_mut() };
+    if frame_ptr.is_null() {
+        set_last_error("owned frame is null");
+        return 0;
+    }
+    let mut frame = unsafe { Box::from_raw(frame_ptr) };
+    let Some(buffer) = frame.buffer.take() else {
+        set_last_error("owned frame was already consumed");
+        return 0;
+    };
+    let Some(session) = (unsafe { session.as_mut() }) else {
+        set_last_error("stitch session is null");
+        return 0;
+    };
+
+    match session.session.push_owned_frame(buffer.freeze()) {
+        Ok(outcome) => {
+            unsafe { *out_outcome = ffi_outcome(outcome) };
+            clear_last_error();
+            1
+        }
+        Err(error) => {
+            set_last_error(error);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must be live and exclusively accessed, and `out_outcome` writable
+/// when non-null. `rgba_bytes` must describe `rgba_len` initialized, immutable
+/// bytes that remain valid until `release(context)` runs. The callback must be
+/// callable on any thread. A non-null callback transfers the context even when
+/// validation or stitching fails, and is called exactly once after the last lease.
+pub unsafe extern "C" fn clip_stitch_session_push_external_rgba(
+    session: *mut ClipStitchSessionImpl,
+    width: u32,
+    height: u32,
+    rgba_bytes: *const u8,
+    rgba_len: usize,
+    release: Option<unsafe extern "C" fn(*mut c_void)>,
+    context: *mut c_void,
+    out_outcome: *mut ClipStitchFrameOutcome,
+) -> u8 {
+    let Some(release) = release else {
+        set_last_error("external frame release callback is null");
+        return 0;
+    };
+    let preparation =
+        clip_stitch_images::perf::Scope::new(clip_stitch_images::perf::Stage::FrameFreeze);
+    let pixels = Arc::new(ExternalRgbaPixels {
+        bytes: rgba_bytes,
+        length: rgba_len,
+        context,
+        release,
+    });
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4));
+    if rgba_bytes.is_null()
+        || rgba_len == 0
+        || rgba_len > isize::MAX as usize
+        || expected != Some(rgba_len)
+        || out_outcome.is_null()
+    {
+        set_last_error("external frame requires packed RGBA pixels and a writable outcome");
+        return 0;
+    }
+    let Some(session) = (unsafe { session.as_mut() }) else {
+        set_last_error("stitch session is null");
+        return 0;
+    };
+    let frame = Frame::from_shared_buffer(width, height, PixelFormat::Rgba8, pixels);
+    preparation.finish();
+    match session.session.push_owned_frame(frame) {
+        Ok(outcome) => {
+            unsafe { *out_outcome = ffi_outcome(outcome) };
+            clear_last_error();
+            1
+        }
+        Err(error) => {
+            set_last_error(error);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified during the call. `destination`
+/// must be writable for exactly `destination_len` bytes.
+pub unsafe extern "C" fn clip_stitch_session_copy_rows(
+    session: *const ClipStitchSessionImpl,
+    top: u32,
+    rows: u32,
+    destination: *mut u8,
+    destination_len: usize,
+) -> u8 {
+    if destination.is_null() {
+        set_last_error("row destination is null");
+        return 0;
+    }
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return 0;
+    };
+    let bytes = unsafe { slice::from_raw_parts_mut(destination, destination_len) };
+    match session.session.copy_rows(top, rows, bytes) {
+        Ok(()) => {
+            clear_last_error();
+            1
+        }
+        Err(error) => {
+            set_last_error(error);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified during the call.
+pub unsafe extern "C" fn clip_stitch_session_materialize_rows(
+    session: *const ClipStitchSessionImpl,
+    top: u32,
+    bottom: u32,
+) -> *mut ClipStitchOwnedImageImpl {
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return ptr::null_mut();
+    };
+    owned_image(session.session.materialize_rows(top, bottom))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified during the call.
+pub unsafe extern "C" fn clip_stitch_session_materialize_axis(
+    session: *const ClipStitchSessionImpl,
+    start: u32,
+    end: u32,
+) -> *mut ClipStitchOwnedImageImpl {
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return ptr::null_mut();
+    };
+    owned_image(session.session.materialize_axis(start, end))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified during the call.
+pub unsafe extern "C" fn clip_stitch_session_render_scaled_rows(
+    session: *const ClipStitchSessionImpl,
+    top: u32,
+    rows: u32,
+    width: u32,
+    height: u32,
+) -> *mut ClipStitchOwnedImageImpl {
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return ptr::null_mut();
+    };
+    owned_image(session.session.render_scaled_rows(top, rows, width, height))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified during the call.
+pub unsafe extern "C" fn clip_stitch_session_render_scaled_axis(
+    session: *const ClipStitchSessionImpl,
+    start: u32,
+    span: u32,
+    width: u32,
+    height: u32,
+) -> *mut ClipStitchOwnedImageImpl {
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return ptr::null_mut();
+    };
+    owned_image(
+        session
+            .session
+            .render_scaled_axis(start, span, width, height),
+    )
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified for the duration of the call.
+pub unsafe extern "C" fn clip_stitch_session_snapshot(
+    session: *const ClipStitchSessionImpl,
+    trim_top: u32,
+    trim_bottom: u32,
+) -> *mut ClipStitchSnapshotImpl {
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return ptr::null_mut();
+    };
+    match session.session.snapshot(trim_top, trim_bottom) {
+        Ok(snapshot) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchSnapshotImpl { snapshot }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `session` must remain live and unmodified for the duration of the call.
+pub unsafe extern "C" fn clip_stitch_session_snapshot_axis(
+    session: *const ClipStitchSessionImpl,
+    start: u32,
+    end: u32,
+) -> *mut ClipStitchSnapshotImpl {
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        set_last_error("stitch session is null");
+        return ptr::null_mut();
+    };
+    match session.session.snapshot(start, end) {
+        Ok(snapshot) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchSnapshotImpl { snapshot }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must be null or a live snapshot handle that has not already been
+/// destroyed.
+pub unsafe extern "C" fn clip_stitch_snapshot_destroy(snapshot: *mut ClipStitchSnapshotImpl) {
+    if !snapshot.is_null() {
+        drop(unsafe { Box::from_raw(snapshot) });
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must remain live during the call and `out_info` must point to
+/// writable storage for one `ClipStitchImageInfo`.
+pub unsafe extern "C" fn clip_stitch_snapshot_info(
+    snapshot: *const ClipStitchSnapshotImpl,
+    out_info: *mut ClipStitchImageInfo,
+) -> u8 {
+    if out_info.is_null() {
+        set_last_error("snapshot image info is null");
+        return 0;
+    }
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return 0;
+    };
+    unsafe {
+        *out_info = ClipStitchImageInfo {
+            width: snapshot.snapshot.width(),
+            height: snapshot.snapshot.height(),
+            stride_bytes: snapshot.snapshot.width() * 4,
+            rgba_bytes: ptr::null(),
+            rgba_len: snapshot.snapshot.rgba_len().unwrap_or(0),
+        };
+    }
+    clear_last_error();
+    1
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must remain live and unmodified during the call. `destination`
+/// must be writable for `destination_len` bytes.
+pub unsafe extern "C" fn clip_stitch_snapshot_copy_rows(
+    snapshot: *const ClipStitchSnapshotImpl,
+    top: u32,
+    rows: u32,
+    destination_stride: usize,
+    destination: *mut u8,
+    destination_len: usize,
+) -> u8 {
+    if destination.is_null() {
+        set_last_error("snapshot row destination is null");
+        return 0;
+    }
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return 0;
+    };
+    let bytes = unsafe { slice::from_raw_parts_mut(destination, destination_len) };
+    match snapshot
+        .snapshot
+        .canvas
+        .copy_rows_strided(top, rows, destination_stride, bytes)
+    {
+        Ok(()) => {
+            clear_last_error();
+            1
+        }
+        Err(error) => {
+            set_last_error(error);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must remain live and unmodified for the duration of the call.
+pub unsafe extern "C" fn clip_stitch_snapshot_slice_rows(
+    snapshot: *const ClipStitchSnapshotImpl,
+    top: u32,
+    bottom: u32,
+) -> *mut ClipStitchSnapshotImpl {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return ptr::null_mut();
+    };
+    match snapshot.snapshot.slice_rows(top, bottom) {
+        Ok(snapshot) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchSnapshotImpl { snapshot }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must remain live and unmodified for the duration of the call.
+pub unsafe extern "C" fn clip_stitch_snapshot_slice_axis(
+    snapshot: *const ClipStitchSnapshotImpl,
+    start: u32,
+    end: u32,
+) -> *mut ClipStitchSnapshotImpl {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return ptr::null_mut();
+    };
+    match snapshot.snapshot.slice_axis(start, end) {
+        Ok(snapshot) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchSnapshotImpl { snapshot }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+fn owned_image(image: Result<RgbaImage, impl ToString>) -> *mut ClipStitchOwnedImageImpl {
+    match image {
+        Ok(image) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchOwnedImageImpl { image }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must remain live and unmodified for the duration of the call.
+pub unsafe extern "C" fn clip_stitch_snapshot_materialize(
+    snapshot: *const ClipStitchSnapshotImpl,
+) -> *mut ClipStitchOwnedImageImpl {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return ptr::null_mut();
+    };
+    owned_image(snapshot.snapshot.materialize())
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` must remain live and unmodified for the duration of the call.
+pub unsafe extern "C" fn clip_stitch_snapshot_render_scaled(
+    snapshot: *const ClipStitchSnapshotImpl,
+    width: u32,
+    height: u32,
+) -> *mut ClipStitchOwnedImageImpl {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return ptr::null_mut();
+    };
+    owned_image(snapshot.snapshot.render_scaled(width, height))
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `image` must remain live during the call and `out_info` must point to
+/// writable storage for one `ClipStitchImageInfo`.
+pub unsafe extern "C" fn clip_stitch_owned_image_info(
+    image: *const ClipStitchOwnedImageImpl,
+    out_info: *mut ClipStitchImageInfo,
+) -> u8 {
+    if out_info.is_null() {
+        set_last_error("owned image info is null");
+        return 0;
+    }
+    let Some(image) = (unsafe { image.as_ref() }) else {
+        set_last_error("owned image is null");
+        return 0;
+    };
+    let bytes = image.image.as_rgba_bytes();
+    unsafe {
+        *out_info = ClipStitchImageInfo {
+            width: image.image.width(),
+            height: image.image.height(),
+            stride_bytes: image.image.width() * 4,
+            rgba_bytes: bytes.as_ptr(),
+            rgba_len: bytes.len(),
+        };
+    }
+    clear_last_error();
+    1
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `image` must be null or a live owned-image handle that has not already been
+/// destroyed.
+pub unsafe extern "C" fn clip_stitch_owned_image_destroy(image: *mut ClipStitchOwnedImageImpl) {
+    if !image.is_null() {
+        drop(unsafe { Box::from_raw(image) });
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `snapshot` and `config` must remain live during the call. The path pointer
+/// in `config` must reference a valid NUL-terminated UTF-8 string.
+pub unsafe extern "C" fn clip_stitch_snapshot_export_png(
+    snapshot: *const ClipStitchSnapshotImpl,
+    config: *const ClipStitchPngExportConfig,
+) -> *mut ClipStitchExportTaskImpl {
+    let Some(snapshot) = (unsafe { snapshot.as_ref() }) else {
+        set_last_error("stitch snapshot is null");
+        return ptr::null_mut();
+    };
+    let Some(config) = (unsafe { config.as_ref() }) else {
+        set_last_error("PNG export config is null");
+        return ptr::null_mut();
+    };
+    if config.output_path_utf8.is_null() {
+        set_last_error("PNG output path is null");
+        return ptr::null_mut();
+    }
+    let path = match unsafe { CStr::from_ptr(config.output_path_utf8) }.to_str() {
+        Ok(path) => PathBuf::from(path),
+        Err(error) => {
+            set_last_error(error);
+            return ptr::null_mut();
+        }
+    };
+    let request = PngExportRequest {
+        output_path: path,
+        compression: match config.compression {
+            ClipStitchPngCompression::Fast => PngCompression::Fast,
+            ClipStitchPngCompression::Balanced => PngCompression::Balanced,
+            ClipStitchPngCompression::Best => PngCompression::Best,
+        },
+        overwrite: config.overwrite != 0,
+    };
+    match snapshot.snapshot.export_png(request) {
+        Ok(task) => {
+            clear_last_error();
+            Box::into_raw(Box::new(ClipStitchExportTaskImpl {
+                task: Some(task),
+                status: ClipStitchExportStatus::Running,
+                error: CString::new("").expect("empty C string"),
+            }))
+        }
+        Err(error) => {
+            set_last_error(error);
+            ptr::null_mut()
+        }
+    }
+}
+
+fn ffi_progress(progress: PngExportProgress) -> ClipStitchExportProgress {
+    ClipStitchExportProgress {
+        stage: match progress.stage {
+            PngExportStage::Preparing => ClipStitchExportStage::Preparing,
+            PngExportStage::Encoding => ClipStitchExportStage::Encoding,
+            PngExportStage::Committing => ClipStitchExportStage::Committing,
+        },
+        rows_written: progress.rows_written,
+        total_rows: progress.total_rows,
+        percent: progress.percent,
+    }
+}
+
+fn finish_export(task: &mut ClipStitchExportTaskImpl, block: bool) {
+    if task.status != ClipStitchExportStatus::Running {
+        return;
+    }
+    let should_finish = block || task.task.as_ref().is_some_and(PngExportTask::is_finished);
+    if !should_finish {
+        return;
+    }
+    let Some(worker) = task.task.take() else {
+        return;
+    };
+    match worker.wait() {
+        Ok(_) => task.status = ClipStitchExportStatus::Complete,
+        Err(PngExportError::Canceled) => {
+            task.status = ClipStitchExportStatus::Canceled;
+            task.error = sanitize_cstring("PNG export canceled");
+        }
+        Err(error) => {
+            task.status = ClipStitchExportStatus::Failed;
+            task.error = sanitize_cstring(error.to_string());
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `task` must be null or point to a live export task.
+pub unsafe extern "C" fn clip_stitch_export_task_cancel(task: *mut ClipStitchExportTaskImpl) {
+    if let Some(task) = unsafe { task.as_ref() }
+        && let Some(worker) = &task.task
+    {
+        worker.cancel();
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `task` must be live and exclusively accessed. Non-null output pointers must
+/// point to writable values of their corresponding C types.
+pub unsafe extern "C" fn clip_stitch_export_task_poll(
+    task: *mut ClipStitchExportTaskImpl,
+    out_progress: *mut ClipStitchExportProgress,
+    out_has_progress: *mut u8,
+) -> ClipStitchExportStatus {
+    let Some(task) = (unsafe { task.as_mut() }) else {
+        set_last_error("PNG export task is null");
+        return ClipStitchExportStatus::Failed;
+    };
+    if !out_has_progress.is_null() {
+        unsafe { *out_has_progress = 0 };
+    }
+    if let Some(worker) = &task.task
+        && let Ok(progress) = worker.try_progress()
+    {
+        if !out_progress.is_null() {
+            unsafe { *out_progress = ffi_progress(progress) };
+        }
+        if !out_has_progress.is_null() {
+            unsafe { *out_has_progress = 1 };
+        }
+    }
+    finish_export(task, false);
+    task.status
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `task` must point to a live, exclusively accessed export task.
+pub unsafe extern "C" fn clip_stitch_export_task_wait(
+    task: *mut ClipStitchExportTaskImpl,
+) -> ClipStitchExportStatus {
+    let Some(task) = (unsafe { task.as_mut() }) else {
+        set_last_error("PNG export task is null");
+        return ClipStitchExportStatus::Failed;
+    };
+    finish_export(task, true);
+    task.status
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `task` must remain live while the returned message pointer is read.
+pub unsafe extern "C" fn clip_stitch_export_task_error_message(
+    task: *const ClipStitchExportTaskImpl,
+) -> *const c_char {
+    unsafe { task.as_ref() }.map_or(ptr::null(), |task| task.error.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// `task` must be null or a live export task that has not already been
+/// destroyed.
+pub unsafe extern "C" fn clip_stitch_export_task_destroy(task: *mut ClipStitchExportTaskImpl) {
+    if !task.is_null() {
+        drop(unsafe { Box::from_raw(task) });
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn clip_stitch_last_error_message() -> *const c_char {
+    LAST_ERROR.with(|slot| slot.borrow().as_ptr())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ExternalTestPixels {
+        pixels: Vec<u8>,
+        released: Arc<AtomicUsize>,
+    }
+
+    unsafe extern "C" fn release_test_pixels(context: *mut c_void) {
+        let owner = unsafe { Box::from_raw(context.cast::<ExternalTestPixels>()) };
+        owner.released.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn external_test_pixels(released: &Arc<AtomicUsize>) -> (*const u8, *mut c_void) {
+        let owner = Box::new(ExternalTestPixels {
+            pixels: vec![0x5a; 5 * 5 * 4],
+            released: Arc::clone(released),
+        });
+        (owner.pixels.as_ptr(), Box::into_raw(owner).cast())
+    }
+
+    #[test]
+    fn external_frame_retains_pixels_until_reset_and_snapshot_outlives_input() {
+        let mut config = StitchConfig::default();
+        for axis in [StitchAxis::Vertical, StitchAxis::Horizontal] {
+            config.axis = axis;
+            let ffi_config = ffi_config(config.clone());
+            let session = unsafe { clip_stitch_session_create(&ffi_config) };
+            let released = Arc::new(AtomicUsize::new(0));
+            let (bytes, context) = external_test_pixels(&released);
+            let mut outcome: ClipStitchFrameOutcome = unsafe { std::mem::zeroed() };
+            assert_eq!(
+                unsafe {
+                    clip_stitch_session_push_external_rgba(
+                        session,
+                        5,
+                        5,
+                        bytes,
+                        100,
+                        Some(release_test_pixels),
+                        context,
+                        &mut outcome,
+                    )
+                },
+                1
+            );
+            assert_eq!(released.load(Ordering::SeqCst), 0);
+            // Initial reference and previous input share exactly the supplied allocation.
+            let snapshot = unsafe { clip_stitch_session_snapshot_axis(session, 0, 5) };
+            let (duplicate, duplicate_context) = external_test_pixels(&released);
+            assert_eq!(
+                unsafe {
+                    clip_stitch_session_push_external_rgba(
+                        session,
+                        5,
+                        5,
+                        duplicate,
+                        100,
+                        Some(release_test_pixels),
+                        duplicate_context,
+                        &mut outcome,
+                    )
+                },
+                1
+            );
+            assert_eq!(released.load(Ordering::SeqCst), 1);
+            assert_eq!(unsafe { clip_stitch_session_reset(session) }, 1);
+            assert_eq!(released.load(Ordering::SeqCst), 2);
+            unsafe { clip_stitch_session_destroy(session) };
+            let image = unsafe { clip_stitch_snapshot_materialize(snapshot) };
+            assert!(!image.is_null());
+            assert!(
+                unsafe { &*image }
+                    .image
+                    .frame
+                    .pixels()
+                    .iter()
+                    .all(|&pixel| pixel == 0x5a)
+            );
+            unsafe {
+                clip_stitch_owned_image_destroy(image);
+                clip_stitch_snapshot_destroy(snapshot);
+            }
+        }
+    }
+
+    #[test]
+    fn external_frame_failure_releases_context_exactly_once() {
+        let config = ffi_config(StitchConfig::default());
+        let session = unsafe { clip_stitch_session_create(&config) };
+        let released = Arc::new(AtomicUsize::new(0));
+        for case in 0..6 {
+            let (bytes, context) = external_test_pixels(&released);
+            let mut outcome: ClipStitchFrameOutcome = unsafe { std::mem::zeroed() };
+            let status = unsafe {
+                clip_stitch_session_push_external_rgba(
+                    if case == 0 { ptr::null_mut() } else { session },
+                    if case == 1 {
+                        4
+                    } else if case == 5 {
+                        u32::MAX
+                    } else {
+                        5
+                    },
+                    if case == 1 {
+                        4
+                    } else if case == 5 {
+                        u32::MAX
+                    } else {
+                        5
+                    },
+                    if case == 2 { ptr::null() } else { bytes },
+                    if case == 1 {
+                        64
+                    } else if case == 3 {
+                        99
+                    } else {
+                        100
+                    },
+                    Some(release_test_pixels),
+                    context,
+                    if case == 4 {
+                        ptr::null_mut()
+                    } else {
+                        &mut outcome
+                    },
+                )
+            };
+            assert_eq!(status, 0);
+            assert_eq!(released.load(Ordering::SeqCst), case + 1);
+        }
+        unsafe { clip_stitch_session_destroy(session) };
+    }
+
+    #[test]
+    fn config_is_sized_and_rejects_truncated_callers() {
+        let mut config = ffi_config(StitchConfig::default());
+        assert_eq!(config.struct_size as usize, size_of::<ClipStitchConfig>());
+        config.struct_size -= 1;
+        let session = unsafe { clip_stitch_session_create(&config) };
+        assert!(session.is_null());
+    }
+
+    #[test]
+    fn config_defaults_vertical_and_rejects_unknown_axis() {
+        let mut config = ffi_config(StitchConfig::default());
+        assert_eq!(config.axis, ClipStitchAxis::Vertical as u32);
+        config.axis = 99;
+        let session = unsafe { clip_stitch_session_create(&config) };
+        assert!(session.is_null());
+    }
+
+    #[test]
+    fn owned_frame_is_consumed_and_snapshot_survives_session() {
+        let pool = clip_stitch_frame_pool_create(5, 5, 2);
+        let config = ffi_config(StitchConfig::default());
+        let session = unsafe { clip_stitch_session_create(&config) };
+        assert!(!pool.is_null() && !session.is_null());
+        let mut frame = unsafe { clip_stitch_frame_pool_acquire(pool) };
+        let mut info = ClipStitchMutableImageInfo {
+            width: 0,
+            height: 0,
+            stride_bytes: 0,
+            rgba_bytes: ptr::null_mut(),
+            rgba_len: 0,
+        };
+        assert_eq!(
+            unsafe { clip_stitch_frame_buffer_info(frame, &mut info) },
+            1
+        );
+        unsafe { slice::from_raw_parts_mut(info.rgba_bytes, info.rgba_len).fill(0x7f) };
+        let mut outcome = ClipStitchFrameOutcome {
+            event: ClipStitchFrameEvent::Unmatched,
+            unmatched_reason: ClipStitchUnmatchedReason::None,
+            matched_reference_offset_y: 0,
+            has_matched_reference_offset_y: 0,
+            reserved: [0; 3],
+            metrics: ffi_metrics(MatchMetrics::default()),
+            added_rows: 0,
+            output_width: 0,
+            output_height: 0,
+            delta_top: 0,
+            delta_rows: 0,
+        };
+        assert_eq!(
+            unsafe { clip_stitch_session_push_owned(session, &mut frame, &mut outcome) },
+            1
+        );
+        assert!(frame.is_null());
+        let snapshot = unsafe { clip_stitch_session_snapshot(session, 0, 5) };
+        assert!(!snapshot.is_null());
+        let slice = unsafe { clip_stitch_snapshot_slice_rows(snapshot, 0, 1) };
+        assert!(!slice.is_null());
+        assert!(unsafe { clip_stitch_snapshot_slice_rows(snapshot, 1, 1) }.is_null());
+        unsafe { clip_stitch_session_destroy(session) };
+        let mut copied = [0_u8; 24];
+        assert_eq!(
+            unsafe {
+                clip_stitch_snapshot_copy_rows(
+                    slice,
+                    0,
+                    1,
+                    copied.len(),
+                    copied.as_mut_ptr(),
+                    copied.len(),
+                )
+            },
+            1
+        );
+        assert!(copied[..20].iter().all(|byte| *byte == 0x7f));
+        assert!(copied[20..].iter().all(|byte| *byte == 0));
+        let image = unsafe { clip_stitch_snapshot_materialize(snapshot) };
+        assert!(!image.is_null());
+        let scaled = unsafe { clip_stitch_snapshot_render_scaled(slice, 1, 3) };
+        assert!(!scaled.is_null());
+        let mut scaled_info = ClipStitchImageInfo {
+            width: 0,
+            height: 0,
+            stride_bytes: 0,
+            rgba_bytes: ptr::null(),
+            rgba_len: 0,
+        };
+        assert_eq!(
+            unsafe { clip_stitch_owned_image_info(scaled, &mut scaled_info) },
+            1
+        );
+        assert_eq!((scaled_info.width, scaled_info.height), (1, 3));
+        assert!(
+            unsafe { slice::from_raw_parts(scaled_info.rgba_bytes, scaled_info.rgba_len) }
+                .iter()
+                .all(|byte| *byte == 0x7f)
+        );
+        unsafe {
+            clip_stitch_owned_image_destroy(scaled);
+            clip_stitch_owned_image_destroy(image);
+            clip_stitch_snapshot_destroy(slice);
+            clip_stitch_snapshot_destroy(snapshot);
+            clip_stitch_frame_pool_destroy(pool);
+        }
+    }
+
+    #[test]
+    fn large_pool_freeze_preserves_pixels_and_recycles_mapped_storage() {
+        let pool = RgbaFramePool::new(1024, 256, 1).unwrap();
+        let mut buffer = pool.acquire().unwrap();
+        let pointer = buffer.as_mut_rgba_bytes().as_ptr();
+        buffer.as_mut_rgba_bytes().fill(0x5a);
+        let frame = buffer.freeze().unwrap();
+        assert_ne!(frame.pixels().as_ptr(), pointer);
+        assert!(frame.pixels().iter().all(|&byte| byte == 0x5a));
+        let mut reused = pool.acquire().unwrap();
+        assert_eq!(reused.as_mut_rgba_bytes().as_ptr(), pointer);
+        assert!(reused.as_mut_rgba_bytes().iter().all(|&byte| byte == 0));
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        {
+            assert!(reused.data.as_ref().unwrap().is_page_backed());
+            assert!(frame.into_buffer().is_page_backed());
+        }
+    }
+
+    #[test]
+    fn overwrite_pool_reuses_initialized_pixels_without_changing_frozen_frames() {
+        for (width, height) in [(8, 16), (1024, 256)] {
+            let pool = RgbaFramePool::new(width, height, 1).unwrap();
+            let mut buffer = pool.acquire_for_overwrite().unwrap();
+            assert!(buffer.as_mut_rgba_bytes().iter().all(|&byte| byte == 0));
+            let pointer = buffer.as_mut_rgba_bytes().as_ptr();
+            buffer.as_mut_rgba_bytes().fill(0x5a);
+            let frame = buffer.freeze().unwrap();
+
+            let mut reused = pool.acquire_for_overwrite().unwrap();
+            assert_eq!(reused.as_mut_rgba_bytes().as_ptr(), pointer);
+            assert!(reused.as_mut_rgba_bytes().iter().all(|&byte| byte == 0x5a));
+            reused.as_mut_rgba_bytes().fill(0x7f);
+            assert!(frame.pixels().iter().all(|&byte| byte == 0x5a));
+            drop(reused);
+
+            let mut cleared = pool.acquire().unwrap();
+            assert_eq!(cleared.as_mut_rgba_bytes().as_ptr(), pointer);
+            assert!(cleared.as_mut_rgba_bytes().iter().all(|&byte| byte == 0));
+        }
+    }
+
+    #[test]
+    fn overwrite_pool_bounds_and_lifetime_survive_failed_freeze() {
+        assert!(RgbaFramePool::new(0, 4, 1).is_err());
+        assert!(RgbaFramePool::new(4, 4, 0).is_err());
+        let pool = RgbaFramePool::new(4, 4, 1).unwrap();
+        let mut buffer = pool.acquire_for_overwrite().unwrap();
+        assert!(pool.acquire().is_err());
+        assert!(pool.acquire_for_overwrite().is_err());
+        assert_eq!(pool.inner.active.load(Ordering::Acquire), 1);
+        // A failed submission must return the slot and leave initialized storage reusable.
+        buffer.data.as_mut().unwrap().truncate(3);
+        assert!(buffer.freeze().is_err());
+        assert_eq!(pool.inner.active.load(Ordering::Acquire), 0);
+        let mut buffer = pool.acquire_for_overwrite().unwrap();
+        assert_eq!(buffer.as_mut_rgba_bytes().len(), 4 * 4 * 4);
+        assert!(buffer.as_mut_rgba_bytes().iter().all(|&byte| byte == 0));
+
+        let owner = Arc::downgrade(&pool.inner);
+        drop(pool);
+        assert!(owner.upgrade().is_some());
+        buffer.as_mut_rgba_bytes().fill(0x5a);
+        drop(buffer);
+        assert!(
+            owner.upgrade().is_none(),
+            "the last buffer must release the pool"
+        );
+    }
+
+    #[test]
+    fn overwrite_acquisition_ffi_validates_handles_and_retains_pool_until_buffer_drop() {
+        assert!(unsafe { clip_stitch_frame_pool_acquire_for_overwrite(ptr::null_mut()) }.is_null());
+        let pool = clip_stitch_frame_pool_create(4, 4, 1);
+        assert!(!pool.is_null());
+        let frame = unsafe { clip_stitch_frame_pool_acquire_for_overwrite(pool) };
+        assert!(!frame.is_null());
+        assert!(unsafe { clip_stitch_frame_pool_acquire_for_overwrite(pool) }.is_null());
+        let mut info = ClipStitchMutableImageInfo {
+            width: 0,
+            height: 0,
+            stride_bytes: 0,
+            rgba_bytes: ptr::null_mut(),
+            rgba_len: 0,
+        };
+        assert_eq!(
+            unsafe { clip_stitch_frame_buffer_info(frame, ptr::null_mut()) },
+            0
+        );
+        assert_eq!(
+            unsafe { clip_stitch_frame_buffer_info(frame, &mut info) },
+            1
+        );
+        assert_eq!(
+            (info.width, info.height, info.stride_bytes, info.rgba_len),
+            (4, 4, 16, 64)
+        );
+        unsafe { clip_stitch_frame_pool_destroy(pool) };
+        let pixels = unsafe { slice::from_raw_parts_mut(info.rgba_bytes, info.rgba_len) };
+        assert!(pixels.iter().all(|&byte| byte == 0));
+        pixels.fill(0x7f);
+        unsafe { clip_stitch_frame_buffer_destroy(frame) };
+    }
+
+    #[test]
+    fn streamed_png_matches_unaligned_vertical_and_horizontal_snapshots() {
+        use clip_stitch_images::CANVAS_TILE_SPAN;
+
+        let temporary = tempfile::tempdir().unwrap();
+        for axis in [StitchAxis::Vertical, StitchAxis::Horizontal] {
+            let (width, height) = match axis {
+                StitchAxis::Vertical => (7, CANVAS_TILE_SPAN * 2 + 73),
+                StitchAxis::Horizontal => (CANVAS_TILE_SPAN * 2 + 73, 137),
+            };
+            let source: Vec<_> = (0..width as usize * height as usize * 4)
+                .map(|index| ((index * 37 + index / 17) % 256) as u8)
+                .collect();
+            let frame = Frame::new(width, height, PixelFormat::Rgba8, source.clone()).unwrap();
+            let full = TiledCanvasSnapshot::from_frame_for_axis(frame, axis);
+            let extent = axis.primary_extent(width, height);
+            let canvas = full.slice_axis(13, extent - 11).unwrap();
+            drop(full);
+            let snapshot = StitchImageSnapshot { canvas };
+            let expected = match axis {
+                StitchAxis::Vertical => source
+                    [13 * width as usize * 4..(height - 11) as usize * width as usize * 4]
+                    .to_vec(),
+                StitchAxis::Horizontal => source
+                    .chunks_exact(width as usize * 4)
+                    .flat_map(|row| row[13 * 4..(width - 11) as usize * 4].iter().copied())
+                    .collect(),
+            };
+            for (index, compression) in [
+                PngCompression::Fast,
+                PngCompression::Balanced,
+                PngCompression::Best,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let output = temporary.path().join(format!("{axis:?}-{index}.png"));
+                let (progress_tx, progress) = sync_channel(64);
+                export_png(
+                    snapshot.clone(),
+                    PngExportRequest {
+                        output_path: output.clone(),
+                        compression,
+                        overwrite: false,
+                    },
+                    Arc::new(AtomicBool::new(false)),
+                    progress_tx,
+                )
+                .unwrap();
+                let mut reader = png::Decoder::new(std::io::BufReader::new(
+                    std::fs::File::open(&output).unwrap(),
+                ))
+                .read_info()
+                .unwrap();
+                let mut decoded = vec![0; reader.output_buffer_size().unwrap()];
+                let info = reader.next_frame(&mut decoded).unwrap();
+                assert_eq!(
+                    (info.width, info.height),
+                    (snapshot.width(), snapshot.height())
+                );
+                assert_eq!(info.color_type, png::ColorType::Rgba);
+                assert_eq!(info.bit_depth, png::BitDepth::Eight);
+                assert_eq!(&decoded[..info.buffer_size()], expected.as_slice());
+                let updates: Vec<_> = progress.try_iter().collect();
+                assert!(matches!(updates[0].stage, PngExportStage::Preparing));
+                assert!(matches!(
+                    updates.last().unwrap().stage,
+                    PngExportStage::Committing
+                ));
+                let encoded_rows: Vec<_> = updates
+                    .iter()
+                    .filter(|update| matches!(update.stage, PngExportStage::Encoding))
+                    .map(|update| update.rows_written)
+                    .collect();
+                assert_eq!(encoded_rows.last(), Some(&snapshot.height()));
+                assert!(encoded_rows.windows(2).all(|rows| rows[1] - rows[0] <= 64));
+            }
+        }
+    }
+
+    #[test]
+    fn streamed_png_cancellation_and_commit_failure_leave_no_temporary_output() {
+        let temporary = tempfile::tempdir().unwrap();
+        let output = temporary.path().join("stitched.png");
+        let snapshot = StitchImageSnapshot {
+            canvas: TiledCanvasSnapshot::from_frame(
+                Frame::new(5, 137, PixelFormat::Rgba8, vec![0x7f; 5 * 137 * 4]).unwrap(),
+            ),
+        };
+        let (progress_tx, _) = sync_channel(16);
+        assert!(matches!(
+            export_png(
+                snapshot.clone(),
+                PngExportRequest {
+                    output_path: output.clone(),
+                    compression: PngCompression::Fast,
+                    overwrite: false
+                },
+                Arc::new(AtomicBool::new(true)),
+                progress_tx,
+            ),
+            Err(PngExportError::Canceled)
+        ));
+        assert_eq!(std::fs::read_dir(temporary.path()).unwrap().count(), 0);
+        std::fs::write(&output, b"original").unwrap();
+        let (progress_tx, _) = sync_channel(16);
+        assert!(matches!(
+            export_png(
+                snapshot,
+                PngExportRequest {
+                    output_path: output.clone(),
+                    compression: PngCompression::Fast,
+                    overwrite: false
+                },
+                Arc::new(AtomicBool::new(false)),
+                progress_tx,
+            ),
+            Err(PngExportError::Failed(_))
+        ));
+        assert_eq!(std::fs::read(&output).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(temporary.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn snapshot_export_writes_png_and_honors_no_clobber() {
+        let temporary = tempfile::tempdir().unwrap();
+        let output = temporary.path().join("stitched.png");
+        let snapshot = StitchImageSnapshot {
+            canvas: TiledCanvasSnapshot::from_frame(
+                Frame::new(5, 5, PixelFormat::Rgba8, vec![0x7f; 5 * 5 * 4]).unwrap(),
+            ),
+        };
+        let task = snapshot
+            .export_png(PngExportRequest {
+                output_path: output.clone(),
+                compression: PngCompression::Best,
+                overwrite: false,
+            })
+            .unwrap();
+
+        task.wait().unwrap();
+
+        assert_eq!(&std::fs::read(&output).unwrap()[..8], b"\x89PNG\r\n\x1a\n");
+        assert!(
+            snapshot
+                .export_png(PngExportRequest {
+                    output_path: output,
+                    compression: PngCompression::Fast,
+                    overwrite: false,
+                })
+                .is_err()
+        );
+    }
+}

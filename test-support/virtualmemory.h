@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#ifndef SNOW_TEST_SUPPORT_VIRTUAL_MEMORY_H
-#define SNOW_TEST_SUPPORT_VIRTUAL_MEMORY_H
+#ifndef CLIP_TEST_SUPPORT_VIRTUAL_MEMORY_H
+#define CLIP_TEST_SUPPORT_VIRTUAL_MEMORY_H
 
 #include <cstdint>
 
@@ -17,7 +17,7 @@
 #include <unistd.h>
 #endif
 
-namespace snow::test_support {
+namespace clip::test_support {
 // Query the address map, not RSS or residency. In particular, macOS mincore
 // can succeed with zero residency bits for an unmapped address.
 inline bool virtualMemoryMapped(const void* address) {
@@ -44,5 +44,5 @@ inline bool virtualMemoryMapped(const void* address) {
     return mincore(base, page, &residency) == 0;
 #endif
 }
-} // namespace snow::test_support
+} // namespace clip::test_support
 #endif

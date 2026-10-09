@@ -1,0 +1,123 @@
+set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/clip_shot.app")
+# Remove the obsolete helper from reused install/package staging directories.
+file(REMOVE "${_app}/Contents/MacOS/clip-shot-updater")
+if(@CLIP_SHOT_ENABLE_MCP@ AND NOT EXISTS "${_app}/Contents/MacOS/clip-shot-mcp")
+    message(FATAL_ERROR "The packaged Clip MCP bridge is missing")
+endif()
+set(_clip_mcp_deploy_arguments)
+if(@CLIP_SHOT_ENABLE_MCP@)
+    list(APPEND _clip_mcp_deploy_arguments "-executable=${_app}/Contents/MacOS/clip-shot-mcp")
+endif()
+set(_clip_codesign_identity [==[@CLIP_MACOS_CODESIGN_IDENTITY@]==])
+if(_clip_codesign_identity STREQUAL "-")
+    message(WARNING "Clip is ad-hoc signed. Rebuilds can invalidate macOS privacy grants even when System Settings shows them enabled. Use CLIP_MACOS_CODESIGN_IDENTITY with a persistent certificate to retain the signing identity.")
+endif()
+string(TOLOWER "${CMAKE_INSTALL_CONFIG_NAME}" _clip_install_config)
+set(_clip_ocr_runtime_arguments)
+set(_clip_ocr_model_arguments)
+if(@CLIP_MACOS_OCR_RUNTIME_ONLY@)
+    list(APPEND _clip_ocr_model_arguments --runtime-only)
+    list(APPEND _clip_ocr_runtime_arguments --runtime-only)
+endif()
+if(@CLIP_SHOT_OCR_STATIC_ONNXRUNTIME@)
+    list(APPEND _clip_ocr_runtime_arguments --static-runtime)
+endif()
+if(_clip_install_config STREQUAL "debug")
+    set(_clip_vcpkg_library_dir "@CLIP_FFMPEG_ROOT@/debug/lib")
+else()
+    set(_clip_vcpkg_library_dir "@CLIP_FFMPEG_ROOT@/lib")
+endif()
+if(@CLIP_MACOS_OCR_ASSETS_ENABLED@ AND NOT @CLIP_SHOT_OCR_STATIC_ONNXRUNTIME@)
+    execute_process(COMMAND "@Python3_EXECUTABLE@" "@CLIP_MACOS_OCR_TOOL@" prepare-bundle
+        --app "${_app}" --library-dir "${_clip_vcpkg_library_dir}"
+        ${_clip_ocr_model_arguments}
+        COMMAND_ERROR_IS_FATAL ANY)
+else()
+    execute_process(COMMAND "@Python3_EXECUTABLE@" "@CLIP_MACOS_OCR_TOOL@" prepare-bundle
+        --app "${_app}" ${_clip_ocr_model_arguments} COMMAND_ERROR_IS_FATAL ANY)
+endif()
+if(NOT @CLIP_SHOT_QT_STATIC@)
+    # This dlopen-only library is deliberately renamed to ORT's stable lookup name.
+    # Update its own Mach-O ID before macdeployqt scans it as an extra executable.
+    execute_process(COMMAND /usr/bin/install_name_tool -id "@loader_path/libonnxruntime.dylib"
+        "${_app}/Contents/MacOS/libonnxruntime.dylib" RESULT_VARIABLE _result)
+    if(NOT _result EQUAL 0)
+        message(FATAL_ERROR "Could not update the ONNX Runtime install name (${_result})")
+    endif()
+    execute_process(COMMAND "@CLIP_MACDEPLOYQT@" "${_app}"
+        "-executable=${_app}/Contents/MacOS/clip-ocr-process"
+        ${_clip_mcp_deploy_arguments}
+        "-executable=${_app}/Contents/MacOS/crashpad_handler"
+        "-executable=${_app}/Contents/MacOS/libonnxruntime.dylib"
+        "-executable=${_app}/Contents/PlugIns/platforms/libqoffscreen.dylib"
+        "-libpath=${_clip_vcpkg_library_dir}"
+        -always-overwrite "-codesign=${_clip_codesign_identity}"
+        RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+    if(NOT _result EQUAL 0 OR "${_output}${_error}" MATCHES "ERROR:")
+        message(FATAL_ERROR "macdeployqt failed (${_result}):\n${_output}\n${_error}")
+    endif()
+elseif(@CLIP_SHOT_QT_STATIC@)
+    file(GLOB_RECURSE _clip_bundle_files LIST_DIRECTORIES FALSE "${_app}/Contents/*")
+    foreach(_clip_bundle_file IN LISTS _clip_bundle_files)
+        if(IS_SYMLINK "${_clip_bundle_file}")
+            continue()
+        endif()
+        execute_process(COMMAND /usr/bin/file -b "${_clip_bundle_file}"
+            OUTPUT_VARIABLE _clip_file_type OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(NOT _clip_file_type MATCHES "Mach-O")
+            continue()
+        endif()
+        execute_process(COMMAND /usr/bin/otool -L "${_clip_bundle_file}"
+            OUTPUT_VARIABLE _clip_loads COMMAND_ERROR_IS_FATAL ANY)
+        string(REPLACE "\n" ";" _clip_load_lines "${_clip_loads}")
+        list(REMOVE_AT _clip_load_lines 0)
+        foreach(_clip_load_line IN LISTS _clip_load_lines)
+            string(STRIP "${_clip_load_line}" _clip_load_line)
+            if(_clip_load_line STREQUAL "")
+                continue()
+            endif()
+            string(REGEX REPLACE "[ \t]+\\(compatibility version.*$" "" _clip_dependency "${_clip_load_line}")
+            if(NOT _clip_dependency MATCHES "^(/usr/lib/|/System/Library/)")
+                message(FATAL_ERROR
+                    "Static package contains a non-system dependency: ${_clip_bundle_file}: ${_clip_dependency}")
+            endif()
+        endforeach()
+        if(@CLIP_SHOT_RELEASE_STATIC@ AND _clip_install_config STREQUAL "release")
+            # The packaging entry point archives UUID-matched dSYMs first. Strip
+            # only deployment copies, retaining external symbols and the build
+            # binaries for diagnostics and development. OCR hashes must describe
+            # the stripped, re-signed worker rather than its build-tree bytes.
+            execute_process(COMMAND /usr/bin/strip -S -x "${_clip_bundle_file}"
+                COMMAND_ERROR_IS_FATAL ANY)
+        endif()
+        execute_process(COMMAND /usr/bin/codesign --force --sign "${_clip_codesign_identity}"
+            "${_clip_bundle_file}" COMMAND_ERROR_IS_FATAL ANY)
+    endforeach()
+endif()
+if(@CLIP_MACOS_OCR_ASSETS_ENABLED@)
+    # Deployment has finalized and signed the nested Mach-O files. Pin those
+    # final bytes, then seal the changed resources without re-signing the worker.
+    execute_process(COMMAND "@Python3_EXECUTABLE@" "@CLIP_MACOS_OCR_TOOL@" finalize --deployed
+        --arch "@CLIP_MACOS_OCR_ARCH@"
+        --manifest "@CLIP_MACOS_OCR_MANIFEST@"
+        --runtime-dir "${_app}/Contents/MacOS"
+        ${_clip_ocr_runtime_arguments}
+        COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND /usr/bin/codesign --force --sign "${_clip_codesign_identity}" "${_app}"
+        COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND "@Python3_EXECUTABLE@" "@CLIP_MACOS_OCR_TOOL@" verify
+        --arch "@CLIP_MACOS_OCR_ARCH@"
+        --manifest "@CLIP_MACOS_OCR_MANIFEST@"
+        --runtime-dir "${_app}/Contents/MacOS" --app "${_app}"
+        --report "@CMAKE_BINARY_DIR@/macos-ocr-verification.json"
+        ${_clip_ocr_runtime_arguments}
+        COMMAND_ERROR_IS_FATAL ANY)
+elseif(@CLIP_SHOT_QT_STATIC@)
+    execute_process(COMMAND /usr/bin/codesign --force --sign "${_clip_codesign_identity}" "${_app}"
+        COMMAND_ERROR_IS_FATAL ANY)
+endif()
+execute_process(COMMAND /usr/bin/codesign --verify --deep --strict "${_app}"
+    RESULT_VARIABLE _result)
+if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Clip bundle signature verification failed (${_result})")
+endif()

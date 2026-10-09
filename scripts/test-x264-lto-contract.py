@@ -19,7 +19,7 @@ FLAGS = ('VCPKG_C_FLAGS', 'VCPKG_CXX_FLAGS', 'VCPKG_LINKER_FLAGS',
 
 class X264LtoFixture(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='snow-x264-lto-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='clip-x264-lto-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.cmake = shutil.which('cmake')

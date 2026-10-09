@@ -1,0 +1,18 @@
+[package]
+name = "clip-draw-engine-scene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clip-draw-engine-core = { path = "../clip-draw-engine-core" }
+clip-draw-engine-document = { path = "../clip-draw-engine-document" }
+clip-draw-engine-display = { path = "../clip-draw-engine-display" }
+clip-draw-engine-editor = { path = "../clip-draw-engine-editor" }
+clip-draw-engine-model = { path = "../clip-draw-engine-model" }
+
+[lib]
+path = "src/lib.rs"

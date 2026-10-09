@@ -1,0 +1,42 @@
+[package]
+name = "clip-shot-rust-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+clip-core = { path = "../clip-crates/crates/clip-core" }
+clip-visual-region-detector-c = { path = "../clip-crates/crates/clip-visual-region-detector-c" }
+clip-recording-effects-c = { path = "../clip-crates/crates/clip-recording-effects-c" }
+clip-diagnostics = { path = "../clip-crates/crates/clip-diagnostics" }
+clip-recording-c = { path = "../clip-crates/crates/clip-recording-c" }
+clip-capture-c = { path = "../clip-crates/crates/clip-capture-c" }
+clip-draw-engine-c = { path = "../clip_draw_engine_qt/crates/clip-draw-engine-c" }
+clip-stitch-images-c = { path = "../clip-crates/crates/clip-stitch-images-c" }
+clip-selected-text-c = { path = "../clip-crates/crates/clip-selected-text-c", optional = true }
+
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+clip-ui-selector-c = { path = "../clip-crates/crates/clip-ui-selector-c" }
+
+[features]
+perf-instrumentation = ["clip-stitch-images-c/perf-instrumentation"]
+selected-text = ["dep:clip-selected-text-c"]
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+debug = 2
+incremental = false
+overflow-checks = false
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 2
+codegen-units = 16
+lto = "thin"
+incremental = true

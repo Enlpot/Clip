@@ -1,13 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
-  "name": "snow-apps",
+  "name": "clip-apps",
   "version-semver": "0.1.0",
   "dependencies": [],
   "overrides": [
     { "name": "flatbuffers", "version": "23.5.26" },
-    { "name": "abseil", "version": "20250814.1" },
+    { "name": "abseil", "version": "20250512.1" },
     { "name": "ffmpeg", "version": "9.0" },
-    { "name": "ffmpeg-bin2c", "version": "9.0" }
+    { "name": "ffmpeg-bin2c", "version": "9.0" },
+    { "name": "protobuf", "version": "5.29.3" }
   ],
   "features": {
     "macos-media": {
@@ -17,27 +18,27 @@
           "name": "ffmpeg",
           "default-features": false,
           "features": [
-            "snow-macos-media"
+            "clip-macos-media"
           ]
         }
       ]
     },
-    "snow-shot": {
-      "description": "Build the minimal native dependency set required by Snow Shot on the selected architecture.",
+    "clip-shot": {
+      "description": "Build the minimal native dependency set required by Clip on the selected architecture.",
       "dependencies": [
         { "name": "crashpad", "platform": "windows | osx" },
         {
           "name": "ffmpeg",
           "default-features": false,
           "features": [
-            "snow-shot-minimal"
+            "clip-shot-minimal"
           ],
           "platform": "windows"
         },
         {
           "name": "ffmpeg",
           "default-features": false,
-          "features": ["snow-macos-media"],
+          "features": ["clip-macos-media"],
           "platform": "osx"
         },
         { "name": "libpng", "features": ["apng"] },
@@ -67,7 +68,7 @@
       ]
     },
     "full-codecs": {
-      "description": "Enable the complete Snow Image codec profile.",
+      "description": "Enable the complete Clip Image codec profile.",
       "dependencies": [
         "giflib",
         { "name": "libheif", "default-features": false, "features": ["aom", "hevc"] },
@@ -80,7 +81,7 @@
       ]
     },
     "image-viewer": {
-      "description": "Build the native dependencies required by Snow Image Viewer.",
+      "description": "Build the native dependencies required by Clip Image Viewer.",
       "dependencies": [
         "vulkan-headers"
       ]

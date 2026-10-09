@@ -1,0 +1,18 @@
+[package]
+name = "clip-draw-engine-document"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clip-draw-engine-core = { path = "../clip-draw-engine-core" }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[lib]
+path = "src/lib.rs"

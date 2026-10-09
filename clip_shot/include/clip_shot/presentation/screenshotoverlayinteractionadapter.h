@@ -1,0 +1,53 @@
+#ifndef CLIP_SHOT_PRESENTATION_SCREENSHOTOVERLAYINTERACTIONADAPTER_H
+#define CLIP_SHOT_PRESENTATION_SCREENSHOTOVERLAYINTERACTIONADAPTER_H
+
+#include "clip_shot/presentation/screenshotoverlayeventsink.h"
+
+#include <QPoint>
+#include <QPointF>
+#include <Qt>
+
+#include <functional>
+
+class ScreenshotOverlayInputHandler;
+class ScreenshotOverlayWindow;
+
+class ScreenshotOverlayEventAdapter final : public ScreenshotOverlayEventSink {
+  public:
+    void setEventTargets(ScreenshotOverlayInputHandler& inputHandler,
+                         std::function<void()> raiseToolbarForCanvasInteraction);
+    void clearEventTargets();
+    bool acceptOverlayInput(bool genuine) override;
+
+    [[nodiscard]] bool shouldHandleOverlayMouseEvent(const ScreenshotOverlayWindow* overlay,
+                                                     const QPointF& localPosition,
+                                                     bool leftButtonActive) const override;
+    void handleOverlayMousePress(ScreenshotOverlayWindow* overlay,
+                                 const QPointF& localPosition) override;
+    void handleOverlayMouseMove(ScreenshotOverlayWindow* overlay,
+                                const QPointF& localPosition) override;
+    void handleOverlayMouseRelease(ScreenshotOverlayWindow* overlay,
+                                   const QPointF& localPosition) override;
+    void completeRightClickCancellation() override;
+    bool effectDragActive() const override;
+    void leaveEffectEditors() override;
+    void cancelEffectDrag() override;
+    bool handleEffectDoubleClick(ScreenshotOverlayWindow*, const QPointF&) override;
+    [[nodiscard]] ScreenshotOverlayRightClickResult
+    handleOverlayRightClick(ScreenshotOverlayWindow* overlay,
+                            const QPointF& localPosition) override;
+    bool handleRegionDoubleClick(ScreenshotOverlayWindow*, const QPointF&) override;
+    void handleUnhandledLeftDoubleClick() override;
+    void handleUnhandledMiddleClick() override;
+    [[nodiscard]] bool handleOverlayWheel(ScreenshotOverlayWindow* overlay,
+                                          const QPointF& localPosition, const QPoint& angleDelta,
+                                          const QPoint& pixelDelta) override;
+    [[nodiscard]] bool shouldBlockUnhandledOverlayKeyInput() const override;
+    void raiseToolbarForCanvasInteraction() override;
+
+  private:
+    ScreenshotOverlayInputHandler* m_inputHandler = nullptr;
+    std::function<void()> m_raiseToolbarForCanvasInteraction;
+};
+
+#endif // CLIP_SHOT_PRESENTATION_SCREENSHOTOVERLAYINTERACTIONADAPTER_H

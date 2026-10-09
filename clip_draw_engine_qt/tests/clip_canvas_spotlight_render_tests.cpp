@@ -1,0 +1,544 @@
+#include "clip_canvas_display_item.h"
+#include "clip_canvas_export.h"
+#include "clip_canvas_ffi_handles.h"
+#include "clip_canvas_render_diagnostics.h"
+#include "clip_canvas_spotlight_renderer.h"
+#include "clip_canvas_viewport.h"
+#include "clip_draw_engine_qt/clip_canvas_widget.h"
+
+#include <QApplication>
+#include <QColor>
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEvent>
+#include <QImage>
+#include <QObject>
+#include <QPainter>
+#include <QRegion>
+#include <QThread>
+
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <vector>
+
+namespace {
+
+void require(bool condition, const char* message) {
+    if (!condition) {
+        std::cerr << message << '\n';
+        std::exit(1);
+    }
+}
+
+class PaintObserver final : public QObject {
+  public:
+    void begin() {
+        m_sawPaint = false;
+        m_observing = true;
+    }
+
+    bool sawPaint() const {
+        return m_sawPaint;
+    }
+
+  protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        Q_UNUSED(watched);
+        if (m_observing && event != nullptr && event->type() == QEvent::Paint) {
+            m_sawPaint = true;
+        }
+        return false;
+    }
+
+  private:
+    bool m_observing = false;
+    bool m_sawPaint = false;
+};
+
+SceneDisplayInfo sceneInfo() {
+    SceneDisplayInfo info;
+    info.surface_width = 100.0;
+    info.surface_height = 100.0;
+    info.camera_center_x = 50.0;
+    info.camera_center_y = 50.0;
+    info.camera_zoom = 1.0;
+    return info;
+}
+
+ClipSpotlightCutout cutout(double centerX, double centerY, double width, double height,
+                           double rotation = 0.0) {
+    ClipSpotlightCutout item{};
+    item.center_x = centerX;
+    item.center_y = centerY;
+    item.width = width;
+    item.height = height;
+    item.rotation = rotation;
+    return item;
+}
+
+QImage render(const ClipSpotlightCutout* items, std::uint32_t itemCount,
+              const QRectF& renderArea = QRectF(0.0, 0.0, 100.0, 100.0),
+              const QRegion& exposed = QRegion(QRect(0, 0, 100, 100)), bool active = true,
+              const SceneDisplayInfo& projection = sceneInfo()) {
+    QImage image(100, 100, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::white);
+    QPainter painter(&image);
+    painter.setClipRegion(exposed);
+    clip_canvas_spotlight_renderer::render(
+        painter, projection, SpotlightDisplayInfo{ClipColorRgba8{0, 0, 0, 255}, 0.64, active},
+        items, itemCount, renderArea, exposed);
+    painter.end();
+    return image;
+}
+
+bool isDefaultMaskPixel(QRgb pixel) {
+    return qAlpha(pixel) == 255 && qRed(pixel) == qGreen(pixel) && qGreen(pixel) == qBlue(pixel) &&
+           qRed(pixel) >= 91 && qRed(pixel) <= 93;
+}
+
+void defaultMaskHasExactOpacityAndTransparentHole() {
+    const ClipSpotlightCutout item = cutout(50.0, 50.0, 40.0, 30.0);
+    const QImage image = render(&item, 1);
+    require(isDefaultMaskPixel(image.pixel(5, 5)),
+            "default spotlight mask must composite 64% black");
+    require(image.pixelColor(50, 50) == QColor(Qt::white),
+            "spotlight rectangle must reveal the unmasked canvas");
+}
+
+void spotlightTypesRenderDistinctHolesAndMixedOverlaps() {
+    for (const auto shape : {CLIP_DISPLAY_RECT_SHAPE_RECTANGLE, CLIP_DISPLAY_RECT_SHAPE_ELLIPSE,
+                             CLIP_DISPLAY_RECT_SHAPE_DIAMOND}) {
+        ClipSpotlightCutout item = cutout(50.0, 50.0, 40.0, 40.0);
+        item.shape = static_cast<std::uint8_t>(shape);
+        const QImage image = render(&item, 1);
+        require(image.pixelColor(50, 50) == QColor(Qt::white),
+                "every spotlight type must reveal its interior");
+        require((image.pixelColor(63, 63) == QColor(Qt::white)) ==
+                    (shape != CLIP_DISPLAY_RECT_SHAPE_DIAMOND),
+                "diamond corners must differ from rectangle and ellipse geometry");
+        require((image.pixelColor(67, 67) == QColor(Qt::white)) ==
+                    (shape == CLIP_DISPLAY_RECT_SHAPE_RECTANGLE),
+                "ellipse and diamond must leave bounding-box corners masked");
+        item.rotation = std::acos(-1.0) / 2.0;
+        item.width = 60.0;
+        item.height = 20.0;
+        const QImage rotated = render(&item, 1);
+        require(rotated.pixelColor(50, 70) == QColor(Qt::white) &&
+                    isDefaultMaskPixel(rotated.pixel(70, 50)),
+                "spotlight shape geometry must rotate with the element");
+        SceneDisplayInfo zoomed = sceneInfo();
+        zoomed.camera_zoom = 2.0;
+        const QImage projected =
+            render(&item, 1, QRectF(0, 0, 100, 100), QRegion(QRect(0, 0, 100, 100)), true, zoomed);
+        require(projected.pixelColor(50, 90) == QColor(Qt::white),
+                "spotlight paths must follow camera zoom");
+        const QImage partial =
+            render(&item, 1, QRectF(0, 0, 100, 100), QRegion(QRect(0, 0, 20, 20)));
+        require(isDefaultMaskPixel(partial.pixel(5, 5)) &&
+                    partial.pixelColor(90, 90) == QColor(Qt::white),
+                "partial exposure must constrain work for every spotlight shape");
+    }
+    ClipSpotlightCutout items[] = {cutout(40, 50, 40, 40), cutout(60, 50, 40, 40)};
+    items[0].shape = CLIP_DISPLAY_RECT_SHAPE_ELLIPSE;
+    items[1].shape = CLIP_DISPLAY_RECT_SHAPE_DIAMOND;
+    const QImage image = render(items, 2);
+    require(image.pixelColor(50, 50) == QColor(Qt::white) &&
+                image.pixelColor(60, 50) == QColor(Qt::white) &&
+                isDefaultMaskPixel(image.pixel(75, 65)),
+            "mixed spotlight holes must form a union without refilling overlaps");
+}
+
+void spotlightTypeSurvivesDisplayPatchesAndExport() {
+    for (const auto shape : {CLIP_RECTANGLE_SHAPE_RECTANGLE, CLIP_RECTANGLE_SHAPE_ELLIPSE,
+                             CLIP_RECTANGLE_SHAPE_DIAMOND}) {
+        ClipStyleDefaults defaults{};
+        require(clip_runtime_style_defaults_default(&defaults) == CLIP_OK,
+                "spotlight export fixture must load valid runtime defaults");
+        defaults.spotlight_shape = shape;
+        ClipRuntimeConfig runtimeConfig{&defaults};
+        ScopedRuntimeHandle runtime;
+        require(clip_runtime_create_with_config(&runtimeConfig, runtime.outParam()) == CLIP_OK,
+                "spotlight export fixture must create a configured runtime");
+        ClipCanvasViewport viewport;
+        require(viewport.create(runtime.get(), clip_canvas_viewport::defaultEngineConfig()) &&
+                    clip_viewport_set_surface_size(runtime.get(), viewport.get(), 100, 100) ==
+                        CLIP_OK,
+                "spotlight export fixture must create a viewport");
+        ScopedChangedViewportList changed;
+        require(clip_viewport_set_active_tool_ex(runtime.get(), viewport.get(),
+                                                 CLIP_ACTIVE_TOOL_SPOTLIGHT,
+                                                 changed.outParam()) == CLIP_OK,
+                "spotlight export fixture must activate its tool");
+        for (const auto type :
+             {CLIP_POINTER_EVENT_DOWN, CLIP_POINTER_EVENT_MOVE, CLIP_POINTER_EVENT_UP}) {
+            ClipInputEvent event{};
+            event.kind = CLIP_INPUT_EVENT_POINTER;
+            event.pointer.pointer_id = 1;
+            event.pointer.event_type = type;
+            event.pointer.device = CLIP_POINTER_DEVICE_MOUSE;
+            event.pointer.position_x = type == CLIP_POINTER_EVENT_DOWN ? 30 : 70;
+            event.pointer.position_y = type == CLIP_POINTER_EVENT_DOWN ? 30 : 70;
+            event.pointer.button = type == CLIP_POINTER_EVENT_MOVE ? CLIP_POINTER_BUTTON_NONE
+                                                                   : CLIP_POINTER_BUTTON_PRIMARY;
+            event.pointer.buttons = type == CLIP_POINTER_EVENT_UP ? 0 : 1;
+            ClipInteractionOutput output{};
+            require(clip_viewport_process_input_ex(runtime.get(), viewport.get(), &event, &output,
+                                                   changed.outParam()) == CLIP_OK,
+                    "spotlight export fixture must create a cutout");
+        }
+        ClipCanvasDisplayCache cache;
+        require(cache.sync(runtime.get(), viewport.get()) && cache.spotlightCutoutCount() == 1 &&
+                    cache.spotlightCutouts()[0].shape == static_cast<std::uint8_t>(shape),
+                "dedicated spotlight display patches must retain the selected type");
+        const QImage expected = render(cache.spotlightCutouts(), 1, QRectF(0, 0, 100, 100),
+                                       QRegion(QRect(0, 0, 100, 100)), true, cache.sceneInfo());
+        QImage background(100, 100, QImage::Format_ARGB32_Premultiplied);
+        background.fill(Qt::white);
+        const QRectF canvasRect(-50, -50, 100, 100);
+        const QImage exported =
+            clip_canvas_export::renderToImage(runtime.get(), canvasRect, QSize(100, 100),
+                                              {CanvasExportSource{background, canvasRect}});
+        require(exported == expected,
+                "spotlight exports must match the live cutout renderer for every type");
+        for (const auto type : {CLIP_POINTER_EVENT_DOWN, CLIP_POINTER_EVENT_UP}) {
+            ClipInputEvent event{};
+            event.kind = CLIP_INPUT_EVENT_POINTER;
+            event.pointer.pointer_id = 1;
+            event.pointer.event_type = type;
+            event.pointer.device = CLIP_POINTER_DEVICE_MOUSE;
+            event.pointer.position_x = 50;
+            event.pointer.position_y = 50;
+            event.pointer.button = CLIP_POINTER_BUTTON_PRIMARY;
+            event.pointer.buttons = type == CLIP_POINTER_EVENT_DOWN ? 1 : 0;
+            ClipInteractionOutput output{};
+            require(clip_viewport_process_input_ex(runtime.get(), viewport.get(), &event, &output,
+                                                   changed.outParam()) == CLIP_OK,
+                    "spotlight interior must support quick selection");
+            require(cache.sync(runtime.get(), viewport.get()),
+                    "spotlight selection must keep the display patch cursor current");
+        }
+        ClipStyleToolbarState toolbarState{};
+        require(clip_viewport_get_style_toolbar_state(runtime.get(), viewport.get(),
+                                                      &toolbarState) == CLIP_OK &&
+                    toolbarState.source == CLIP_STYLE_TOOLBAR_SOURCE_SELECTED_SPOTLIGHT,
+                "a spotlight shape edit must target the selected cutout");
+        const auto sceneRevision = cache.patchCursor().scene_revision;
+        ClipShapeStyle style{};
+        style.shape = shape == CLIP_RECTANGLE_SHAPE_DIAMOND ? CLIP_RECTANGLE_SHAPE_ELLIPSE
+                                                            : CLIP_RECTANGLE_SHAPE_DIAMOND;
+        require(clip_viewport_set_shape_style_patch_ex(
+                    runtime.get(), viewport.get(), &style, CLIP_SHAPE_STYLE_PROPERTY_SHAPE,
+                    CLIP_SHAPE_KIND_SPOTLIGHT, changed.outParam()) == CLIP_OK &&
+                    cache.sync(runtime.get(), viewport.get()),
+                "spotlight type changes must propagate through display cache patches");
+        require(cache.spotlightCutouts()[0].shape == static_cast<std::uint8_t>(style.shape),
+                "spotlight type edits must change the selected cutout type");
+        require(cache.patchCursor().scene_revision == sceneRevision &&
+                    cache.sceneDirtyRectCount() == 0,
+                "spotlight type edits must update decoration geometry without dirtying the "
+                "retained scene");
+    }
+}
+
+void overlappingAndRotatedCutoutsUseAPathUnion() {
+    const ClipSpotlightCutout overlap[] = {
+        cutout(40.0, 50.0, 30.0, 24.0),
+        cutout(60.0, 50.0, 30.0, 24.0),
+    };
+    const QImage unionImage = render(overlap, 2);
+    require(unionImage.pixelColor(50, 50) == QColor(Qt::white),
+            "overlapping spotlight rectangles must form one transparent union");
+
+    const ClipSpotlightCutout rotated = cutout(50.0, 50.0, 40.0, 20.0, std::acos(-1.0) / 4.0);
+    const QImage rotatedImage = render(&rotated, 1);
+    require(rotatedImage.pixelColor(50, 50) == QColor(Qt::white),
+            "rotated spotlight must keep its center transparent");
+    require(isDefaultMaskPixel(rotatedImage.pixel(68, 50)),
+            "rotated spotlight must not use its axis-aligned bounding box as the hole");
+
+    bool foundAntialiasedEdge = false;
+    for (int y = 30; y <= 70 && !foundAntialiasedEdge; ++y) {
+        for (int x = 30; x <= 70; ++x) {
+            const int red = qRed(rotatedImage.pixel(x, y));
+            if (red > 92 && red < 255) {
+                foundAntialiasedEdge = true;
+                break;
+            }
+        }
+    }
+    require(foundAntialiasedEdge, "rotated spotlight edge must be antialiased");
+}
+
+void renderAreaAndExposureLimitMaskWork() {
+    const ClipSpotlightCutout item = cutout(50.0, 50.0, 16.0, 16.0);
+    const QImage bounded = render(&item, 1, QRectF(20.0, 20.0, 60.0, 60.0));
+    require(bounded.pixelColor(5, 5) == QColor(Qt::white),
+            "pixels outside an explicit spotlight render area must remain untouched");
+    require(isDefaultMaskPixel(bounded.pixel(25, 25)),
+            "pixels inside the bounded render area must be masked");
+    require(bounded.pixelColor(50, 50) == QColor(Qt::white),
+            "cutouts must remain transparent inside a bounded render area");
+
+    const QImage empty = render(&item, 1, QRectF());
+    require(empty.pixelColor(25, 25) == QColor(Qt::white),
+            "an explicitly empty render area must suppress the mask");
+
+    QRegion exposed(QRect(0, 0, 20, 20));
+    exposed += QRect(80, 80, 20, 20);
+    const QImage clipped = render(nullptr, 0, QRectF(0, 0, 100, 100), exposed);
+    require(isDefaultMaskPixel(clipped.pixel(5, 5)) && isDefaultMaskPixel(clipped.pixel(90, 90)),
+            "every exposed region must receive the mask");
+    require(clipped.pixelColor(50, 50) == QColor(Qt::white),
+            "unexposed pixels must not be repainted by the mask pass");
+}
+
+void inactiveMaskLeavesCanvasUnchanged() {
+    const ClipSpotlightCutout item = cutout(50.0, 50.0, 20.0, 20.0);
+    const QImage image =
+        render(&item, 1, QRectF(0.0, 0.0, 100.0, 100.0), QRegion(QRect(0, 0, 100, 100)), false);
+    require(image.pixelColor(5, 5) == QColor(Qt::white),
+            "removing the final spotlight cutout must remove the global mask");
+}
+
+void zeroAlphaAndNonintersectingExposureSkipGeometry() {
+    const ClipSpotlightCutout item = cutout(50.0, 50.0, 30.0, 20.0);
+    QImage image(100, 100, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::white);
+    QPainter painter(&image);
+    clip_canvas_spotlight_renderer::resetDiagnosticsForCurrentThread();
+    clip_canvas_spotlight_renderer::render(
+        painter, sceneInfo(), SpotlightDisplayInfo{ClipColorRgba8{0, 0, 0, 0}, 1.0, true}, &item, 1,
+        QRectF(0.0, 0.0, 100.0, 100.0), QRegion(QRect(0, 0, 100, 100)));
+    clip_canvas_spotlight_renderer::render(
+        painter, sceneInfo(), SpotlightDisplayInfo{ClipColorRgba8{0, 0, 0, 255}, 1.0, true}, &item,
+        1, QRectF(0.0, 0.0, 20.0, 20.0), QRegion(QRect(80, 80, 20, 20)));
+    painter.end();
+    const auto diagnostics = clip_canvas_spotlight_renderer::diagnosticsForCurrentThread();
+    require(diagnostics.earlyExitCount == 2,
+            "transparent and nonintersecting spotlight paints must be diagnosed as early exits");
+}
+
+void displayCachePatchesSpotlightIndependentlyFromStyle() {
+    ScopedRuntimeHandle runtime;
+    require(clip_runtime_create(runtime.outParam()) == CLIP_OK,
+            "spotlight runtime creation must succeed");
+    ClipCanvasViewport viewport;
+    ClipEngineConfig config = clip_canvas_viewport::defaultEngineConfig();
+    require(viewport.create(runtime.get(), config), "spotlight viewport creation must succeed");
+    require(clip_viewport_set_surface_size(runtime.get(), viewport.get(), 100, 100) == CLIP_OK,
+            "spotlight surface setup must succeed");
+    ScopedChangedViewportList toolChange;
+    require(clip_viewport_set_active_tool_ex(runtime.get(), viewport.get(),
+                                             CLIP_ACTIVE_TOOL_SPOTLIGHT,
+                                             toolChange.outParam()) == CLIP_OK,
+            "spotlight tool setup must succeed");
+
+    ClipCanvasDisplayCache cache;
+    require(cache.sync(runtime.get(), viewport.get()),
+            "initial spotlight display cache sync must succeed");
+    const std::uint64_t sceneRevision = cache.patchCursor().scene_revision;
+    require(cache.executionPlan(1.0).buildCount == 1,
+            "first paint must prepare the execution plan");
+    require(cache.executionPlan(1.0).buildCount == 1,
+            "unchanged paint must reuse the execution plan");
+
+    const auto pointer = [&](ClipPointerEventType type, double x, double y, std::uint8_t buttons) {
+        ClipInputEvent event{};
+        event.kind = CLIP_INPUT_EVENT_POINTER;
+        event.pointer.pointer_id = 1;
+        event.pointer.event_type = type;
+        event.pointer.device = CLIP_POINTER_DEVICE_MOUSE;
+        event.pointer.position_x = x;
+        event.pointer.position_y = y;
+        event.pointer.button = type == CLIP_POINTER_EVENT_MOVE ? CLIP_POINTER_BUTTON_NONE
+                                                               : CLIP_POINTER_BUTTON_PRIMARY;
+        event.pointer.buttons = buttons;
+        ClipInteractionOutput output{};
+        ScopedChangedViewportList changedViewports;
+        require(clip_viewport_process_input_ex(runtime.get(), viewport.get(), &event, &output,
+                                               changedViewports.outParam()) == CLIP_OK,
+                "spotlight pointer input must succeed");
+    };
+    pointer(CLIP_POINTER_EVENT_DOWN, 30.0, 30.0, 1);
+    pointer(CLIP_POINTER_EVENT_MOVE, 70.0, 70.0, 1);
+    require(cache.sync(runtime.get(), viewport.get()),
+            "spotlight creation preview sync must succeed");
+    require(cache.spotlightCutoutCount() == 1,
+            "spotlight creation preview must populate dedicated cutout storage");
+    require(cache.patchCursor().scene_revision == sceneRevision,
+            "spotlight creation preview must not advance the scene revision");
+    require(cache.sceneDirtyRectCount() == 0,
+            "spotlight creation preview must not dirty retained scene content");
+
+    pointer(CLIP_POINTER_EVENT_UP, 70.0, 70.0, 0);
+    require(cache.sync(runtime.get(), viewport.get()), "committed spotlight sync must succeed");
+    ClipSpotlightConfig spotlight{};
+    require(clip_viewport_get_spotlight_config(runtime.get(), viewport.get(), &spotlight) ==
+                CLIP_OK,
+            "spotlight config query must succeed");
+    spotlight.opacity = 0.35;
+    ScopedChangedViewportList spotlightChange;
+    require(clip_viewport_set_spotlight_config_ex(runtime.get(), viewport.get(), &spotlight,
+                                                  spotlightChange.outParam()) == CLIP_OK,
+            "spotlight opacity update must succeed");
+    require(cache.sync(runtime.get(), viewport.get()), "spotlight opacity sync must succeed");
+    require(cache.patchCursor().scene_revision == sceneRevision,
+            "spotlight color/opacity-only updates must preserve scene revision");
+    require(cache.executionPlan(1.0).buildCount == 1,
+            "decoration and editor changes must reuse the scene execution plan");
+    require(cache.executionPlan(1.25).buildCount == 2,
+            "DPR changes must refresh physical filter parameters");
+    require(cache.executionPlan(1.25).buildCount == 2,
+            "unchanged fractional DPR must reuse the plan");
+
+    ScopedChangedViewportList filterToolChange;
+    require(clip_viewport_set_active_tool_ex(runtime.get(), viewport.get(),
+                                             CLIP_ACTIVE_TOOL_RECTANGLE_FILTER,
+                                             filterToolChange.outParam()) == CLIP_OK,
+            "filter tool setup must succeed");
+    pointer(CLIP_POINTER_EVENT_DOWN, 20.0, 20.0, 1);
+    pointer(CLIP_POINTER_EVENT_MOVE, 60.0, 60.0, 1);
+    pointer(CLIP_POINTER_EVENT_UP, 60.0, 60.0, 0);
+    require(cache.sync(runtime.get(), viewport.get()), "filter scene sync must succeed");
+    const auto& retainedPlan = cache.executionPlan(1.25);
+    require(retainedPlan.filters.size() == 1 && !retainedPlan.passes.empty(),
+            "a filter scene must retain a nonempty execution plan");
+    const auto originalPlan = retainedPlan;
+    const ClipPatchCursor cursorBeforeClear = cache.patchCursor();
+    const auto* sceneBeforeClear = cache.sceneItems();
+    const auto sceneCountBeforeClear = cache.sceneItemCount();
+    const auto* spotlightBeforeClear = cache.spotlightCutouts();
+    const auto spotlightCountBeforeClear = cache.spotlightCutoutCount();
+    const auto* renderPlanBeforeClear = cache.renderPlan().data();
+    const auto renderPlanSizeBeforeClear = cache.renderPlan().size();
+
+    cache.clearRenderState();
+    require(retainedPlan.passes.capacity() == 0 && retainedPlan.filters.capacity() == 0 &&
+                retainedPlan.filterForItem.capacity() == 0 &&
+                retainedPlan.passForItem.capacity() == 0 &&
+                retainedPlan.filterIndices.capacity() == 0,
+            "clearing render state must release execution-plan allocations");
+    require(cache.patchCursor().scene_revision == cursorBeforeClear.scene_revision &&
+                cache.patchCursor().decoration_revision == cursorBeforeClear.decoration_revision &&
+                cache.patchCursor().overlay_revision == cursorBeforeClear.overlay_revision,
+            "clearing derived render state must preserve every patch cursor");
+    require(cache.sceneItems() == sceneBeforeClear &&
+                cache.sceneItemCount() == sceneCountBeforeClear &&
+                cache.spotlightCutouts() == spotlightBeforeClear &&
+                cache.spotlightCutoutCount() == spotlightCountBeforeClear &&
+                cache.renderPlan().data() == renderPlanBeforeClear &&
+                cache.renderPlan().size() == renderPlanSizeBeforeClear,
+            "clearing derived render state must preserve current scene and decoration storage");
+
+    const auto& rebuiltPlan = cache.executionPlan(1.25);
+    require(rebuiltPlan.buildCount == 1 && rebuiltPlan.revision == originalPlan.revision &&
+                rebuiltPlan.dpr == originalPlan.dpr &&
+                rebuiltPlan.passForItem == originalPlan.passForItem &&
+                rebuiltPlan.filterForItem == originalPlan.filterForItem &&
+                rebuiltPlan.filterIndices == originalPlan.filterIndices &&
+                rebuiltPlan.passes.size() == originalPlan.passes.size() &&
+                rebuiltPlan.filters.size() == originalPlan.filters.size(),
+            "the next paint must lazily rebuild equivalent scene execution mappings");
+    const auto& originalFilter = originalPlan.filters.front();
+    const auto& rebuiltFilter = rebuiltPlan.filters.front();
+    require(rebuiltFilter.effective == originalFilter.effective &&
+                rebuiltFilter.logicalSamplingRadius == originalFilter.logicalSamplingRadius &&
+                rebuiltFilter.axisAlignedRect == originalFilter.axisAlignedRect &&
+                rebuiltFilter.devicePixelAlignedRect == originalFilter.devicePixelAlignedRect &&
+                rebuiltFilter.clipPath == originalFilter.clipPath &&
+                rebuiltFilter.logicalBounds == originalFilter.logicalBounds,
+            "rebuilding must preserve physical filter parameters and clipping geometry");
+    require(cache.executionPlan(1.25).buildCount == 1,
+            "the rebuilt plan must remain reusable for unchanged paints");
+}
+
+void unchangedRenderAreaDoesNotScheduleRepaint() {
+    ClipCanvasWidget canvas;
+    canvas.resize(1920, 1080);
+    canvas.show();
+    QApplication::processEvents();
+
+    const QRectF renderArea(-800.0, -450.0, 1600.0, 900.0);
+    canvas.setSpotlightRenderArea(renderArea);
+    QApplication::processEvents();
+
+    PaintObserver observer;
+    canvas.installEventFilter(&observer);
+    observer.begin();
+    canvas.setSpotlightRenderArea(QRectF(renderArea.bottomRight(), renderArea.topLeft()));
+    QApplication::processEvents();
+    canvas.removeEventFilter(&observer);
+
+    require(!observer.sawPaint(), "an unchanged spotlight render area must not schedule a repaint");
+}
+
+void spotlightPreviewCoalescesAndCommitCancelsQueuedValue() {
+    ClipCanvasWidget canvas;
+    int appliedCount = 0;
+    QObject::connect(&canvas, &ClipCanvasWidget::spotlightPreviewApplied,
+                     [&appliedCount]() { ++appliedCount; });
+
+    ClipCanvasSpotlightConfig first;
+    first.color = QColor(32, 96, 180, 255);
+    first.opacity = 0.35;
+    ClipCanvasSpotlightConfig latest = first;
+    latest.color = QColor(210, 64, 48, 220);
+    latest.opacity = 0.72;
+
+    canvas.previewCanvasSpotlightConfig(first);
+    require(appliedCount == 1, "the first spotlight preview should apply synchronously");
+    canvas.previewCanvasSpotlightConfig(first);
+    require(appliedCount == 1,
+            "an unchanged spotlight preview should not emit another application");
+    canvas.previewCanvasSpotlightConfig(latest);
+    require(appliedCount == 1,
+            "later spotlight preview writes should coalesce until the refresh callback");
+
+    QElapsedTimer previewWait;
+    previewWait.start();
+    while (appliedCount < 2 && previewWait.elapsed() < 100) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        QThread::msleep(1);
+    }
+    require(appliedCount == 2,
+            "the refresh-paced spotlight callback should deliver the latest value once");
+
+    ClipCanvasWidget cancellationCanvas;
+    int cancellationCount = 0;
+    QObject::connect(&cancellationCanvas, &ClipCanvasWidget::spotlightPreviewApplied,
+                     [&cancellationCount]() { ++cancellationCount; });
+    cancellationCanvas.previewCanvasSpotlightConfig(first);
+    ClipCanvasSpotlightConfig stale = first;
+    stale.opacity = 0.91;
+    ClipCanvasSpotlightConfig committed = latest;
+    committed.color = QColor(24, 144, 88, 255);
+    committed.opacity = 0.48;
+    cancellationCanvas.previewCanvasSpotlightConfig(stale);
+    require(cancellationCanvas.setCanvasSpotlightConfig(committed),
+            "a spotlight commit should succeed while a preview is queued");
+    QCoreApplication::processEvents();
+    require(cancellationCount == 1,
+            "a persistent spotlight commit should cancel its queued transient preview");
+    require(cancellationCanvas.canvasSpotlightConfig() == committed,
+            "the persistent spotlight commit should remain authoritative");
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    QApplication application(argc, argv);
+    clip_canvas_render_diagnostics::setEnabled(true);
+    defaultMaskHasExactOpacityAndTransparentHole();
+    spotlightTypesRenderDistinctHolesAndMixedOverlaps();
+    spotlightTypeSurvivesDisplayPatchesAndExport();
+    overlappingAndRotatedCutoutsUseAPathUnion();
+    renderAreaAndExposureLimitMaskWork();
+    inactiveMaskLeavesCanvasUnchanged();
+    zeroAlphaAndNonintersectingExposureSkipGeometry();
+    displayCachePatchesSpotlightIndependentlyFromStyle();
+    unchangedRenderAreaDoesNotScheduleRepaint();
+    spotlightPreviewCoalescesAndCommitCancelsQueuedValue();
+    return 0;
+}

@@ -629,8 +629,8 @@
         "libsrt"
       ]
     },
-    "snow-shot-minimal": {
-      "description": "Build only the codecs, containers, and hardware paths used by Snow Shot",
+    "clip-shot-minimal": {
+      "description": "Build only the codecs, containers, and hardware paths used by Clip",
       "supports": "windows & !uwp",
       "dependencies": [
         {
@@ -803,7 +803,7 @@
         "zeromq"
       ]
     },
-    "snow-macos-media": {
+    "clip-macos-media": {
       "description": "Standalone macOS capture recording and export codecs with VideoToolbox and software fallbacks",
       "supports": "osx",
       "dependencies": [

@@ -11,7 +11,7 @@ import sys
 def package(app, profile):
     app = pathlib.Path(app).resolve()
     profile = pathlib.Path(profile).resolve()
-    executable = app / "Contents/MacOS/SnowRecordingHarness"
+    executable = app / "Contents/MacOS/ClipRecordingHarness"
     frameworks = app / "Contents/Frameworks"
     frameworks.mkdir(parents=True, exist_ok=True)
     queue = [executable]

@@ -33,4 +33,4 @@ jobs:
           fi
           auth="$(printf '%s:%s' "$GITEE_USERNAME" "$GITEE_TOKEN" | base64 -w 0)"
           git -c "http.https://gitee.com/.extraheader=Authorization: Basic $auth" \
-            push https://gitee.com/mg-chao/snow-apps.git HEAD:refs/heads/main
+            push https://gitee.com/mg-chao/clip-apps.git HEAD:refs/heads/main

@@ -1,0 +1,23 @@
+#pragma once
+
+#include <QImage>
+#include <QByteArray>
+#include <QList>
+#include <QRectF>
+#include <memory>
+
+// Original image pixels only. coverage may restrict a layer to a subrectangle.
+struct ClipCanvasBaseImageSource {
+    QImage image;
+    QRectF canvasRect;
+    QRectF coverage;
+};
+
+// Immutable, implicitly shared appearance captured with a document for worker exports.
+class ClipCanvasSmartEraseSnapshot {
+  public:
+    struct Data;
+    std::shared_ptr<const Data> data;
+    // Stable while geometry and immutable reconstruction results remain unchanged.
+    QByteArray cacheKey() const;
+};

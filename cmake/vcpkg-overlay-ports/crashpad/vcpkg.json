@@ -2,7 +2,7 @@
   "name": "crashpad",
   "version-date": "2024-04-11",
   "port-version": 12,
-  "description": "Crashpad with Snow toolchain compatibility for MSVC and macOS.",
+  "description": "Crashpad with Clip toolchain compatibility for MSVC and macOS.",
   "homepage": "https://chromium.googlesource.com/crashpad/crashpad/+/master/README.md",
   "license": "Apache-2.0",
   "supports": "osx | (windows & !uwp)",

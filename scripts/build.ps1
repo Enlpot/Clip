@@ -4,12 +4,12 @@ param(
         "windows-msvc-debug",
         "windows-msvc-performance",
         "windows-clang-portability",
-        "snow-shot-msvc-release",
-        "snow-shot-msvc-fast",
-        "snow-shot-msvc-arm64-debug",
-        "snow-shot-msvc-arm64-performance",
-        "snow-shot-msvc-arm64-release",
-        "snow-shot-msvc-arm64-fast"
+        "clip-shot-msvc-release",
+        "clip-shot-msvc-fast",
+        "clip-shot-msvc-arm64-debug",
+        "clip-shot-msvc-arm64-performance",
+        "clip-shot-msvc-arm64-release",
+        "clip-shot-msvc-arm64-fast"
     )]
     [string]$Preset = "windows-msvc-debug",
     [string]$Target = "",
@@ -18,9 +18,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-$windowsTarget = Get-SnowWindowsTarget -Preset $Preset
-Set-SnowBuildEnvironment -Preset $Preset | Out-Null
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
+$windowsTarget = Get-ClipWindowsTarget -Preset $Preset
+Set-ClipBuildEnvironment -Preset $Preset | Out-Null
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $buildDirectory = Join-Path $repoRoot "build/$Preset"
 
@@ -49,7 +49,7 @@ if (-not $SkipBootstrap) {
 
 Push-Location $repoRoot
 try {
-    $configureArguments = @(Get-SnowConfigureArguments -Preset $Preset -BuildDirectory $buildDirectory)
+    $configureArguments = @(Get-ClipConfigureArguments -Preset $Preset -BuildDirectory $buildDirectory)
     & cmake @configureArguments
     if ($LASTEXITCODE -ne 0) {
         throw "CMake configure failed for preset $Preset."
@@ -61,8 +61,8 @@ try {
     }
     elseif ($windowsTarget.IsStatic -and
         -not (Select-String -LiteralPath (Join-Path $buildDirectory 'CMakeCache.txt') `
-            -Pattern '^SNOW_APPS_BUILD_SNOW_SHOT_MINI:BOOL=(ON|TRUE|1)$' -Quiet)) {
-        $buildArguments += @('--target', 'snow_shot')
+            -Pattern '^CLIP_APPS_BUILD_CLIP_SHOT_MINI:BOOL=(ON|TRUE|1)$' -Quiet)) {
+        $buildArguments += @('--target', 'clip_shot')
     }
     & cmake @buildArguments
     if ($LASTEXITCODE -ne 0) {

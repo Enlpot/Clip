@@ -23,24 +23,24 @@ find_program(FLATC NAMES flatc PATHS "${CURRENT_HOST_INSTALLED_DIR}/tools/flatbu
 vcpkg_find_acquire_program(PYTHON3)
 execute_process(
     COMMAND "${PYTHON3}" -I -c "import venv"
-    RESULT_VARIABLE _snow_python_venv_result
+    RESULT_VARIABLE _clip_python_venv_result
     OUTPUT_QUIET
     ERROR_QUIET
 )
-if(_snow_python_venv_result EQUAL 0)
-    set(_snow_onnxruntime_venv "${CURRENT_BUILDTREES_DIR}/${TARGET_TRIPLET}-venv")
-    file(REMOVE_RECURSE "${_snow_onnxruntime_venv}")
+if(_clip_python_venv_result EQUAL 0)
+    set(_clip_onnxruntime_venv "${CURRENT_BUILDTREES_DIR}/${TARGET_TRIPLET}-venv")
+    file(REMOVE_RECURSE "${_clip_onnxruntime_venv}")
     vcpkg_execute_required_process(
-        COMMAND "${PYTHON3}" -I -m venv "${_snow_onnxruntime_venv}"
+        COMMAND "${PYTHON3}" -I -m venv "${_clip_onnxruntime_venv}"
         WORKING_DIRECTORY "${CURRENT_BUILDTREES_DIR}"
         LOGNAME "venv-setup-${TARGET_TRIPLET}"
     )
     if(CMAKE_HOST_WIN32)
-        set(_snow_onnxruntime_python_dir "${_snow_onnxruntime_venv}/Scripts")
+        set(_clip_onnxruntime_python_dir "${_clip_onnxruntime_venv}/Scripts")
     else()
-        set(_snow_onnxruntime_python_dir "${_snow_onnxruntime_venv}/bin")
+        set(_clip_onnxruntime_python_dir "${_clip_onnxruntime_venv}/bin")
     endif()
-    set(PYTHON3 "${_snow_onnxruntime_python_dir}/python${VCPKG_HOST_EXECUTABLE_SUFFIX}")
+    set(PYTHON3 "${_clip_onnxruntime_python_dir}/python${VCPKG_HOST_EXECUTABLE_SUFFIX}")
     if(NOT EXISTS "${PYTHON3}")
         message(FATAL_ERROR "Python venv creation did not produce the expected interpreter: ${PYTHON3}")
     endif()
@@ -49,8 +49,8 @@ if(_snow_python_venv_result EQUAL 0)
         WORKING_DIRECTORY "${CURRENT_BUILDTREES_DIR}"
         LOGNAME "pip-install-flatbuffers-${TARGET_TRIPLET}"
     )
-    set(ENV{VIRTUAL_ENV} "${_snow_onnxruntime_venv}")
-    vcpkg_add_to_path(PREPEND "${_snow_onnxruntime_python_dir}")
+    set(ENV{VIRTUAL_ENV} "${_clip_onnxruntime_venv}")
+    vcpkg_add_to_path(PREPEND "${_clip_onnxruntime_python_dir}")
 else()
     x_vcpkg_get_python_packages(
         PYTHON_VERSION "3"
@@ -60,10 +60,10 @@ else()
     )
 endif()
 
-set(SNOW_SHOT_REQUIRED_OPERATORS "${CMAKE_CURRENT_LIST_DIR}/required_operators.config")
-if(NOT EXISTS "${SNOW_SHOT_REQUIRED_OPERATORS}")
+set(CLIP_SHOT_REQUIRED_OPERATORS "${CMAKE_CURRENT_LIST_DIR}/required_operators.config")
+if(NOT EXISTS "${CLIP_SHOT_REQUIRED_OPERATORS}")
     message(FATAL_ERROR
-        "Snow Shot ONNX Runtime operator configuration is missing: ${SNOW_SHOT_REQUIRED_OPERATORS}")
+        "Clip ONNX Runtime operator configuration is missing: ${CLIP_SHOT_REQUIRED_OPERATORS}")
 endif()
 
 vcpkg_execute_required_process(
@@ -130,9 +130,9 @@ if(VCPKG_LIBRARY_LINKAGE STREQUAL "static" AND "directml" IN_LIST FEATURES)
     set(VCPKG_POLICY_DLLS_IN_STATIC_LIBRARY enabled)
 endif()
 
-set(SNOW_ORT_PLATFORM_OPTIONS)
-set(SNOW_ORT_RELEASE_OPTIONS)
-set(SNOW_ORT_DEBUG_OPTIONS)
+set(CLIP_ORT_PLATFORM_OPTIONS)
+set(CLIP_ORT_RELEASE_OPTIONS)
+set(CLIP_ORT_DEBUG_OPTIONS)
 if(VCPKG_TARGET_IS_WINDOWS)
     if(NOT VCPKG_TARGET_IS_MINGW AND
        VCPKG_BUILD_TYPE STREQUAL "release" AND
@@ -145,40 +145,40 @@ if(VCPKG_TARGET_IS_WINDOWS)
     endif()
 
     if(VCPKG_CRT_LINKAGE STREQUAL "static")
-        set(SNOW_ORT_MSVC_RUNTIME_RELEASE "MultiThreaded")
-        set(SNOW_ORT_MSVC_RUNTIME_DEBUG "MultiThreadedDebug")
+        set(CLIP_ORT_MSVC_RUNTIME_RELEASE "MultiThreaded")
+        set(CLIP_ORT_MSVC_RUNTIME_DEBUG "MultiThreadedDebug")
     else()
-        set(SNOW_ORT_MSVC_RUNTIME_RELEASE "MultiThreadedDLL")
-        set(SNOW_ORT_MSVC_RUNTIME_DEBUG "MultiThreadedDebugDLL")
+        set(CLIP_ORT_MSVC_RUNTIME_RELEASE "MultiThreadedDLL")
+        set(CLIP_ORT_MSVC_RUNTIME_DEBUG "MultiThreadedDebugDLL")
     endif()
-    list(APPEND SNOW_ORT_RELEASE_OPTIONS
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=${SNOW_ORT_MSVC_RUNTIME_RELEASE}")
-    list(APPEND SNOW_ORT_DEBUG_OPTIONS
-        "-DCMAKE_MSVC_RUNTIME_LIBRARY=${SNOW_ORT_MSVC_RUNTIME_DEBUG}")
+    list(APPEND CLIP_ORT_RELEASE_OPTIONS
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=${CLIP_ORT_MSVC_RUNTIME_RELEASE}")
+    list(APPEND CLIP_ORT_DEBUG_OPTIONS
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=${CLIP_ORT_MSVC_RUNTIME_DEBUG}")
 
     if(VCPKG_LIBRARY_LINKAGE STREQUAL "dynamic")
         # The reduced DirectML DLL still exceeds MSVC's final PDB capacity in
         # Debug builds. Preserve Debug objects but omit the DLL's link PDB.
-        list(APPEND SNOW_ORT_DEBUG_OPTIONS
+        list(APPEND CLIP_ORT_DEBUG_OPTIONS
             "-DCMAKE_SHARED_LINKER_FLAGS_DEBUG=/PDB:NONE")
     endif()
 
     if(VCPKG_TARGET_ARCHITECTURE STREQUAL "x64")
         # MLAS includes macamd64.inc from the Windows SDK. MASM does not inherit
         # CMAKE_C/CXX_FLAGS, so provide its SDK include directory explicitly.
-        set(_snow_sdk_shared "$ENV{WindowsSdkDir}/Include/$ENV{WindowsSDKVersion}/shared")
-        if(NOT IS_DIRECTORY "${_snow_sdk_shared}")
-            file(GLOB _snow_sdk_shared_candidates
+        set(_clip_sdk_shared "$ENV{WindowsSdkDir}/Include/$ENV{WindowsSDKVersion}/shared")
+        if(NOT IS_DIRECTORY "${_clip_sdk_shared}")
+            file(GLOB _clip_sdk_shared_candidates
                 "$ENV{SystemDrive}/Program Files (x86)/Windows Kits/10/Include/*/shared")
-            list(SORT _snow_sdk_shared_candidates COMPARE NATURAL ORDER DESCENDING)
-            list(LENGTH _snow_sdk_shared_candidates _snow_sdk_shared_count)
-            if(_snow_sdk_shared_count GREATER 0)
-                list(GET _snow_sdk_shared_candidates 0 _snow_sdk_shared)
+            list(SORT _clip_sdk_shared_candidates COMPARE NATURAL ORDER DESCENDING)
+            list(LENGTH _clip_sdk_shared_candidates _clip_sdk_shared_count)
+            if(_clip_sdk_shared_count GREATER 0)
+                list(GET _clip_sdk_shared_candidates 0 _clip_sdk_shared)
             endif()
         endif()
-        if(IS_DIRECTORY "${_snow_sdk_shared}")
-            list(APPEND SNOW_ORT_PLATFORM_OPTIONS
-                "-DCMAKE_ASM_MASM_FLAGS=/I\"${_snow_sdk_shared}\"")
+        if(IS_DIRECTORY "${_clip_sdk_shared}")
+            list(APPEND CLIP_ORT_PLATFORM_OPTIONS
+                "-DCMAKE_ASM_MASM_FLAGS=/I\"${_clip_sdk_shared}\"")
         else()
             message(FATAL_ERROR
                 "Windows SDK shared include directory was not found for the ONNX Runtime MASM build.")
@@ -190,7 +190,7 @@ vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}/cmake"
     OPTIONS
         ${FEATURE_OPTIONS}
-        ${SNOW_ORT_PLATFORM_OPTIONS}
+        ${CLIP_ORT_PLATFORM_OPTIONS}
         "-DPython_EXECUTABLE:FILEPATH=${PYTHON3}"
         "-DProtobuf_PROTOC_EXECUTABLE:FILEPATH=${PROTOC}"
         "-DONNX_CUSTOM_PROTOC_EXECUTABLE:FILEPATH=${PROTOC}"
@@ -211,14 +211,14 @@ vcpkg_cmake_configure(
         -Donnxruntime_ENABLE_LAZY_TENSOR=OFF
         -Donnxruntime_MINIMAL_BUILD=OFF
         -Donnxruntime_REDUCED_OPS_BUILD=ON
-        "-Donnxruntime_REDUCED_OPS_CONFIG=${SNOW_SHOT_REQUIRED_OPERATORS}"
+        "-Donnxruntime_REDUCED_OPS_CONFIG=${CLIP_SHOT_REQUIRED_OPERATORS}"
         -Donnxruntime_DISABLE_RTTI=OFF
         -Donnxruntime_DISABLE_ABSEIL=OFF
         --compile-no-warning-as-error
     OPTIONS_RELEASE
-        ${SNOW_ORT_RELEASE_OPTIONS}
+        ${CLIP_ORT_RELEASE_OPTIONS}
     OPTIONS_DEBUG
-        ${SNOW_ORT_DEBUG_OPTIONS}
+        ${CLIP_ORT_DEBUG_OPTIONS}
         -Donnxruntime_ENABLE_MEMLEAK_CHECKER=OFF
         -Donnxruntime_DEBUG_NODE_INPUTS_OUTPUTS=1
     MAYBE_UNUSED_VARIABLES
@@ -292,7 +292,7 @@ if("directml" IN_LIST FEATURES)
     set(DIRECTML_TARGET_REFERENCE_FOUND FALSE)
     foreach(ONNXRUNTIME_TARGETS_FILE IN LISTS ONNXRUNTIME_TARGETS_FILES)
         file(READ "${ONNXRUNTIME_TARGETS_FILE}" ONNXRUNTIME_TARGETS_CONTENT)
-        snow_onnxruntime_relocate_directml_reference(
+        clip_onnxruntime_relocate_directml_reference(
             RELOCATABLE_ONNXRUNTIME_TARGETS_CONTENT
             "${ONNXRUNTIME_TARGETS_CONTENT}"
             "${DIRECTML_IMPORT_LIBRARY}"

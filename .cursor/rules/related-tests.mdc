@@ -9,16 +9,16 @@ After any code change, run **only** the tests that cover those changes. The full
 
 ## How to choose tests
 
-- Map the edited files to the matching CTest name (`snow-shot-<feature>-tests`, `adqt-*`, `snow-canvas-*`, `snow_image_viewer_*`, `snow_image_*`) or Rust crate/test.
+- Map the edited files to the matching CTest name (`clip-shot-<feature>-tests`, `adqt-*`, `clip-canvas-*`, `clip_image_viewer_*`, `clip_image_*`) or Rust crate/test.
 - Prefer the existing `*_tests.cpp` / `#[cfg(test)]` next to the change. If none exists, add a focused test rather than widening the run.
 
 ## Allowed
 
 ```text
-ctest --preset test-windows-msvc-debug -R snow-shot-pinned-window-tests
-ctest --preset test-windows-msvc-debug -R "snow-shot-selector-policy-tests|snow-shot-physical-cursor-tests"
-cargo test -p snow-capture
-cargo test -p snow-ocr-process -- selector_policy
+ctest --preset test-windows-msvc-debug -R clip-shot-pinned-window-tests
+ctest --preset test-windows-msvc-debug -R "clip-shot-selector-policy-tests|clip-shot-physical-cursor-tests"
+cargo test -p clip-capture
+cargo test -p clip-ocr-process -- selector_policy
 ```
 
 ## Forbidden unless the user explicitly asks

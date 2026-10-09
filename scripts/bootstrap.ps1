@@ -13,13 +13,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
 $targetArguments = @{ Architecture = $Architecture }
 if ($Preset) {
     $targetArguments.Preset = $Preset
     if (-not $PSBoundParameters.ContainsKey('Architecture')) { $targetArguments.Remove('Architecture') }
 }
-$windowsTarget = Get-SnowWindowsTarget @targetArguments
+$windowsTarget = Get-ClipWindowsTarget @targetArguments
 $Architecture = $windowsTarget.Architecture
 
 function Invoke-Checked {
@@ -62,12 +62,12 @@ $vcpkgBaseline = "4497409a47f19db373a410a0efb84eca4747adbf"
 $rustToolchain = "1.97.1"
 $rustTarget = $windowsTarget.RustTarget
 
-Add-SnowMsvcToolsToPath -Architecture $Architecture | Out-Null
+Add-ClipMsvcToolsToPath -Architecture $Architecture | Out-Null
 
 if (-not $SkipQtValidation) {
     # Environment variables often outlive a Qt upgrade, so each candidate is
     # version-checked before it is exported to the bootstrap subprocesses.
-    $Qt6Dir = Set-SnowQtEnvironment -Qt6Dir $Qt6Dir -Preset $Preset `
+    $Qt6Dir = Set-ClipQtEnvironment -Qt6Dir $Qt6Dir -Preset $Preset `
         -Architecture $Architecture -HostQtPrefix $HostQtPrefix
 }
 
@@ -79,7 +79,7 @@ $rustup = Require-Command "rustup"
 # vcpkg's app-local packaging invokes dumpbin to discover DLL dependencies of
 # host tools. Without the MSVC bin directory, it can install unusable tools and
 # still record their packages as successfully installed.
-Add-SnowMsvcToolsToPath -Architecture $Architecture | Out-Null
+Add-ClipMsvcToolsToPath -Architecture $Architecture | Out-Null
 Require-Command "dumpbin" | Out-Null
 
 $cmakeVersionLine = (& $cmake.Source --version | Select-Object -First 1)
@@ -211,7 +211,7 @@ if (-not $SkipDependencyInstall) {
             "--x-install-root=$tripletInstallRoot",
             "--triplet=$triplet",
             "--host-triplet=$($windowsTarget.HostTriplet)",
-              "--x-feature=snow-shot"
+              "--x-feature=clip-shot"
           ) + $overlayPortArguments + @(
               "--overlay-triplets=$(Join-Path $repoRoot 'cmake/vcpkg-overlay-triplets')",
               "--clean-after-build"
@@ -234,17 +234,17 @@ Invoke-Checked -Command $rustup.Source -Arguments @(
 
 $null = Invoke-Checked -Command $cargo.Source -Arguments @(
     "+$rustToolchain", "metadata", "--format-version", "1", "--no-deps"
-) -WorkingDirectory (Join-Path $repoRoot "snow-crates")
+) -WorkingDirectory (Join-Path $repoRoot "clip-crates")
 $null = Invoke-Checked -Command $cargo.Source -Arguments @(
     "+$rustToolchain", "metadata", "--format-version", "1", "--no-deps"
-) -WorkingDirectory (Join-Path $repoRoot "snow_draw_engine_qt")
+) -WorkingDirectory (Join-Path $repoRoot "clip_draw_engine_qt")
 
 $libclangDirectory = Join-Path $toolsRoot "llvm\bin"
 if (-not (Test-Path -LiteralPath (Join-Path $libclangDirectory "libclang.dll"))) {
     Write-Warning "libclang.dll was not found under $libclangDirectory; Rust bindgen builds may fail."
 }
 
-Write-Host "Snow Apps build environment is ready."
+Write-Host "Clip Apps build environment is ready."
 Write-Host "Repository: $repoRoot"
 Write-Host "CMake: $cmakeVersionLine"
 Write-Host "vcpkg: $vcpkgRoot"
@@ -256,8 +256,8 @@ foreach ($variant in $VcpkgVariants) {
 }
 if (-not $SkipQtValidation) {
     Write-Host "Qt6_DIR: $Qt6Dir"
-    if (-not [string]::IsNullOrWhiteSpace($env:SNOW_QT_STATIC_DIR)) {
-        Write-Host "SNOW_QT_STATIC_DIR: $env:SNOW_QT_STATIC_DIR"
+    if (-not [string]::IsNullOrWhiteSpace($env:CLIP_QT_STATIC_DIR)) {
+        Write-Host "CLIP_QT_STATIC_DIR: $env:CLIP_QT_STATIC_DIR"
     }
 }
 Write-Host "Rust: $rustToolchain ($rustTarget)"

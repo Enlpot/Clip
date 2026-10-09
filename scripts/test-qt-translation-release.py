@@ -33,8 +33,8 @@ class QtTranslationRelease(unittest.TestCase):
                     'set(QT6_INSTALL_TRANSLATIONS translations)')
         (self.source / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.25)
-project(SnowQtTranslationRelease NONE)
-include("{ROOT.as_posix()}/cmake/SnowShotTranslationRelease.cmake")
+project(ClipQtTranslationRelease NONE)
+include("{ROOT.as_posix()}/cmake/ClipShotTranslationRelease.cmake")
 {location}
 function(qt_add_lrelease)
     cmake_parse_arguments(PARSE_ARGV 0 arg "MERGE_QT_TRANSLATIONS"
@@ -59,7 +59,7 @@ function(qt_add_lrelease)
     set(${{arg_QM_FILES_OUTPUT_VARIABLE}} ${{qm_files}} PARENT_SCOPE)
 endfunction()
 foreach(edition IN ITEMS full mini)
-    snow_shot_release_translation_catalogs(${{edition}}-translations
+    clip_shot_release_translation_catalogs(${{edition}}-translations
         "${{CMAKE_CURRENT_BINARY_DIR}}/${{edition}}-ts"
         "${{CMAKE_CURRENT_BINARY_DIR}}/${{edition}}-qm" outputs)
     list(LENGTH outputs count)
@@ -67,7 +67,7 @@ foreach(edition IN ITEMS full mini)
         message(FATAL_ERROR "An edition lost a locale resource")
     endif()
     foreach(locale IN ITEMS en_US zh_CN zh_TW)
-        if(NOT "${{CMAKE_CURRENT_BINARY_DIR}}/${{edition}}-qm/snow_shot_${{locale}}.qm" IN_LIST outputs)
+        if(NOT "${{CMAKE_CURRENT_BINARY_DIR}}/${{edition}}-qm/clip_shot_${{locale}}.qm" IN_LIST outputs)
             message(FATAL_ERROR "An edition's catalog resource path changed")
         endif()
     endforeach()
@@ -101,29 +101,29 @@ endforeach()
         self.configure(custom_translation_path=True)
 
 
-@unittest.skipUnless(os.environ.get('SNOW_TEST_QT_TRANSLATION_KIT'),
-                     'Set SNOW_TEST_QT_TRANSLATION_KIT to verify the installed Qt Linguist tools')
+@unittest.skipUnless(os.environ.get('CLIP_TEST_QT_TRANSLATION_KIT'),
+                     'Set CLIP_TEST_QT_TRANSLATION_KIT to verify the installed Qt Linguist tools')
 class InstalledQtTranslationRelease(unittest.TestCase):
     def test_native_release_merges_stock_dialogs_only_into_chinese(self):
-        kit = Path(os.environ['SNOW_TEST_QT_TRANSLATION_KIT']).resolve()
+        kit = Path(os.environ['CLIP_TEST_QT_TRANSLATION_KIT']).resolve()
         (ROOT / 'build').mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='qt-native-translation-', dir=ROOT / 'build') as directory:
             source = Path(directory) / 'source'
             source.mkdir()
             for language in ('en_US', 'zh_CN', 'zh_TW'):
-                (source / f'snow_shot_{language}.ts').write_text(
+                (source / f'clip_shot_{language}.ts').write_text(
                     '<?xml version="1.0" encoding="utf-8"?>\n'
                     f'<TS version="2.1" language="{language}"><context>'
-                    '<name>SnowTranslationFixture</name><message><source>Fixture message</source>'
+                    '<name>ClipTranslationFixture</name><message><source>Fixture message</source>'
                     '<translation>Fixture translation</translation></message></context></TS>\n',
                     encoding='utf-8')
             (source / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.25)
-project(SnowNativeQtTranslationRelease LANGUAGES CXX)
-include("{ROOT.as_posix()}/cmake/SnowQt.cmake")
-snow_find_qt(COMPONENTS Core LinguistTools)
-include("{ROOT.as_posix()}/cmake/SnowShotTranslationRelease.cmake")
-snow_shot_release_translation_catalogs(fixture-translations
+project(ClipNativeQtTranslationRelease LANGUAGES CXX)
+include("{ROOT.as_posix()}/cmake/ClipQt.cmake")
+clip_find_qt(COMPONENTS Core LinguistTools)
+include("{ROOT.as_posix()}/cmake/ClipShotTranslationRelease.cmake")
+clip_shot_release_translation_catalogs(fixture-translations
     "${{CMAKE_CURRENT_SOURCE_DIR}}" "${{CMAKE_CURRENT_BINARY_DIR}}/qm" outputs)
 file(GENERATE OUTPUT "${{CMAKE_CURRENT_BINARY_DIR}}/lconvert-path.txt"
     CONTENT "$<TARGET_FILE:Qt6::lconvert>")
@@ -131,9 +131,9 @@ file(GENERATE OUTPUT "${{CMAKE_CURRENT_BINARY_DIR}}/lconvert-path.txt"
             binary = Path(directory) / 'configured'
             configure = [shutil.which('cmake'), '-S', str(source), '-B', str(binary),
                          '-G', 'Ninja', f'-DQt6_DIR={kit.as_posix()}/lib/cmake/Qt6']
-            if os.environ.get('SNOW_TEST_QT_DEPENDENCY_PREFIX'):
+            if os.environ.get('CLIP_TEST_QT_DEPENDENCY_PREFIX'):
                 configure.append('-DCMAKE_PREFIX_PATH=' +
-                                 Path(os.environ['SNOW_TEST_QT_DEPENDENCY_PREFIX']).resolve().as_posix())
+                                 Path(os.environ['CLIP_TEST_QT_DEPENDENCY_PREFIX']).resolve().as_posix())
             result = subprocess.run(configure,
                                     text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -145,13 +145,13 @@ file(GENERATE OUTPUT "${{CMAKE_CURRENT_BINARY_DIR}}/lconvert-path.txt"
             converter = (binary / 'lconvert-path.txt').read_text()
             for language in ('en_US', 'zh_CN', 'zh_TW'):
                 catalog = binary / f'{language}.ts'
-                result = subprocess.run([converter, '-i', str(binary / 'qm' / f'snow_shot_{language}.qm'),
+                result = subprocess.run([converter, '-i', str(binary / 'qm' / f'clip_shot_{language}.qm'),
                                          '-o', str(catalog)], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 contexts = {context.findtext('name') for context in ET.parse(catalog).getroot()}
-                self.assertIn('SnowTranslationFixture', contexts)
+                self.assertIn('ClipTranslationFixture', contexts)
                 if language == 'en_US':
-                    self.assertEqual(contexts, {'SnowTranslationFixture'})
+                    self.assertEqual(contexts, {'ClipTranslationFixture'})
                 else:
                     self.assertIn('QFileDialog', contexts)
                     self.assertIn('QColorDialog', contexts)

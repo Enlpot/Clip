@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create a focused macOS memory optimization comparison plan.
 
-Build the named targets with snow-shot-macos-arm64-performance first. The
+Build the named targets with clip-shot-macos-arm64-performance first. The
 baseline uses memorybenchmark-baseline.cmake to share current benchmark sources.
 Each job runs alone in a fresh process; no full test or benchmark suite is used.
 """
@@ -54,7 +54,7 @@ def main():
                 continue
             key, value = line.split("=", 1)
             entries[key.split(":", 1)[0]] = value
-        if entries.get("CMAKE_BUILD_TYPE") != "Release" or entries.get("SNOW_APPS_BUILD_BENCHMARKS") != "ON":
+        if entries.get("CMAKE_BUILD_TYPE") != "Release" or entries.get("CLIP_APPS_BUILD_BENCHMARKS") != "ON":
             parser.error(f"Use a configured macOS performance preset: {directory}")
     jobs = []
 
@@ -63,11 +63,11 @@ def main():
             label: [str(builds[label] / paths[label]), *map(str, arguments)]
             for label in builds}})
 
-    image = {"before": "snow_image/snow-image-memory-performance-benchmark-baseline",
-             "after": "snow_image/tools/snow_image_memory_performance_benchmark"}
-    canvas = {label: "snow_draw_engine_qt/snow-canvas-image-memory-benchmark" +
+    image = {"before": "clip_image/clip-image-memory-performance-benchmark-baseline",
+             "after": "clip_image/tools/clip_image_memory_performance_benchmark"}
+    canvas = {label: "clip_draw_engine_qt/clip-canvas-image-memory-benchmark" +
               ("-baseline" if label == "before" else "") for label in builds}
-    shot = {label: "snow_shot/snow-shot-memory-performance-benchmark" +
+    shot = {label: "clip_shot/clip-shot-memory-performance-benchmark" +
             ("-baseline" if label == "before" else "") for label in builds}
     for width, height in ((1920, 1080), (3840, 2160)):
         size = ["--width", width, "--height", height, "--warmup", 3]
@@ -101,16 +101,16 @@ def main():
         ("filter", ("kernel_gaussian_very_low_1920x1080", "renderer_full_gaussian_1080p")),
         ("watermark", ("renderer_dense_1920x1080", "workflow_export_watermark_3840x2160")),
     ):
-        paths = {label: f"snow_draw_engine_qt/snow-canvas-{kind}-benchmark" for label in builds}
+        paths = {label: f"clip_draw_engine_qt/clip-canvas-{kind}-benchmark" for label in builds}
         for scenario in scenarios:
             add(f"{kind}-{scenario}", paths,
                 ["--scenario", scenario, "--warmup", 3, "--iterations", args.samples,
                  "--csv", "{run_dir}/" + kind + ".csv", "-platform", "offscreen"])
     for scenario in ("4k-text", "nonrepeat-medium"):
-        paths = {label: "snow_draw_engine_qt/snow-canvas-smart-erase-benchmark" for label in builds}
+        paths = {label: "clip_draw_engine_qt/clip-canvas-smart-erase-benchmark" for label in builds}
         add("erase-" + scenario, paths,
             ["--scenario", scenario, "--warmup", 1, "--repeat", 7, "--jobs", 1])
-    paths = {label: "snow_shot/snow-shot-main-window-skin-performance-benchmark" for label in builds}
+    paths = {label: "clip_shot/clip-shot-main-window-skin-performance-benchmark" for label in builds}
     add("skin", paths, ["--output", "{run_dir}/skin.json", "--samples", 7])
     if args.fixtures:
         for path in sorted(args.fixtures.resolve().iterdir()):

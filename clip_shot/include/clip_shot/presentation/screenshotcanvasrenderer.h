@@ -1,0 +1,292 @@
+#ifndef CLIP_SHOT_PRESENTATION_SCREENSHOTCANVASRENDERER_H
+#define CLIP_SHOT_PRESENTATION_SCREENSHOTCANVASRENDERER_H
+
+#include "clip_draw_engine_qt/clip_canvas_custom_renderer.h"
+#include "clip_shot/presentation/screenshotimagesource.h"
+#include "clip_shot/presentation/screenshotresultcompositor.h"
+#include "clip_shot/presentation/screenshotselectioneffectgeometry.h"
+
+#include <QColor>
+#include <QImage>
+#include <QMetaObject>
+#include <QPoint>
+#include <QPointer>
+#include <QRect>
+#include <QRectF>
+#include <QRegion>
+#include "clip_shot/image/screenshotregiongeometry.h"
+#include <QSize>
+#include <QTransform>
+
+#include <cstddef>
+#include <array>
+#include <memory>
+#include <optional>
+
+class ClipCanvasWidget;
+class ScreenshotOcrPresentation;
+class ScreenshotOcrTextLayer;
+struct ScreenshotOcrTextPosition;
+
+struct ScreenshotSelectionVisualState {
+    QRectF bounds;
+    bool present = false;
+    bool handlesVisible = true;
+    bool borderVisible = true;
+    int cornerRadius = 0;
+    int shadowWidth = 0;
+    QColor shadowColor = QColor(0x33, 0x33, 0x33);
+    bool toolbarHovered = false;
+    bool effectEditorsVisible = false;
+    ScreenshotSelectionEffectHandle hoveredEffectHandle = ScreenshotSelectionEffectHandle::None;
+    ScreenshotSelectionEffectHandle activeEffectHandle = ScreenshotSelectionEffectHandle::None;
+    bool effectPreviewVisible = false;
+    std::optional<ScreenshotRegionGeometry> region;
+    ScreenshotRegionGeometry confirmedRegion;
+    QRectF marquee;
+    bool subtracting = false;
+    QColor dangerColor;
+    QPainterPath draftPath;
+    QVector<QPointF> draftVertices;
+
+    [[nodiscard]] bool operator==(const ScreenshotSelectionVisualState& other) const {
+        return bounds == other.bounds && present == other.present &&
+               handlesVisible == other.handlesVisible && borderVisible == other.borderVisible &&
+               cornerRadius == other.cornerRadius && shadowWidth == other.shadowWidth &&
+               shadowColor == other.shadowColor && toolbarHovered == other.toolbarHovered &&
+               effectEditorsVisible == other.effectEditorsVisible &&
+               hoveredEffectHandle == other.hoveredEffectHandle &&
+               activeEffectHandle == other.activeEffectHandle &&
+               effectPreviewVisible == other.effectPreviewVisible && region == other.region &&
+               confirmedRegion == other.confirmedRegion && marquee == other.marquee &&
+               subtracting == other.subtracting && dangerColor == other.dangerColor &&
+               draftPath == other.draftPath && draftVertices == other.draftVertices;
+    }
+
+    [[nodiscard]] bool operator!=(const ScreenshotSelectionVisualState& other) const {
+        return !(*this == other);
+    }
+};
+
+QRegion planScreenshotSelectionDamage(const ScreenshotSelectionVisualState& previous,
+                                      const ScreenshotSelectionVisualState& next,
+                                      const QRect& viewportRect,
+                                      const QTransform& canvasToViewTransform, bool maskVisible);
+QRegion planScreenshotGuideLineDamage(const QRect& viewportRect,
+                                      const QPoint& previousCursorPosition,
+                                      const QColor& previousCursorColor,
+                                      const QColor& previousMonitorCenterColor,
+                                      const QPoint& nextCursorPosition,
+                                      const QColor& nextCursorColor,
+                                      const QColor& nextMonitorCenterColor);
+
+#if defined(CLIP_SHOT_BENCH_INTERNALS)
+struct ScreenshotSelectionRenderDiagnostics {
+    std::size_t requestedDamagePixels = 0;
+    std::size_t pathFallbacks = 0;
+};
+
+struct ScreenshotGuideLineRenderDiagnostics {
+    std::size_t requestedDamagePixels = 0;
+    std::size_t updateRequests = 0;
+};
+
+ScreenshotSelectionRenderDiagnostics selectionRenderDiagnosticsForCurrentThread();
+void resetSelectionRenderDiagnosticsForCurrentThread();
+ScreenshotGuideLineRenderDiagnostics guideLineRenderDiagnosticsForCurrentThread();
+void resetGuideLineRenderDiagnosticsForCurrentThread();
+#endif
+
+class ScreenshotCanvasRenderer final : public ClipCanvasCustomRenderer {
+  public:
+    enum class RenderMode {
+        Standard,
+        ScrollingCapture,
+        PinnedResult,
+    };
+    enum class OcrPresentationMode {
+        BackgroundOnly,
+        BackgroundAndText,
+    };
+
+    explicit ScreenshotCanvasRenderer(ClipCanvasWidget& canvas);
+    ~ScreenshotCanvasRenderer() override;
+
+    void setRenderMode(RenderMode mode);
+    void setImage(QImage image, const QRectF& canvasRect);
+    void setImageSource(ScreenshotImageSource source, const QRectF& damage = {});
+    [[nodiscard]] ScreenshotImageSource imageSourceSnapshot() const {
+        return m_imageSource;
+    }
+    void setScrollingResultPreview(QImage image, const QRectF& canvasRect,
+                                   std::optional<Qt::Orientation> cropGuide = std::nullopt);
+    void clearScrollingResultPreview();
+    [[nodiscard]] bool hasScrollingResultPreview() const;
+    void setImageViewportPhysicalSize(const QSize& size);
+    void setPinnedResultSurface(const QRectF& contentCanvasRect, const QRectF& surfaceCanvasRect,
+                                const ScreenshotResultStyle& style);
+    void setBakedSelectionPath(const QPainterPath& path);
+    qsizetype selectionOutlineCacheBytes() const {
+        return m_outlineCache.bytes();
+    }
+    qsizetype selectionMaskCacheBytes() const {
+        return m_maskCache.bytes();
+    }
+    qsizetype selectionRegionHoverCacheBytes() const {
+        return m_regionHoverCache.sizeInBytes();
+    }
+    void setPinnedCheckerboardEnabled(bool enabled);
+    [[nodiscard]] bool pinnedCheckerboardEnabled() const {
+        return m_pinnedCheckerboardEnabled;
+    }
+    void setPinnedBackgroundColor(const QColor& color);
+    void setMaskVisible(bool visible);
+    void setSelectionBorderColor(const QColor& color);
+    void setMaskColor(const QColor& color);
+    void setGuideLines(const QPointF& cursorPosition, const QColor& cursorColor,
+                       const QColor& monitorCenterColor);
+    void setGuideCursorPosition(const QPointF& cursorPosition);
+    void setSelectionCenterGuideLineColor(const QColor& color);
+    void clearGuideLines();
+    void setSelection(const QRectF& selection, bool handlesVisible = true, int cornerRadius = 0,
+                      int shadowWidth = 0, const QColor& shadowColor = QColor(0x33, 0x33, 0x33));
+    void setSelectionRegion(const ScreenshotRegionGeometry& region,
+                            const ScreenshotRegionGeometry& confirmed, const QRectF& marquee,
+                            bool subtracting, const QColor& danger);
+    void setSelectionDraft(const QPainterPath& path, const QVector<QPointF>& vertices);
+    void applySelectionState(const ScreenshotSelectionVisualState& state);
+    void setSelectionToolbarHovered(bool hovered);
+    void setSelectionBorderVisible(bool visible);
+    void clearSelection();
+    void setOcrPresentation(std::shared_ptr<ScreenshotOcrPresentation> presentation,
+                            OcrPresentationMode mode = OcrPresentationMode::BackgroundAndText);
+    // Suppress rendering without discarding the latest presentation or filtered image.
+    void setOcrVisible(bool visible);
+    void setOcrFilteredImage(QImage image, const QRectF& canvasRect);
+    void clearOcrFilteredImage();
+    [[nodiscard]] QImage ocrFilteredImage() const {
+        return m_ocrFilteredImage;
+    }
+    [[nodiscard]] QRectF ocrFilteredCanvasRect() const {
+        return m_ocrFilteredCanvasRect;
+    }
+    [[nodiscard]] ScreenshotOcrTextPosition ocrTextPositionAt(const QPointF& canvasPosition,
+                                                              bool useClosestLine = false) const;
+    void updateOcrSelection();
+    void clearOcrPresentation();
+    void reset();
+    void clearRenderState() override;
+
+    [[nodiscard]] std::uint64_t contentRevision() const override;
+    [[nodiscard]] std::uint64_t originalBackgroundRevision() const override;
+    [[nodiscard]] std::optional<ClipCanvasFilterRenderReference>
+    filterRenderReference() const override;
+    [[nodiscard]] RenderMode renderMode() const;
+    [[nodiscard]] bool maskVisible() const;
+    [[nodiscard]] QColor maskColor() const;
+    [[nodiscard]] bool guideLinesVisible() const;
+    [[nodiscard]] bool hasSelection() const;
+    [[nodiscard]] bool selectionHandlesVisible() const;
+    [[nodiscard]] int selectionCornerRadius() const;
+    [[nodiscard]] int selectionShadowWidth() const;
+    [[nodiscard]] bool selectionToolbarHovered() const;
+    [[nodiscard]] bool selectionBorderVisible() const;
+    [[nodiscard]] QRectF selection() const;
+    // True when the next paint will Source-fill or blit screenshot content over
+    // every pixel of widgetRect, so a parent translucent clear is redundant.
+    [[nodiscard]] bool coversWidgetRect(const QRect& widgetRect) const;
+#if defined(CLIP_SHOT_BENCH_INTERNALS)
+    [[nodiscard]] quint64 ocrGeometrySynchronizationCountForTesting() const;
+#endif
+
+    void renderBeforeCanvas(QPainter& painter, const ClipCanvasRenderContext& context) override;
+    void renderOriginalBackground(QPainter& painter,
+                                  const ClipCanvasRenderContext& context) override;
+    void renderAfterCanvas(QPainter& painter, const ClipCanvasRenderContext& context) override;
+
+  private:
+    struct SelectionViewGeometry {
+        bool valid = false;
+        QTransform canvasToViewTransform;
+        QRect viewportRect;
+        int cornerRadius = 0;
+        int borderCornerRadius = 0;
+        QPainterPath effectivePath;
+        QPainterPath outlinePath;
+        QPainterPath draftPath;
+        QPainterPath maskPath;
+        bool maskCacheEligible = false;
+        bool sharedDraftOutline = false;
+    };
+    struct PathRasterCache {
+        struct Entry {
+            QPainterPath path;
+            QPainterPath viewPath;
+            QPointF origin;
+            QColor color;
+            qreal scale = 0;
+            QImage image;
+        };
+        std::array<Entry, 2> entries;
+        qsizetype bytes() const {
+            return entries[0].image.sizeInBytes() + entries[1].image.sizeInBytes();
+        }
+        bool draw(QPainter& painter, const QPainterPath& path, const QColor& color, bool exterior,
+                  const QRect& viewport);
+    };
+    void invalidateCachedContent(bool originalChanged = true);
+    void paintBackground(QPainter& painter, const ClipCanvasRenderContext& context,
+                         bool originalOnly);
+    const SelectionViewGeometry& selectionViewGeometry(const ClipCanvasRenderContext& context,
+                                                       int cornerRadius, int borderCornerRadius);
+    [[nodiscard]] ScreenshotOcrTextLayer* ensureOcrTextLayer();
+    // Widget-space repaint region for an image canvas rect; empty when the
+    // rect maps outside the viewport, the full viewport when the display cache is
+    // unsynchronized.
+    [[nodiscard]] QRegion canvasImageDamageRegion(const QRectF& canvasRect) const;
+
+    ClipCanvasWidget& m_canvas;
+    QPointer<ClipCanvasWidget> m_canvasGuard;
+    QMetaObject::Connection m_themeConnection;
+    std::uint64_t m_contentRevision = 0;
+    std::uint64_t m_originalBackgroundRevision = 0;
+    ScreenshotImageSource m_imageSource;
+    QImage m_scrollingResultPreviewImage;
+    QRectF m_scrollingResultPreviewCanvasRect;
+    std::optional<Qt::Orientation> m_scrollingCropGuide;
+    QSize m_imageViewportPhysicalSize;
+    QRectF m_pinnedContentCanvasRect;
+    QRectF m_pinnedSurfaceCanvasRect;
+    ScreenshotResultStyle m_pinnedResultStyle;
+    QColor m_pinnedBackgroundColor;
+    QPainterPath m_bakedSelectionPath;
+    PathRasterCache m_outlineCache;
+    PathRasterCache m_maskCache;
+    std::optional<ScreenshotRegionGeometry> m_regionHoverCacheRegion;
+    QImage m_regionHoverCache;
+    int m_regionHoverCacheRadius = 0;
+    int m_regionHoverCacheShadowWidth = 0;
+    QColor m_regionHoverCacheShadowColor;
+    bool m_pinnedCheckerboardEnabled = false;
+    ScreenshotSelectionVisualState m_selectionState;
+    SelectionViewGeometry m_selectionViewGeometry;
+    RenderMode m_renderMode = RenderMode::Standard;
+    bool m_maskVisible = false;
+    QColor m_selectionBorderColor = QColor(0x40, 0x96, 0xff);
+    QColor m_maskColor = QColor(0, 0, 0, 128);
+    QPoint m_guideLineCursorPosition;
+    QColor m_cursorGuideLineColor = QColor(0, 0, 0, 0);
+    QColor m_selectionCenterGuideLineColor = QColor(0, 0, 0, 0);
+    QColor m_monitorCenterGuideLineColor = QColor(0, 0, 0, 0);
+    bool m_guideLinesVisible = false;
+    bool m_ocrVisible = true;
+    std::shared_ptr<ScreenshotOcrPresentation> m_ocrPresentation;
+    QImage m_ocrFilteredImage;
+    QRectF m_ocrFilteredCanvasRect;
+    QColor m_ocrBackgroundColor;
+    OcrPresentationMode m_ocrPresentationMode = OcrPresentationMode::BackgroundAndText;
+    // The canvas owns this widget through QObject parenting.
+    QPointer<ScreenshotOcrTextLayer> m_ocrTextLayer;
+};
+
+#endif // CLIP_SHOT_PRESENTATION_SCREENSHOTCANVASRENDERER_H

@@ -1,0 +1,4676 @@
+#include "clip_canvas_text_editor_connector.h"
+#include "clip_canvas_text_editor_input.h"
+#include "clip_canvas_text_editor_session.h"
+#include "clip_canvas_text_editor_view.h"
+#include "clip_canvas_cursor_controller.h"
+#include "clip_canvas_text.h"
+#include "clip_canvas_text_draft.h"
+#include "clip_canvas_text_edit_target.h"
+#include "clip_canvas_text_edit_geometry.h"
+#include "clip_canvas_text_layout.h"
+#include "clip_canvas_text_render.h"
+#include "clip_canvas_fill_render.h"
+#include "clip_canvas_text_measurement.h"
+#include "clip_canvas_type_conversions.h"
+#include "clip_canvas_changed_viewports.h"
+#include "clip_canvas_render_geometry.h"
+#include "clip_canvas_renderer.h"
+#include "clip_canvas_runtime_access.h"
+#include "clip_canvas_viewport.h"
+#include "clip_canvas_ffi_handles.h"
+#include "clip_canvas_widget_selection_hit_testing.h"
+#include "clip_canvas_widget_pointer_flow.h"
+#include "clip_canvas_widget_repaint.h"
+#include "clip_canvas_state.h"
+#include "clip_canvas_widget_text_interaction.h"
+#include "demo_serial_number_controls.h"
+#include "clip_draw_engine_qt/clip_canvas_runtime.h"
+#include "clip_draw_engine_qt/clip_canvas_widget.h"
+
+#include <QAbstractTextDocumentLayout>
+#include <QApplication>
+#include <QBuffer>
+#include <QByteArray>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QFont>
+#include <QFontDatabase>
+#include <QFontInfo>
+#include <QHBoxLayout>
+#include <QImage>
+#include <QInputMethodEvent>
+#include <QInputMethodQueryEvent>
+#include <QKeyEvent>
+#include <QLineEdit>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextCharFormat>
+#include <QTextLayout>
+#include <QThread>
+#include <QWidget>
+
+#include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <future>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <thread>
+#include <vector>
+
+namespace {
+
+void require(bool condition, const char* message) {
+    if (!condition) {
+        std::cerr << message << '\n';
+        std::exit(1);
+    }
+}
+
+template <typename T> const T& requireValue(const std::optional<T>& value, const char* message) {
+    if (!value.has_value()) {
+        std::cerr << message << '\n';
+        std::exit(1);
+    }
+    return *value;
+}
+
+void requireNear(double actual, double expected, const char* message) {
+    if (std::abs(actual - expected) > 0.0001) {
+        std::cerr << message << ": expected " << expected << ", got " << actual << '\n';
+        std::exit(1);
+    }
+}
+
+void replacementNormalizesLineBreaksAndSupportsUndoRedo() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abc"));
+    draft.setCursorPosition(1);
+    draft.replaceSelection(QStringLiteral("x\r\ny"));
+
+    require(draft.text() == QStringLiteral("ax\nybc"), "replacement should normalize CRLF");
+    require(draft.cursorPosition() == 4, "cursor should move after normalized replacement");
+    require(draft.undoEdit(), "undo should be available after replacement");
+    require(draft.text() == QStringLiteral("abc"), "undo should restore original text");
+    require(draft.cursorPosition() == 1, "undo should restore cursor");
+    require(draft.redoEdit(), "redo should be available after undo");
+    require(draft.text() == QStringLiteral("ax\nybc"), "redo should restore replacement");
+}
+
+ClipCanvasStyleToolbarState serialNumberToolbarState(ClipCanvasStyleToolbarSource source,
+                                                     qint64 number, quint32 mixed = 0) {
+    ClipCanvasStyleToolbarState state;
+    state.source = source;
+    state.serialNumberStyle.number = number;
+    state.serialNumberStyleMixed = mixed;
+    return state;
+}
+
+void demoSerialNumberControlsRespectSelectedMixedDecreaseState() {
+    const ClipCanvasStyleToolbarState selectedZero =
+        serialNumberToolbarState(ClipCanvasStyleToolbarSource::SelectedSerialNumber, 0);
+    require(!demo_serial_number_controls::selectedSerialNumberCanDecrease(selectedZero),
+            "selected serial controls should not decrease a concrete zero");
+
+    const ClipCanvasStyleToolbarState selectedMixed =
+        serialNumberToolbarState(ClipCanvasStyleToolbarSource::SelectedSerialNumber, 0,
+                                 ClipCanvasSerialNumberStyleMixedNumber);
+    require(demo_serial_number_controls::selectedSerialNumberCanDecrease(selectedMixed),
+            "selected serial controls should allow decrease when mixed selection may include "
+            "positive numbers");
+    require(demo_serial_number_controls::serialNumberControlsCanDecrease(selectedMixed),
+            "side-panel serial controls should inherit selected mixed decrease state");
+}
+
+void demoSerialNumberControlsClampDefaultDecrease() {
+    const ClipCanvasStyleToolbarState defaultZero =
+        serialNumberToolbarState(ClipCanvasStyleToolbarSource::DefaultSerialNumber, 0);
+    require(!demo_serial_number_controls::serialNumberControlsCanDecrease(defaultZero),
+            "default serial controls should not enable decrease at zero");
+
+    require(demo_serial_number_controls::defaultSerialNumberAfterStep(3, -5) == 0,
+            "default serial stepping should clamp below zero");
+    require(demo_serial_number_controls::defaultSerialNumberAfterStep(3, 2) == 5,
+            "default serial stepping should increase by the requested delta");
+}
+
+void cursorPositionReportsOnlyRealStateChanges() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abc"));
+
+    require(!draft.setCursorPosition(3), "setting the current cursor should not report a change");
+    require(draft.setCursorPosition(1), "moving the cursor should report a change");
+    require(!draft.hasSelection(), "plain cursor movement should clear selection");
+    require(draft.setCursorPosition(2, true), "shift-style cursor movement should report a change");
+    require(draft.selectionStart() == 1, "selection should keep the original anchor");
+    require(draft.selectionEnd() == 2, "selection should extend to the new cursor");
+    require(!draft.setCursorPosition(2, true),
+            "repeating selected cursor position should be a no-op");
+    require(draft.setCursorPosition(2), "dropping selection at the cursor should report a change");
+    require(!draft.hasSelection(), "non-selecting movement should collapse selection");
+}
+
+void inputMethodPreeditDoesNotCommitUntilCommitString() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("ab"));
+    draft.setCursorPosition(1);
+
+    QInputMethodEvent preedit(QStringLiteral("中"), {});
+    require(draft.handleInputMethodEvent(preedit), "preedit should change display text");
+    require(draft.text() == QStringLiteral("ab"), "preedit should not mutate committed text");
+    require(draft.displayText() == QStringLiteral("a中b"), "preedit should appear in display text");
+    require(draft.hasPreedit(), "preedit state should be active");
+    require(draft.inputMethodCursorPosition() == 1,
+            "IME cursor should report committed-text anchor");
+
+    QInputMethodEvent commit;
+    commit.setCommitString(QStringLiteral("中"));
+    require(draft.handleInputMethodEvent(commit), "commit should change committed text");
+    require(draft.text() == QStringLiteral("a中b"), "commit should replace preedit range");
+    require(!draft.hasPreedit(), "commit should clear preedit state");
+    require(draft.cursorPosition() == 2, "commit should move cursor after committed text");
+}
+
+void inputMethodCommitReplacementUsesCursorRelativeRange() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abcd"));
+    draft.setCursorPosition(2);
+
+    QInputMethodEvent commit;
+    commit.setCommitString(QStringLiteral("XY"), -1, 2);
+    require(draft.handleInputMethodEvent(commit), "IME replacement commit should change text");
+    require(draft.text() == QStringLiteral("aXYd"),
+            "IME replacement should use cursor-relative range");
+    require(draft.cursorPosition() == 3,
+            "IME replacement should leave cursor after committed text");
+    require(draft.undoEdit(), "IME replacement should be undoable");
+    require(draft.text() == QStringLiteral("abcd"),
+            "undo should restore text before IME replacement");
+    require(draft.cursorPosition() == 2, "undo should restore cursor before IME replacement");
+}
+
+void keyCommandsInsertTextAndReportEditorCommands() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("ab"));
+    draft.setCursorPosition(1);
+
+    QKeyEvent insertEvent(QEvent::KeyPress, Qt::Key_X, Qt::NoModifier, QStringLiteral("x"));
+    const clip_canvas_text_editor_input::KeyResult insertResult =
+        clip_canvas_text_editor_input::handleKeyPress(&insertEvent, draft, {});
+    require(insertResult.handled, "printable key should be handled by text editor");
+    require(insertResult.changed, "printable key should change the draft");
+    require(insertResult.command == clip_canvas_text_editor_input::EventCommand::None,
+            "printable key should not request editor lifecycle command");
+    require(draft.text() == QStringLiteral("axb"), "printable key should insert into draft");
+
+    QKeyEvent commitEvent(QEvent::KeyPress, Qt::Key_Return, Qt::ControlModifier);
+    const clip_canvas_text_editor_input::KeyResult commitResult =
+        clip_canvas_text_editor_input::handleKeyPress(&commitEvent, draft, {});
+    require(commitResult.handled, "control-enter should be handled");
+    require(!commitResult.changed, "control-enter should not mutate draft text");
+    require(commitResult.command == clip_canvas_text_editor_input::EventCommand::Commit,
+            "control-enter should request commit");
+
+    QKeyEvent escapeEvent(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    const clip_canvas_text_editor_input::KeyResult escapeResult =
+        clip_canvas_text_editor_input::handleKeyPress(&escapeEvent, draft, {});
+    require(escapeResult.handled, "escape should be handled");
+    require(!escapeResult.changed, "escape should not mutate draft text");
+    require(escapeResult.command == clip_canvas_text_editor_input::EventCommand::Commit,
+            "escape should commit the draft and end text editing");
+    require(draft.text() == QStringLiteral("axb"), "escape should preserve the complete draft");
+}
+
+void deleteRequestsElementRemovalWhileBackspaceEditsCharacters() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abc"));
+    draft.setCursorPosition(2);
+    QKeyEvent backspace(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    const auto backspaceResult =
+        clip_canvas_text_editor_input::handleKeyPress(&backspace, draft, {});
+    require(backspaceResult.changed && draft.text() == QStringLiteral("ac"),
+            "Backspace continues deleting the previous character");
+    QKeyEvent remove(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    const auto deleteResult = clip_canvas_text_editor_input::handleKeyPress(&remove, draft, {});
+    require(deleteResult.handled && !deleteResult.changed &&
+                deleteResult.command == clip_canvas_text_editor_input::EventCommand::DeleteElement,
+            "Delete requests element removal rather than a character edit");
+    require(draft.text() == QStringLiteral("ac"),
+            "Delete leaves draft mutation to lifecycle handling");
+}
+
+void keyCommandsDelegateCursorMovement() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abc"));
+
+    QTextCursor::MoveOperation movedOperation = QTextCursor::NoMove;
+    QTextCursor::MoveMode movedMode = QTextCursor::MoveAnchor;
+    QKeyEvent leftEvent(QEvent::KeyPress, Qt::Key_Left, Qt::ShiftModifier);
+    const clip_canvas_text_editor_input::KeyResult result =
+        clip_canvas_text_editor_input::handleKeyPress(
+            &leftEvent, draft,
+            [&movedOperation, &movedMode](QTextCursor::MoveOperation operation,
+                                          QTextCursor::MoveMode mode) {
+                movedOperation = operation;
+                movedMode = mode;
+                return true;
+            });
+
+    require(result.handled, "left arrow should be handled");
+    require(result.changed, "left arrow should request editor refresh");
+    require(movedOperation == QTextCursor::PreviousCharacter,
+            "left arrow should request previous-character movement");
+    require(movedMode == QTextCursor::KeepAnchor, "shift-left should keep anchor while moving");
+}
+
+void keyCommandsReportNoChangeForNoopEdits() {
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abc"));
+    draft.setCursorPosition(0);
+
+    QKeyEvent backspaceEvent(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+    const clip_canvas_text_editor_input::KeyResult backspaceResult =
+        clip_canvas_text_editor_input::handleKeyPress(&backspaceEvent, draft, {});
+    require(backspaceResult.handled, "backspace at start should still be handled");
+    require(!backspaceResult.changed, "backspace at start should not report a text change");
+    require(draft.text() == QStringLiteral("abc"), "backspace at start should preserve text");
+
+    QKeyEvent leftEvent(QEvent::KeyPress, Qt::Key_Left, Qt::NoModifier);
+    const clip_canvas_text_editor_input::KeyResult leftResult =
+        clip_canvas_text_editor_input::handleKeyPress(
+            &leftEvent, draft, [&draft](QTextCursor::MoveOperation, QTextCursor::MoveMode mode) {
+                return draft.setCursorPosition(0, mode == QTextCursor::KeepAnchor);
+            });
+    require(leftResult.handled, "left at start should still be handled");
+    require(!leftResult.changed, "left at start should not report a cursor change");
+    require(draft.cursorPosition() == 0, "left at start should preserve cursor");
+}
+
+void finishedEditCommitPolicyRequiresViewportAndContent() {
+    ClipCanvasTextEditorSession::FinishedEdit edit;
+
+    require(!edit.shouldCommit(true), "new empty finished text edit should not commit");
+
+    edit.text = QStringLiteral("   ");
+    require(!edit.shouldCommit(true), "new whitespace-only finished text edit should not commit");
+
+    edit.text = QStringLiteral("text");
+    require(edit.shouldCommit(true),
+            "new non-empty finished text edit should commit when a viewport exists");
+    require(!edit.shouldCommit(false), "finished text edit should not commit without a viewport");
+
+    edit.text.clear();
+    edit.hasExistingElement = true;
+    require(edit.shouldCommit(true), "existing finished text edit should commit even when emptied");
+    require(!edit.shouldCommit(false),
+            "existing finished text edit should still require a viewport");
+}
+
+void textLayoutMapsDocumentRectsToLocalItemRects() {
+    clip_canvas_text_layout::DocumentLayout layout;
+    layout.itemWidth = 200.0;
+    layout.itemHeight = 100.0;
+    layout.topOffset = 10.0;
+    layout.resolution.scale = 2.0;
+    layout.document = std::make_unique<QTextDocument>();
+    layout.document->setPlainText(QStringLiteral("abc"));
+
+    const QRectF localRect =
+        clip_canvas_text_layout::documentRectToLocalItemRect(QRectF(3.0, 4.0, 5.0, 6.0), layout);
+    requireNear(localRect.left(), -94.0, "document rect should map x into local item coordinates");
+    requireNear(localRect.top(), -32.0, "document rect should map y into local item coordinates");
+    requireNear(localRect.width(), 10.0, "document rect width should scale to item coordinates");
+    requireNear(localRect.height(), 12.0, "document rect height should scale to item coordinates");
+
+    const QRectF contents = clip_canvas_text_layout::documentContentsRect(layout);
+    requireNear(contents.left(), 0.0, "document contents should start at document origin");
+    requireNear(contents.width(), 100.0,
+                "document contents width should be unscaled document width");
+    require(contents.height() > 0.0, "document contents should expose document height");
+}
+
+void resizedAlignedTextKeepsCaretClickAndSelectionGeometryConsistent() {
+    ClipSceneDisplayItem item{};
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.center_x = 0.0;
+    item.center_y = 0.0;
+    item.width = 4000.0;
+    item.height = 160.0;
+    item.font_size = clip_canvas_text::defaultTextFontSize();
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_CENTER;
+    item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_CENTER;
+
+    const QString text = QStringLiteral(
+        "resizing this text element to a narrower width must keep every wrapped line editable");
+    clip_canvas_text_layout::DocumentLayout wideLayout =
+        clip_canvas_text_layout::createDocumentLayout(item, QFont(), 1.0, text, true);
+    QTextBlock wideBlock = wideLayout.textDocument().begin();
+    require(wideBlock.isValid() && wideBlock.layout() != nullptr &&
+                wideBlock.layout()->lineCount() == 1,
+            "text should begin on one line before its width is reduced");
+
+    item.width = 140.0;
+    clip_canvas_text_layout::DocumentLayout layout =
+        clip_canvas_text_layout::createDocumentLayout(item, QFont(), 1.0, text, true);
+    QTextBlock block = layout.textDocument().begin();
+    require(block.isValid() && block.layout() != nullptr,
+            "resized aligned text should create a laid-out text block");
+    require(block.layout()->lineCount() > 1, "reducing text width should create wrapped lines");
+    const QTextLine line = block.layout()->lineAt(1);
+    require(line.isValid() && line.textStart() > 0 && line.textLength() > 1,
+            "resized aligned text should create a non-empty second line");
+
+    const QRectF blockRect = layout.textDocument().documentLayout()->blockBoundingRect(block);
+    const int blockCursorPosition = line.textStart() + 1;
+    const int documentCursorPosition = block.position() + blockCursorPosition;
+    const qreal firstCursorX = line.cursorToX(blockCursorPosition);
+    const qreal secondCursorX = line.cursorToX(blockCursorPosition + 1);
+    const QRectF caret = clip_canvas_text_layout::cursorRectInDocument(layout.textDocument(),
+                                                                       documentCursorPosition);
+    requireNear(caret.left(), blockRect.left() + firstCursorX,
+                "resized wrapped caret should use a block-relative QTextLine cursor position");
+
+    const QVector<QRectF> selectionRects = clip_canvas_text_layout::rangeRectsInDocument(
+        layout.textDocument(), documentCursorPosition, documentCursorPosition + 1);
+    require(selectionRects.size() == 1,
+            "single-character resized aligned selection should create one rectangle");
+    requireNear(selectionRects[0].left(), blockRect.left() + qMin(firstCursorX, secondCursorX),
+                "resized wrapped selection should use block-relative QTextLine cursor positions");
+    requireNear(selectionRects[0].width(), qMax<qreal>(1.0, std::abs(secondCursorX - firstCursorX)),
+                "resized aligned selection width should match the selected glyph advance");
+
+    SceneDisplayInfo sceneInfo{};
+    sceneInfo.surface_width = 800.0;
+    sceneInfo.surface_height = 600.0;
+    sceneInfo.camera_zoom = 1.0;
+    const QRectF caretInView = clip_canvas_text_editor_view::cursorRect(
+        item, QFont(), sceneInfo, text, documentCursorPosition);
+    const int hitPosition = clip_canvas_text_editor_view::cursorPositionForViewPosition(
+        item, QFont(), sceneInfo, caretInView.center(), text);
+    require(hitPosition == documentCursorPosition,
+            "clicking a resized aligned caret should resolve to the painted cursor position");
+}
+
+void textFontSizeFallbackIsSharedAcrossCreationAndMeasurement() {
+    requireNear(clip_canvas_text::defaultTextFontSize(), 30.0,
+                "default text font size should be 30px");
+    requireNear(ClipCanvasTextStyle{}.fontSize, clip_canvas_text::defaultTextFontSize(),
+                "Qt text style should use the shared default font size");
+    require(ClipCanvasTextStyle{}.color == QColor(0xf4, 0x21, 0x2c),
+            "Qt text style should use the default text color");
+    require(ClipCanvasSerialNumberStyle{}.color == QColor(0xf4, 0x21, 0x2c),
+            "Qt serial-number style should use the default serial-number color");
+    requireNear(ClipCanvasTextStyle{}.cornerRadii.topLeft, 6.0,
+                "Qt text style should use the default corner radius");
+
+    ClipTextStyle zeroStyle{};
+    zeroStyle.font_size = 0.0;
+    ClipTextStyle defaultStyle{};
+    defaultStyle.font_size = clip_canvas_text::defaultTextFontSize();
+
+    requireNear(clip_canvas_text::resolvedTextFontSize(zeroStyle.font_size),
+                clip_canvas_text::defaultTextFontSize(),
+                "non-positive text font size should resolve to default");
+    requireNear(clip_canvas_text::resolvedTextFontSize(1.0),
+                clip_canvas_text::minimumTextFontSize(),
+                "positive text font size below engine minimum should clamp to minimum");
+
+    ClipCanvasSceneItem item;
+    clip_canvas_text::applyTextStyleToSceneItem(item, zeroStyle);
+    requireNear(item.font_size, clip_canvas_text::defaultTextFontSize(),
+                "style application should clamp non-positive font size to default");
+
+    const QFont baseFont;
+    const ClipTextElementInfo info =
+        clip_canvas_text::newTextInfoAt(QPointF(10.0, 20.0), baseFont, zeroStyle);
+    requireNear(info.font_size, clip_canvas_text::defaultTextFontSize(),
+                "new text info should use default font size");
+
+    const ClipTextLayoutSize zeroLayout =
+        clip_canvas_text_measurement::measureEmptyDraftLayout(zeroStyle, baseFont);
+    const ClipTextLayoutSize defaultLayout =
+        clip_canvas_text_measurement::measureEmptyDraftLayout(defaultStyle, baseFont);
+    requireNear(zeroLayout.width, defaultLayout.width,
+                "empty draft width should use shared default font size");
+    requireNear(zeroLayout.height, defaultLayout.height,
+                "empty draft height should use shared default font size");
+}
+
+void serialNumberBoundTextMeasurementUsesCreatedTextStyle() {
+    const QFont baseFont;
+    ClipTextStyle textStyle{};
+    textStyle.font_size = 12.0;
+    ClipSerialNumberStyle serialNumberStyle{};
+    serialNumberStyle.font_size = 42.0;
+
+    const ClipTextLayoutSize expectedLayout =
+        clip_canvas_text_measurement::measureEmptyDraftLayout(textStyle, baseFont);
+    const ClipTextLayoutSize actualLayout =
+        clip_canvas_text_measurement::measureSerialNumberBoundTextLayout(textStyle, baseFont);
+
+    requireNear(actualLayout.width, expectedLayout.width,
+                "serial bound text width should use the created text style");
+    requireNear(actualLayout.height, expectedLayout.height,
+                "serial bound text height should use the created text style");
+    ClipTextStyle serialSizedTextStyle = textStyle;
+    serialSizedTextStyle.font_size = serialNumberStyle.font_size;
+    require(actualLayout.height < clip_canvas_text_measurement::measureEmptyDraftLayout(
+                                      serialSizedTextStyle, baseFont)
+                                      .height,
+            "serial bound text measurement should preserve the default text font size");
+}
+
+void textElementInfoDecodingBuildsOwnedPreview() {
+    ClipTextElementInfo info{};
+    const QByteArray text = QByteArrayLiteral("abc");
+    std::memcpy(info.text_utf8, text.constData(), static_cast<std::size_t>(text.size()));
+    info.text_utf8_len = static_cast<std::uint32_t>(text.size());
+    info.text_truncated = 1;
+
+    const QByteArray family = QByteArrayLiteral("Inter");
+    std::memcpy(info.font_family_utf8, family.constData(), static_cast<std::size_t>(family.size()));
+    info.font_family_utf8_len = static_cast<std::uint32_t>(family.size());
+    info.font_family_truncated = 1;
+
+    require(clip_canvas_text::textFromElementInfo(info) == QStringLiteral("abc"),
+            "text element info should decode bounded UTF-8 text");
+
+    const ClipCanvasSceneItem item = clip_canvas_text::defaultPreviewItem(info);
+    require(clip_canvas_text::textFromSceneItem(item) == QStringLiteral("abc"),
+            "preview item should carry decoded element text");
+    require(clip_canvas_text::fontFamilyFromSceneItem(item) == QStringLiteral("Inter"),
+            "preview item should carry decoded font family");
+}
+
+void textSceneItemCopyPreservesCompleteUtf8() {
+    const QString emoji = QString::fromUtf8("\xf0\x9f\x98\x80");
+
+    const int textPrefixLength = CLIP_TEXT_UTF8_CAPACITY - 1;
+    require(textPrefixLength > 0, "text UTF-8 capacity should allow truncation boundary test");
+    const QString textPrefix(textPrefixLength, QLatin1Char('a'));
+    ClipCanvasSceneItem textItem;
+    clip_canvas_text::copyTextToSceneItem(textItem, textPrefix + emoji);
+
+    require(textItem.text_utf8_len ==
+                static_cast<std::uint32_t>((textPrefix + emoji).toUtf8().size()),
+            "owned scene item text should preserve complete UTF-8 content");
+    require(clip_canvas_text::textFromSceneItem(textItem) == textPrefix + emoji,
+            "owned scene item text should decode the complete value");
+}
+
+void textStyleConversionsTruncateFontFamilyAtUtf8Boundaries() {
+    const QString emoji = QString::fromUtf8("\xf0\x9f\x98\x80");
+    const int prefixLength = CLIP_FONT_FAMILY_UTF8_CAPACITY - 1;
+    require(prefixLength > 0, "font-family UTF-8 capacity should allow truncation boundary test");
+    const QString prefix(prefixLength, QLatin1Char('f'));
+
+    ClipCanvasTextStyle textStyle;
+    textStyle.fontFamily = prefix + emoji;
+    const ClipTextStyle engineTextStyle = clip_canvas_types::toEngineTextStyle(textStyle);
+    require(engineTextStyle.font_family_utf8_len == static_cast<std::uint32_t>(prefixLength),
+            "text style conversion should avoid partial UTF-8 code points");
+    require(engineTextStyle.font_family_truncated != 0,
+            "text style conversion should mark UTF-8 boundary truncation");
+    require(clip_canvas_types::toCanvasTextStyle(engineTextStyle).fontFamily == prefix,
+            "text style conversion should round-trip the valid truncated font-family prefix");
+
+    ClipCanvasSerialNumberStyle serialStyle;
+    serialStyle.fontFamily = prefix + emoji;
+    const ClipSerialNumberStyle engineSerialStyle =
+        clip_canvas_types::toEngineSerialNumberStyle(serialStyle);
+    require(engineSerialStyle.font_family_utf8_len == static_cast<std::uint32_t>(prefixLength),
+            "serial-number style conversion should avoid partial UTF-8 code points");
+    require(engineSerialStyle.font_family_truncated != 0,
+            "serial-number style conversion should mark UTF-8 boundary truncation");
+    require(
+        clip_canvas_types::toCanvasSerialNumberStyle(engineSerialStyle).fontFamily == prefix,
+        "serial-number style conversion should round-trip the valid truncated font-family prefix");
+}
+
+void textStyleStateEqualityBoundsFontFamilyLengths() {
+    ClipTextStyle lhs{};
+    ClipTextStyle rhs{};
+    lhs.font_family_truncated = 1;
+    rhs.font_family_truncated = 1;
+    lhs.font_family_utf8_len = CLIP_FONT_FAMILY_UTF8_CAPACITY + 1;
+    rhs.font_family_utf8_len = CLIP_FONT_FAMILY_UTF8_CAPACITY + 8;
+    std::memset(lhs.font_family_utf8, 'a', sizeof(lhs.font_family_utf8));
+    std::memset(rhs.font_family_utf8, 'a', sizeof(rhs.font_family_utf8));
+
+    require(clip_canvas_state::textStylesEqual(lhs, rhs),
+            "text style equality should compare only bounded font-family bytes");
+
+    rhs.font_family_utf8[CLIP_FONT_FAMILY_UTF8_CAPACITY - 1] = 'b';
+    require(!clip_canvas_state::textStylesEqual(lhs, rhs),
+            "text style equality should still detect bounded font-family byte changes");
+
+    ClipSerialNumberStyle serialLhs{};
+    ClipSerialNumberStyle serialRhs{};
+    serialLhs.font_family_truncated = 1;
+    serialRhs.font_family_truncated = 1;
+    serialLhs.font_family_utf8_len = CLIP_FONT_FAMILY_UTF8_CAPACITY + 3;
+    serialRhs.font_family_utf8_len = CLIP_FONT_FAMILY_UTF8_CAPACITY + 5;
+    std::memset(serialLhs.font_family_utf8, 's', sizeof(serialLhs.font_family_utf8));
+    std::memset(serialRhs.font_family_utf8, 's', sizeof(serialRhs.font_family_utf8));
+
+    require(clip_canvas_state::serialNumberStylesEqual(serialLhs, serialRhs),
+            "serial-number style equality should compare only bounded font-family bytes");
+}
+
+void textMeasurementBuildsAutoResizeLayoutOverridesFromSnapshots() {
+    ClipTextStyle style{};
+    style.font_size = clip_canvas_text::defaultTextFontSize();
+
+    ClipTextElementInfo infos[2] = {};
+    infos[0].id = ClipElementId{10, 2};
+    infos[0].font_size = style.font_size;
+    infos[0].auto_resize = 1;
+    const QByteArray measuredText = QByteArrayLiteral("auto");
+    std::memcpy(infos[0].text_utf8, measuredText.constData(),
+                static_cast<std::size_t>(measuredText.size()));
+    infos[0].text_utf8_len = static_cast<std::uint32_t>(measuredText.size());
+
+    infos[1].id = ClipElementId{11, 2};
+    infos[1].font_size = style.font_size;
+    infos[1].auto_resize = 0;
+    infos[1].width = 40.0;
+    infos[1].height = 20.0;
+    const QByteArray fixedText = QByteArrayLiteral("fixed width note that wraps");
+    std::memcpy(infos[1].text_utf8, fixedText.constData(),
+                static_cast<std::size_t>(fixedText.size()));
+    infos[1].text_utf8_len = static_cast<std::uint32_t>(fixedText.size());
+
+    const clip_canvas_text_measurement::TextLayoutOverrideMeasurement measurement =
+        clip_canvas_text_measurement::measureAutoResizeLayoutOverrides(infos, 2, style, QFont());
+
+    require(measurement.success, "snapshot layout measurement should succeed");
+    // A font change re-renders the glyphs, so fixed-size text must be measured
+    // too: the re-measured wrapped height and ink box anchor decorations and
+    // dirty regions to the edges the frame actually paints.
+    require(measurement.layouts.size() == 2,
+            "snapshot layout measurement must also measure fixed-size text");
+    require(measurement.layouts[0].id.index == infos[0].id.index &&
+                measurement.layouts[0].id.generation == infos[0].id.generation,
+            "snapshot layout measurement should preserve measured text id");
+    require(measurement.layouts[0].size.width > 1.0,
+            "snapshot layout measurement should produce width");
+    require(measurement.layouts[0].size.height > 1.0,
+            "snapshot layout measurement should produce height");
+    require(measurement.layouts[1].size.width > 1.0 && measurement.layouts[1].size.height > 1.0,
+            "fixed-size text measurement should produce a wrapped layout");
+    require(measurement.layouts[1].size.content_width > 1.0 &&
+                measurement.layouts[1].size.content_width <= measurement.layouts[1].size.width,
+            "fixed-size text measurement should report the wrapped ink box");
+}
+
+void textEditTargetResolvesCreateHitAndSelectedText() {
+    ScopedRuntimeHandle runtime;
+    require(clip_runtime_create(runtime.outParam()) == CLIP_OK,
+            "runtime creation should succeed for text edit target tests");
+
+    ClipCanvasViewport viewport;
+    ClipEngineConfig config = clip_canvas_viewport::defaultEngineConfig();
+    require(viewport.create(runtime.get(), config),
+            "viewport creation should succeed for text edit target tests");
+
+    QFont baseFont;
+    ClipTextStyle style{};
+    style.font_size = clip_canvas_text::defaultTextFontSize();
+
+    const QPointF createPoint(12.0, 34.0);
+    require(!clip_canvas_text_edit_target::resolveTextEditTarget(
+                 runtime.get(), viewport.get(), createPoint, baseFont, style, false)
+                 .has_value(),
+            "text edit target should not create a draft when creation is disabled");
+
+    const std::optional<ClipTextElementInfo> created =
+        clip_canvas_text_edit_target::resolveTextEditTarget(runtime.get(), viewport.get(),
+                                                            createPoint, baseFont, style, true);
+    const ClipTextElementInfo& createdValue =
+        requireValue(created, "text edit target should create a draft target on empty canvas");
+    requireNear(createdValue.center_x, createPoint.x(), "created text edit target center x");
+    requireNear(createdValue.center_y, createPoint.y(), "created text edit target center y");
+
+    const QByteArray text = QByteArrayLiteral("target");
+    require(clip_viewport_create_text(runtime.get(), viewport.get(), 50.0, 60.0, text.constData(),
+                                      static_cast<std::uint32_t>(text.size()), 40.0,
+                                      20.0) == CLIP_OK,
+            "runtime should create text for edit target hit testing");
+
+    const QPointF hitPoint(50.0, 60.0);
+    const std::optional<ClipTextElementInfo> hit =
+        clip_canvas_text_edit_target::resolveTextEditTarget(runtime.get(), viewport.get(), hitPoint,
+                                                            baseFont, style, false);
+    require(hit.has_value(), "text edit target should resolve existing hit text");
+    require(clip_canvas_text::textFromElementInfo(*hit) == QStringLiteral("target"),
+            "text edit target should return the hit text element info");
+
+    ClipElementId hitId{};
+    std::uint8_t hitFlag = 0;
+    require(clip_viewport_hit_text(runtime.get(), viewport.get(), hitPoint.x(), hitPoint.y(),
+                                   &hitId, &hitFlag) == CLIP_OK &&
+                hitFlag != 0,
+            "runtime should expose the created text id for selected target testing");
+
+    ScopedChangedViewportList changedViewports;
+    require(clip_viewport_select_element_ex(runtime.get(), viewport.get(), hitId,
+                                            changedViewports.outParam()) == CLIP_OK,
+            "runtime should select text for selected edit target testing");
+
+    const std::optional<ClipTextElementInfo> selected =
+        clip_canvas_text_edit_target::resolveSelectedTextEditTarget(runtime.get(), viewport.get(),
+                                                                    hitPoint, false);
+    require(selected.has_value(),
+            "selected text edit target should resolve a selected hit text element");
+    require(clip_canvas_text::textFromElementInfo(*selected) == QStringLiteral("target"),
+            "selected text edit target should return selected text element info");
+
+    require(!clip_canvas_text_edit_target::resolveSelectedTextEditTarget(
+                 runtime.get(), viewport.get(), hitPoint, true)
+                 .has_value(),
+            "serial-bound selected target should reject ordinary selected text");
+}
+
+void textEditGeometryAnchorsRespectHorizontalAlignment() {
+    ClipSceneDisplayItem item{};
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.center_x = 100.0;
+    item.center_y = 50.0;
+    item.width = 40.0;
+    item.height = 20.0;
+    item.rotation = 0.0;
+
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+    QPointF anchor = clip_canvas_text_edit_geometry::topAnchorForItem(item);
+    requireNear(anchor.x(), 80.0, "left-aligned text top anchor x");
+    requireNear(anchor.y(), 40.0, "left-aligned text top anchor y");
+    QPointF center = clip_canvas_text_edit_geometry::centerForTopAnchor(item, anchor);
+    requireNear(center.x(), item.center_x, "left-aligned top anchor should round-trip center x");
+    requireNear(center.y(), item.center_y, "left-aligned top anchor should round-trip center y");
+
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_CENTER;
+    anchor = clip_canvas_text_edit_geometry::topAnchorForItem(item);
+    requireNear(anchor.x(), 100.0, "center-aligned text top anchor x");
+    requireNear(anchor.y(), 40.0, "center-aligned text top anchor y");
+
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_RIGHT;
+    anchor = clip_canvas_text_edit_geometry::topAnchorForItem(item);
+    requireNear(anchor.x(), 120.0, "right-aligned text top anchor x");
+    requireNear(anchor.y(), 40.0, "right-aligned text top anchor y");
+
+    const QPointF creationAnchor =
+        clip_canvas_text_edit_geometry::topAnchorForCreationPoint(item, QPointF(10.0, 30.0));
+    requireNear(creationAnchor.x(), 10.0, "new text creation anchor x");
+    requireNear(creationAnchor.y(), 20.0, "new text creation anchor y");
+}
+
+void textEditorViewMapsCanvasHitTestingAndEditingRegion() {
+    SceneDisplayInfo sceneInfo{};
+    sceneInfo.surface_width = 200.0;
+    sceneInfo.surface_height = 100.0;
+    sceneInfo.camera_center_x = 10.0;
+    sceneInfo.camera_center_y = 20.0;
+    sceneInfo.camera_zoom = 2.0;
+
+    ClipSceneDisplayItem item{};
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.element_id = ClipElementId{5, 2};
+    item.center_x = 15.0;
+    item.center_y = 25.0;
+    item.width = 20.0;
+    item.height = 10.0;
+    item.font_size = clip_canvas_text::defaultTextFontSize();
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+    item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_CENTER;
+
+    const QPointF centerView =
+        clip_canvas_text_editor_view::canvasToViewPoint(sceneInfo, QPointF(15.0, 25.0));
+    requireNear(centerView.x(), 110.0, "text editor view should map canvas x through scene camera");
+    requireNear(centerView.y(), 60.0, "text editor view should map canvas y through scene camera");
+
+    require(clip_canvas_text_editor_view::itemContainsViewPosition(item, sceneInfo, centerView),
+            "text editor view hit testing should include the item center");
+    require(!clip_canvas_text_editor_view::itemContainsViewPosition(item, sceneInfo,
+                                                                    QPointF(131.0, 60.0)),
+            "text editor view hit testing should reject points outside the item bounds");
+
+    ClipCanvasTextDraft draft;
+    draft.begin(QStringLiteral("abc"));
+    const QRegion region =
+        clip_canvas_text_editor_view::editingRegion(item, draft, QFont(), sceneInfo);
+    require(!region.isEmpty(), "text editor view editing region should be non-empty");
+    require(region.contains(centerView.toPoint()),
+            "text editor view editing region should include preview bounds");
+
+    const QRectF logicalBounds = clip_canvas_render_geometry::sceneItemBounds(sceneInfo, item);
+    item.fill = ClipColorRgba8{0xff, 0xff, 0xff, 0xff};
+    const QRectF fillBounds = clip_canvas_render_geometry::sceneItemBounds(sceneInfo, item);
+    require(
+        fillBounds.left() < logicalBounds.left() && fillBounds.right() > logicalBounds.right() &&
+            fillBounds.top() < logicalBounds.top() && fillBounds.bottom() > logicalBounds.bottom(),
+        "editing text bounds should include background fill padding");
+    const QRegion fillEditingRegion =
+        clip_canvas_text_editor_view::editingRegion(item, draft, QFont(), sceneInfo);
+    require(
+        fillEditingRegion.contains(clip_canvas_render_geometry::alignedRectForBounds(fillBounds)),
+        "text editing dirty region should cover the background fill");
+
+    item.fill = ClipColorRgba8{};
+    item.stroke = ClipColorRgba8{0, 0, 0, 0xff};
+    item.stroke_width = 12.0;
+    item.text_utf8_len = 3;
+    const QRectF strokeBounds = clip_canvas_render_geometry::sceneItemBounds(sceneInfo, item);
+    require(strokeBounds.left() < logicalBounds.left() &&
+                strokeBounds.right() > logicalBounds.right() &&
+                strokeBounds.top() < logicalBounds.top() &&
+                strokeBounds.bottom() > logicalBounds.bottom(),
+            "editing text bounds should include visible stroke paint");
+    const QRegion strokeEditingRegion =
+        clip_canvas_text_editor_view::editingRegion(item, draft, QFont(), sceneInfo);
+    require(strokeEditingRegion.contains(
+                clip_canvas_render_geometry::alignedRectForBounds(strokeBounds)),
+            "text editing dirty region should cover the visible stroke");
+
+    const QRectF caret = clip_canvas_text_editor_view::cursorRect(
+        item, QFont(), sceneInfo, draft.displayText(), draft.displayCursorPosition());
+    require(!caret.isEmpty(), "text editor view should resolve a caret rectangle");
+
+    const int cursorPosition = clip_canvas_text_editor_view::cursorPositionForViewPosition(
+        item, QFont(), sceneInfo, centerView, draft.text());
+    require(cursorPosition >= 0 && cursorPosition <= draft.text().size(),
+            "text editor view should clamp hit-tested cursor positions to draft text bounds");
+}
+
+void bahnschriftCondensedMeasurementUsesDocumentHeight() {
+    const QString family = QStringLiteral("Bahnschrift Condensed");
+    ClipTextElementInfo info{};
+    info.font_size = 64.0;
+    ClipCanvasSceneItem item = clip_canvas_text::defaultPreviewItem(info);
+    item.setFontFamilyUtf8(family.toUtf8());
+
+    const QFont baseFont = QApplication::font();
+    const clip_canvas_text_layout::FontResolution font =
+        clip_canvas_text_layout::resolveFont(baseFont, item, 1.0);
+    if (!QFontInfo(font.font).family().contains(QStringLiteral("Bahnschrift"))) {
+        return;
+    }
+
+    const QString text = QStringLiteral("Bahnschrift Condensed");
+    const QSizeF measuredSize = clip_canvas_text_layout::measureNaturalText(text, baseFont, item);
+    item.width = measuredSize.width();
+    item.height = measuredSize.height();
+    clip_canvas_text_layout::DocumentLayout documentLayout =
+        clip_canvas_text_layout::createDocumentLayout(item, baseFont, 1.0, text, false);
+    const QTextBlock block = documentLayout.textDocument().begin();
+    require(block.isValid() && block.layout() != nullptr && block.layout()->lineCount() == 1,
+            "Bahnschrift Condensed natural measurement should produce one document line");
+    requireNear(measuredSize.height(),
+                documentLayout.textDocument().size().height() * documentLayout.resolution.scale,
+                "Bahnschrift Condensed measurement should use the painted document line height");
+}
+
+QRect darkPixelBounds(const QImage& image) {
+    QRect bounds;
+    bool hasDarkPixel = false;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor pixel = image.pixelColor(x, y);
+            if (pixel.alpha() == 0 || pixel.red() >= 250 || pixel.green() >= 250 ||
+                pixel.blue() >= 250) {
+                continue;
+            }
+            const QRect pixelRect(x, y, 1, 1);
+            bounds = hasDarkPixel ? bounds.united(pixelRect) : pixelRect;
+            hasDarkPixel = true;
+        }
+    }
+    return bounds;
+}
+
+void serialNumberFormattedLabelsRenderAndFitBadges() {
+#if defined(Q_OS_WIN)
+    require(QFontDatabase::addApplicationFont(QStringLiteral("C:/Windows/Fonts/msyh.ttc")) >= 0,
+            "Chinese number rendering requires a CJK fallback font");
+#endif
+    const QList<QByteArray> labels = {"1",         "27",
+                                      "XXVII",     "aa",
+                                      "AA",        QByteArray::fromHex("e4ba8ce58d81e4b883"),
+                                      "MMMCMXCIX", "CRPXNLSKVLJFHG"};
+    SceneDisplayInfo info{};
+    info.surface_width = 240;
+    info.surface_height = 240;
+    info.camera_zoom = 1.0;
+    for (const auto shape :
+         {CLIP_SERIAL_NUMBER_TYPE_OUTLINED_CIRCLE, CLIP_SERIAL_NUMBER_TYPE_OUTLINED_SQUARE,
+          CLIP_SERIAL_NUMBER_TYPE_SOLID_CIRCLE, CLIP_SERIAL_NUMBER_TYPE_SOLID_SQUARE}) {
+        QSize shortLabelInkSize;
+        for (double diameter : {40.0, 100.0}) {
+            QList<QImage> rendered;
+            for (const QByteArray& label : labels) {
+                ClipCanvasSceneItem item;
+                item.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+                item.serial_number_type = static_cast<std::uint8_t>(shape);
+                item.serial_number = 27;
+                item.width = item.height = diameter;
+                item.font_size = 32.0;
+                item.opacity = 1.0;
+                item.stroke = ClipColorRgba8{255, 255, 255, 255};
+                item.stroke_width = 3.0;
+                item.fill = ClipColorRgba8{255, 255, 255, 255};
+                item.fill_style = CLIP_FILL_STYLE_SOLID;
+                item.text_color = ClipColorRgba8{0, 0, 0, 255};
+                item.setTextUtf8(label);
+                QImage image(240, 240, QImage::Format_ARGB32_Premultiplied);
+                image.fill(Qt::transparent);
+                QPainter painter(&image);
+                painter.setFont(QApplication::font());
+                clip_canvas_renderer::renderSceneItems(
+                    {&painter, &info, &item, 1, QRegion(image.rect())});
+                painter.end();
+                const QRect ink = darkPixelBounds(image);
+                require(!ink.isEmpty(), "each numeric label paints visible glyphs");
+                const double contentDiameter = diameter - 2.0 * item.stroke_width;
+                require(ink.width() <= contentDiameter + 2 && ink.height() <= contentDiameter + 2,
+                        "long and Chinese labels fit the stroke-adjusted badge content area");
+                if (label == "1") {
+                    if (shortLabelInkSize.isEmpty()) {
+                        shortLabelInkSize = ink.size();
+                    } else {
+                        require(ink.size() == shortLabelInkSize,
+                                "short labels keep their font size when more space is available");
+                    }
+                }
+                require(std::abs(ink.center().x() - 119) <= 2 &&
+                            std::abs(ink.center().y() - 119) <= 2,
+                        "formatted glyphs remain optically centered");
+                for (const auto& previous : rendered)
+                    require(previous != image,
+                            "each notation renders its UTF-8 label instead of decimal digits");
+                rendered.append(image);
+            }
+        }
+    }
+}
+
+void bahnschriftCondensedSerialNumberUsesResolvedGlyphBounds() {
+    constexpr double zoom = 1.37;
+    const QString family = QStringLiteral("Bahnschrift Condensed");
+    ClipCanvasSceneItem item;
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    item.width = 40.0;
+    item.height = 40.0;
+    item.font_size = 63.25;
+    item.serial_number = 88;
+    item.fill = ClipColorRgba8{0xff, 0xff, 0xff, 0xff};
+    item.stroke = ClipColorRgba8{0, 0, 0, 0};
+    item.text_color = ClipColorRgba8{0, 0, 0, 0xff};
+    item.fill_style = CLIP_FILL_STYLE_SOLID;
+    item.opacity = 1.0;
+    item.setFontFamilyUtf8(family.toUtf8());
+
+    const QFont baseFont = QApplication::font();
+    clip_canvas_text_layout::SingleLineLayout layout =
+        clip_canvas_text_layout::createSingleLineLayout(QStringLiteral("88"), baseFont, item, zoom);
+    if (!QFontInfo(layout.resolution.font).family().contains(QStringLiteral("Bahnschrift"))) {
+        return;
+    }
+    require(layout.visualBounds.isValid() && !layout.visualBounds.isEmpty(),
+            "Bahnschrift Condensed serial number should have resolved glyph bounds");
+    requireNear(layout.resolution.font.pixelSize() * layout.resolution.scale, item.font_size * zoom,
+                "serial-number font resolution should preserve the requested view pixel size");
+
+    const QSize imageSize(320, 320);
+    SceneDisplayInfo sceneInfo{};
+    sceneInfo.surface_width = imageSize.width();
+    sceneInfo.surface_height = imageSize.height();
+    sceneInfo.camera_zoom = zoom;
+    QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setFont(baseFont);
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &sceneInfo, &item, 1, QRegion(image.rect())});
+    painter.end();
+
+    const QRect paintedBounds = darkPixelBounds(image);
+    require(!paintedBounds.isEmpty(), "Bahnschrift Condensed serial number should paint text");
+    const QSizeF resolvedVisualSize = layout.visualBounds.size() * layout.resolution.scale;
+    const double contentSize = item.width * zoom;
+    const double fitScale = qMin(1.0, qMin(contentSize / resolvedVisualSize.width(),
+                                           contentSize / resolvedVisualSize.height()));
+    const QSizeF measuredViewSize = resolvedVisualSize * fitScale;
+    require(std::abs(paintedBounds.width() - measuredViewSize.width()) <= 2.0,
+            "serial-number painted width should match resolved glyph width");
+    require(std::abs(paintedBounds.height() - measuredViewSize.height()) <= 2.0,
+            "serial-number painted height should match resolved glyph height");
+    require(std::abs(paintedBounds.center().x() - image.rect().center().x()) <= 1.0,
+            "serial-number measured glyphs should be horizontally centered");
+    require(std::abs(paintedBounds.center().y() - image.rect().center().y()) <= 1.0,
+            "serial-number measured glyphs should be vertically centered");
+}
+
+bool textEditorOverlayHasVisiblePixels(ClipCanvasWidgetTextInteraction& interaction,
+                                       const ClipCanvasDisplayCache& displayCache,
+                                       const QFont& font, const QSize& size) {
+    QImage image(size, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    interaction.renderEditorOverlay(painter, font, displayCache);
+    painter.end();
+
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool waitForTextEditorOverlayVisibility(ClipCanvasWidgetTextInteraction& interaction,
+                                        const ClipCanvasDisplayCache& displayCache,
+                                        const QFont& font, const QSize& size, bool expectedVisible,
+                                        int timeoutMs) {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    do {
+        QApplication::processEvents(QEventLoop::AllEvents, 5);
+        if (textEditorOverlayHasVisiblePixels(interaction, displayCache, font, size) ==
+            expectedVisible) {
+            return true;
+        }
+        QThread::msleep(1);
+    } while (elapsed.elapsed() < timeoutMs);
+    return false;
+}
+
+bool textEditorOverlayRemainsVisible(ClipCanvasWidgetTextInteraction& interaction,
+                                     const ClipCanvasDisplayCache& displayCache, const QFont& font,
+                                     const QSize& size, int durationMs) {
+    QElapsedTimer elapsed;
+    elapsed.start();
+    while (elapsed.elapsed() < durationMs) {
+        QApplication::processEvents(QEventLoop::AllEvents, 5);
+        if (!textEditorOverlayHasVisiblePixels(interaction, displayCache, font, size)) {
+            return false;
+        }
+        QThread::msleep(1);
+    }
+    return true;
+}
+
+void textEditorCaretBlinksResetsAndHonorsSystemFlashTime() {
+    constexpr int kFlashTimeMs = 80;
+    constexpr int kVisibilityTimeoutMs = 1000;
+    const int originalFlashTimeMs = QApplication::cursorFlashTime();
+    QApplication::setCursorFlashTime(kFlashTimeMs);
+
+    ScopedRuntimeHandle runtime;
+    require(clip_runtime_create(runtime.outParam()) == CLIP_OK,
+            "runtime creation should succeed for text caret blink tests");
+    ClipCanvasViewport viewport;
+    require(viewport.create(runtime.get(), clip_canvas_viewport::defaultEngineConfig()),
+            "viewport creation should succeed for text caret blink tests");
+
+    const QSize surfaceSize(200, 160);
+    require(clip_viewport_set_surface_size(runtime.get(), viewport.get(), surfaceSize.width(),
+                                           surfaceSize.height()) == CLIP_OK,
+            "text caret blink viewport should accept its surface size");
+    ClipCanvasDisplayCache displayCache;
+    require(displayCache.sync(runtime.get(), viewport.get()),
+            "text caret blink test should synchronize the display cache");
+
+    QWidget editorHost;
+    editorHost.resize(surfaceSize);
+    editorHost.show();
+    QApplication::processEvents();
+
+    ClipTextStyle style{};
+    style.color = ClipColorRgba8{0x1e, 0x1e, 0x1e, 0xff};
+    style.font_size = clip_canvas_text::defaultTextFontSize();
+    style.opacity = 1.0;
+    style.horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+    style.vertical_align = CLIP_TEXT_VERTICAL_ALIGN_CENTER;
+    const ClipTextElementInfo info =
+        clip_canvas_text::newTextInfoAt(QPointF(0.0, 0.0), editorHost.font(), style);
+
+    ClipCanvasCursorController cursorController(editorHost);
+    ClipCanvasWidgetTextInteraction interaction(editorHost, cursorController);
+    require(interaction.beginForElement(
+                info, displayCache, QPointF(surfaceSize.width() / 2.0, surfaceSize.height() / 2.0),
+                &style, false),
+            "text caret blink test should begin an empty text edit");
+    require(textEditorOverlayHasVisiblePixels(interaction, displayCache, editorHost.font(),
+                                              surfaceSize),
+            "a newly activated text caret should start visible");
+    require(waitForTextEditorOverlayVisibility(interaction, displayCache, editorHost.font(),
+                                               surfaceSize, false, kVisibilityTimeoutMs),
+            "an active custom-painted text caret should enter its hidden blink phase");
+
+    const QRegion resetRegion = interaction.setCursorFromViewPosition(
+        displayCache, editorHost.font(),
+        QPointF(surfaceSize.width() / 2.0, surfaceSize.height() / 2.0), false);
+    require(!resetRegion.isEmpty(),
+            "placing the cursor at the same position should invalidate a hidden caret");
+    require(textEditorOverlayHasVisiblePixels(interaction, displayCache, editorHost.font(),
+                                              surfaceSize),
+            "cursor interaction should immediately restart the visible blink phase");
+
+    require(waitForTextEditorOverlayVisibility(interaction, displayCache, editorHost.font(),
+                                               surfaceSize, false, kVisibilityTimeoutMs),
+            "a restarted caret should continue blinking after its visible phase");
+    QApplication::setCursorFlashTime(0);
+    QApplication::processEvents();
+    require(textEditorOverlayHasVisiblePixels(interaction, displayCache, editorHost.font(),
+                                              surfaceSize),
+            "disabling system cursor flashing should immediately reveal a hidden caret");
+    require(textEditorOverlayRemainsVisible(interaction, displayCache, editorHost.font(),
+                                            surfaceSize, kFlashTimeMs * 2),
+            "a zero system cursor flash time should keep the caret steadily visible");
+
+    const ClipCanvasWidgetTextInteraction::CancelResult cancelResult =
+        interaction.cancel(runtime.get(), viewport.get(), displayCache);
+    require(cancelResult.sessionEnded, "cancel should end the blinking text edit session");
+    require(!textEditorOverlayHasVisiblePixels(interaction, displayCache, editorHost.font(),
+                                               surfaceSize),
+            "ending text editing should remove the caret overlay");
+
+    QApplication::setCursorFlashTime(originalFlashTimeMs);
+}
+
+ClipOverlayDisplayItem overlayRect(ClipOverlayRectKind kind, double centerX, double centerY,
+                                   double width, double height) {
+    ClipOverlayDisplayItem item{};
+    item.kind = CLIP_OVERLAY_DISPLAY_ITEM_DRAW_RECT;
+    item.rect_kind = kind;
+    item.center_x = centerX;
+    item.center_y = centerY;
+    item.width = width;
+    item.height = height;
+    return item;
+}
+
+clip_canvas_render_geometry::ViewProjection testProjection() {
+    return clip_canvas_render_geometry::ViewProjection{
+        0.0, 0.0, 1.0, 200.0, 200.0,
+    };
+}
+
+bool isTextSelectionControl(const ClipOverlayDisplayItem& item) {
+    if (item.kind != CLIP_OVERLAY_DISPLAY_ITEM_DRAW_RECT) {
+        return false;
+    }
+    return item.rect_kind == CLIP_OVERLAY_RECT_SELECTION_FRAME ||
+           item.rect_kind == CLIP_OVERLAY_RECT_TEXT_ACTUAL_FRAME ||
+           item.rect_kind == CLIP_OVERLAY_RECT_SELECTION_RESIZE_HANDLE ||
+           item.rect_kind == CLIP_OVERLAY_RECT_SELECTION_ROTATION_HANDLE;
+}
+
+std::vector<ClipOverlayDisplayItem>
+textSelectionControls(const ClipCanvasDisplayCache& displayCache) {
+    std::vector<ClipOverlayDisplayItem> controls;
+    for (std::uint32_t index = 0; index < displayCache.overlayItemCount(); ++index) {
+        const ClipOverlayDisplayItem& item = displayCache.overlayItems()[index];
+        if (isTextSelectionControl(item)) {
+            controls.push_back(item);
+        }
+    }
+    return controls;
+}
+
+bool sameColor(const ClipColorRgba8& left, const ClipColorRgba8& right) {
+    return left.r == right.r && left.g == right.g && left.b == right.b && left.a == right.a;
+}
+
+void syncDisplayCacheForChangedViewport(ClipCanvasDisplayCache& displayCache, ClipRuntime runtime,
+                                        const ClipCanvasViewport& viewport,
+                                        ClipChangedViewportList changedViewports,
+                                        const char* failureMessage) {
+    std::uint64_t viewportId = 0;
+    require(viewport.id(&viewportId), "changed viewport test should resolve its viewport id");
+    const clip_canvas_changed_viewports::ViewportIds changedIds =
+        clip_canvas_changed_viewports::idsFromList(changedViewports);
+    for (std::uint64_t changedId : changedIds) {
+        if (changedId == viewportId) {
+            require(displayCache.sync(runtime, viewport.get()), failureMessage);
+            return;
+        }
+    }
+}
+
+bool imageRegionContainsSelectionBlue(const QImage& image, const QRect& region) {
+    const QRect clipped = region.intersected(image.rect());
+    for (int y = clipped.top(); y <= clipped.bottom(); ++y) {
+        for (int x = clipped.left(); x <= clipped.right(); ++x) {
+            const QColor pixel = image.pixelColor(x, y);
+            if (pixel.blue() >= 224 && pixel.blue() - pixel.red() >= 40 &&
+                pixel.blue() - pixel.green() >= 20 && pixel.alpha() > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+QImage renderCanvasWidget(ClipCanvasWidget& canvas) {
+    QImage image(canvas.size(), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    canvas.render(&painter);
+    painter.end();
+    return image;
+}
+
+void sendCanvasMouseEvent(ClipCanvasWidget& canvas, QEvent::Type type, const QPointF& position,
+                          Qt::MouseButton button, Qt::MouseButtons buttons,
+                          Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+    QMouseEvent event(type, position, position, position, button, buttons, modifiers);
+    QApplication::sendEvent(&canvas, &event);
+}
+
+void beginTextDraftWithContent(ClipCanvasWidget& canvas) {
+    require(canvas.setCanvasTool(ClipCanvasTool::Text),
+            "text focus test should activate the text tool");
+    canvas.setFocus(Qt::OtherFocusReason);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, QPointF(80.0, 80.0), Qt::LeftButton,
+                         Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, QPointF(80.0, 80.0), Qt::LeftButton,
+                         Qt::NoButton);
+    QKeyEvent insertEvent(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, QStringLiteral("a"));
+    QApplication::sendEvent(&canvas, &insertEvent);
+}
+
+bool canvasReportsInputMethodEnabled(ClipCanvasWidget& canvas) {
+    QInputMethodQueryEvent event(Qt::ImEnabled);
+    QApplication::sendEvent(&canvas, &event);
+    return event.value(Qt::ImEnabled).toBool();
+}
+
+void inputMethodEnablementTracksInlineTextEditing() {
+    ClipCanvasWidget canvas;
+    canvas.resize(320, 240);
+    canvas.show();
+    QApplication::processEvents();
+
+    require(!canvas.testAttribute(Qt::WA_InputMethodEnabled),
+            "an idle canvas must not advertise input-method support");
+    require(!canvasReportsInputMethodEnabled(canvas),
+            "an idle canvas must report input methods disabled");
+    require(canvas.setCanvasTool(ClipCanvasTool::Text),
+            "input-method lifecycle test should activate the text tool");
+    require(!canvas.testAttribute(Qt::WA_InputMethodEnabled),
+            "selecting the text tool must not enable input methods before editing");
+
+    beginTextDraftWithContent(canvas);
+    require(canvas.testAttribute(Qt::WA_InputMethodEnabled),
+            "an active inline text draft must enable input methods");
+    require(canvasReportsInputMethodEnabled(canvas),
+            "an active inline text draft must report input methods enabled");
+    require(canvas.cancelActiveTextEditing(),
+            "input-method lifecycle test should cancel its first text draft");
+    require(!canvas.testAttribute(Qt::WA_InputMethodEnabled),
+            "canceling inline text editing must disable input methods");
+
+    beginTextDraftWithContent(canvas);
+    require(canvas.setCanvasTool(ClipCanvasTool::Select),
+            "input-method lifecycle test should commit by changing tools");
+    require(!canvas.testAttribute(Qt::WA_InputMethodEnabled),
+            "committing inline text editing must disable input methods");
+    require(!canvasReportsInputMethodEnabled(canvas),
+            "a committed canvas must report input methods disabled");
+}
+
+void textEditorStylePopupInteractionPreservesDraftUntilItCloses() {
+    QWidget host;
+    auto* layout = new QHBoxLayout(&host);
+    auto* canvas = new ClipCanvasWidget(&host);
+    auto* unrelatedControl = new QLineEdit(&host);
+    layout->addWidget(canvas);
+    layout->addWidget(unrelatedControl);
+    host.resize(400, 240);
+    host.show();
+
+    QWidget stylePopupSurface;
+    stylePopupSurface.setWindowFlags(Qt::Tool);
+    auto* stylePopupControl = new QLineEdit(&stylePopupSurface);
+    stylePopupSurface.resize(160, 32);
+    stylePopupSurface.show();
+    QApplication::processEvents();
+
+    beginTextDraftWithContent(*canvas);
+    require(!canvas->canvasHistoryState().canUndo,
+            "an active text draft should remain outside history before it is committed");
+
+    canvas->beginTextStylePopupInteraction();
+    stylePopupControl->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    require(!canvas->canvasHistoryState().canUndo,
+            "an explicit text-style popup interaction should keep the draft active");
+
+    stylePopupSurface.hide();
+    host.activateWindow();
+    canvas->endTextStylePopupInteraction(&host);
+    QApplication::processEvents();
+    require(canvas->hasFocus(), "canvas should regain focus after the style popup closes");
+    unrelatedControl->setFocus(Qt::OtherFocusReason);
+    QApplication::processEvents();
+    require(canvas->canvasHistoryState().canUndo,
+            "moving focus to an unrelated control should commit the active text draft");
+}
+
+void cancelingAnActiveTextDraftDoesNotCommitIt() {
+    ClipCanvasWidget canvas;
+    canvas.resize(320, 240);
+    canvas.show();
+    QApplication::processEvents();
+
+    beginTextDraftWithContent(canvas);
+    require(!canvas.canvasHistoryState().canUndo,
+            "an active text draft should remain outside history before cancellation");
+    require(canvas.cancelActiveTextEditing(),
+            "canceling an active text draft should report a state change");
+    require(canvas.setCanvasTool(ClipCanvasTool::Select),
+            "switching tools after cancellation should remain supported");
+    require(!canvas.canvasHistoryState().canUndo,
+            "canceling an active text draft must not commit it to history");
+}
+
+ClipInputEvent pointerInput(ClipPointerEventType type, double x, double y, ClipPointerButton button,
+                            std::uint8_t buttons) {
+    ClipInputEvent event{};
+    event.kind = CLIP_INPUT_EVENT_POINTER;
+    event.pointer.pointer_id = 1;
+    event.pointer.event_type = type;
+    event.pointer.device = CLIP_POINTER_DEVICE_MOUSE;
+    event.pointer.position_x = x;
+    event.pointer.position_y = y;
+    event.pointer.button = button;
+    event.pointer.buttons = buttons;
+    return event;
+}
+
+void selectToolDragRendersSelectionMarquee() {
+    ClipCanvasRuntime runtime;
+    require(runtime.isValid(), "selection marquee runtime should be valid");
+    const ClipRuntime runtimeHandle = clip_canvas_runtime::Access::handle(runtime);
+
+    ClipCanvasViewport viewport;
+    require(viewport.create(runtimeHandle, clip_canvas_viewport::defaultEngineConfig()),
+            "selection marquee viewport should be created");
+    require(clip_viewport_set_surface_size(runtimeHandle, viewport.get(), 320, 240) == CLIP_OK,
+            "selection marquee viewport should accept its surface size");
+    ScopedChangedViewportList toolChange;
+    require(clip_viewport_set_active_tool_ex(runtimeHandle, viewport.get(), CLIP_ACTIVE_TOOL_SELECT,
+                                             toolChange.outParam()) == CLIP_OK,
+            "selection marquee test should activate select tool");
+
+    ClipInteractionOutput output{};
+    ClipInputEvent press =
+        pointerInput(CLIP_POINTER_EVENT_DOWN, 60.0, 70.0, CLIP_POINTER_BUTTON_PRIMARY, 0b0000'0001);
+    ScopedChangedViewportList pressChange;
+    require(clip_viewport_process_input_ex(runtimeHandle, viewport.get(), &press, &output,
+                                           pressChange.outParam()) == CLIP_OK,
+            "selection marquee press should reach the engine");
+
+    ClipInputEvent move =
+        pointerInput(CLIP_POINTER_EVENT_MOVE, 260.0, 190.0, CLIP_POINTER_BUTTON_NONE, 0b0000'0001);
+    ScopedChangedViewportList moveChange;
+    require(clip_viewport_process_input_ex(runtimeHandle, viewport.get(), &move, &output,
+                                           moveChange.outParam()) == CLIP_OK,
+            "selection marquee move should reach the engine");
+
+    ClipCanvasDisplayCache displayCache;
+    require(displayCache.sync(runtimeHandle, viewport.get()),
+            "selection marquee overlay should synchronize to the display cache");
+
+    const ClipOverlayDisplayItem* marquee = nullptr;
+    for (std::uint32_t index = 0; index < displayCache.overlayItemCount(); ++index) {
+        const ClipOverlayDisplayItem& item = displayCache.overlayItems()[index];
+        if (item.kind == CLIP_OVERLAY_DISPLAY_ITEM_DRAW_RECT &&
+            item.rect_kind == CLIP_OVERLAY_RECT_SELECTION_MARQUEE) {
+            marquee = &item;
+            break;
+        }
+    }
+    require(marquee != nullptr, "select-tool drag should expose a selection marquee overlay");
+    requireNear(marquee->width, 200.0, "selection marquee width");
+    requireNear(marquee->height, 120.0, "selection marquee height");
+    require(sameColor(marquee->fill, ClipColorRgba8{0x40, 0x96, 0xff, 0x33}),
+            "selection marquee fill should match the reference blue at 20 percent opacity");
+    require(sameColor(marquee->stroke, ClipColorRgba8{0x40, 0x96, 0xff, 0xff}),
+            "selection marquee stroke should match the reference blue");
+    requireNear(marquee->stroke_width, 1.0, "selection marquee stroke width");
+
+    QImage image(QSize(320, 240), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::white);
+    QPainter painter(&image);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderOverlayItems(
+        painter, displayCache.overlayInfo(), displayCache.overlayItems(),
+        displayCache.overlayItemCount(), QRegion(image.rect()));
+    painter.end();
+
+    const QColor fillPixel = image.pixelColor(160, 130);
+    require(fillPixel.red() < 230 && fillPixel.blue() > fillPixel.red(),
+            "selection marquee should paint its translucent fill");
+    require(imageRegionContainsSelectionBlue(image, QRect(56, 66, 9, 9)),
+            "selection marquee should paint its blue outline");
+}
+
+bool isElementSelected(ClipRuntime runtime, ClipViewport viewport, ClipElementId elementId) {
+    std::uint8_t selected = 0;
+    require(clip_viewport_is_element_selected(runtime, viewport, elementId, &selected) == CLIP_OK,
+            "selection interaction test should query the selected element");
+    return selected != 0;
+}
+
+void requireSameTextSelectionControls(const std::vector<ClipOverlayDisplayItem>& actual,
+                                      const std::vector<ClipOverlayDisplayItem>& expected) {
+    require(actual.size() == expected.size(),
+            "text selection control count should match select tool");
+    for (std::size_t index = 0; index < actual.size(); ++index) {
+        const ClipOverlayDisplayItem& actualItem = actual[index];
+        const ClipOverlayDisplayItem& expectedItem = expected[index];
+        require(actualItem.kind == expectedItem.kind,
+                "text selection control kind should match select tool");
+        require(actualItem.rect_kind == expectedItem.rect_kind,
+                "text selection rectangle kind should match select tool");
+        requireNear(actualItem.center_x, expectedItem.center_x,
+                    "text selection center x should match select tool");
+        requireNear(actualItem.center_y, expectedItem.center_y,
+                    "text selection center y should match select tool");
+        requireNear(actualItem.width, expectedItem.width,
+                    "text selection width should match select tool");
+        requireNear(actualItem.height, expectedItem.height,
+                    "text selection height should match select tool");
+        requireNear(actualItem.rotation, expectedItem.rotation,
+                    "text selection rotation should match select tool");
+        require(sameColor(actualItem.fill, expectedItem.fill),
+                "text selection fill should match select tool");
+        require(sameColor(actualItem.stroke, expectedItem.stroke),
+                "text selection stroke should match select tool");
+        requireNear(actualItem.stroke_width, expectedItem.stroke_width,
+                    "text selection stroke width should match select tool");
+        require(actualItem.fill_style == expectedItem.fill_style,
+                "text selection fill style should match select tool");
+        requireNear(actualItem.corner_radii.top_left, expectedItem.corner_radii.top_left,
+                    "text selection top-left radius should match select tool");
+        requireNear(actualItem.corner_radii.top_right, expectedItem.corner_radii.top_right,
+                    "text selection top-right radius should match select tool");
+        requireNear(actualItem.corner_radii.bottom_right, expectedItem.corner_radii.bottom_right,
+                    "text selection bottom-right radius should match select tool");
+        requireNear(actualItem.corner_radii.bottom_left, expectedItem.corner_radii.bottom_left,
+                    "text selection bottom-left radius should match select tool");
+    }
+}
+
+void selectionHitTestingUsesMinimumHandleHitSize() {
+    const ClipOverlayDisplayItem items[] = {
+        overlayRect(CLIP_OVERLAY_RECT_SELECTION_RESIZE_HANDLE, 0.0, 0.0, 8.0, 8.0),
+    };
+
+    require(clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteractionItems(
+                items, 1, testProjection(), QPointF(105.0, 100.0)),
+            "selection handle hit testing should expand small handles");
+    require(!clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteractionItems(
+                items, 1, testProjection(), QPointF(107.0, 100.0)),
+            "selection handle hit testing should not expand beyond minimum hit size");
+}
+
+void selectionHitTestingTreatsTextFramePaddingAsMoveRing() {
+    const ClipOverlayDisplayItem items[] = {
+        overlayRect(CLIP_OVERLAY_RECT_SELECTION_FRAME, 0.0, 0.0, 68.0, 48.0),
+        overlayRect(CLIP_OVERLAY_RECT_TEXT_ACTUAL_FRAME, 0.0, 0.0, 40.0, 20.0),
+    };
+
+    require(clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteractionItems(
+                items, 2, testProjection(), QPointF(100.0, 78.0)),
+            "text selection padded frame should hit in the move ring");
+    require(!clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteractionItems(
+                items, 2, testProjection(), QPointF(100.0, 100.0)),
+            "text selection move ring should not consume the actual text frame");
+}
+
+void selectionHitTestingDistinguishesMoveFromHandles() {
+    using namespace clip_canvas_widget_selection_hit_testing;
+    const ClipOverlayDisplayItem items[] = {
+        overlayRect(CLIP_OVERLAY_RECT_SELECTION_FRAME, 0.0, 0.0, 68.0, 48.0),
+        overlayRect(CLIP_OVERLAY_RECT_TEXT_ACTUAL_FRAME, 0.0, 0.0, 40.0, 20.0),
+        overlayRect(CLIP_OVERLAY_RECT_SELECTION_RESIZE_HANDLE, 0.0, -24.0, 8.0, 8.0),
+    };
+    require(selectionInteractionAtItems(items, 3, testProjection(), QPointF(100.0, 78.0)) ==
+                SelectionInteractionTarget::Handle,
+            "a handle overlapping the move ring must retain handle priority");
+    require(selectionInteractionAtItems(items, 3, testProjection(), QPointF(110.0, 78.0)) ==
+                SelectionInteractionTarget::Move,
+            "padding away from handles must be classified as selection movement");
+    require(selectionInteractionAtItems(items, 3, testProjection(), QPointF(110.0, 76.0)) ==
+                SelectionInteractionTarget::Handle,
+            "the outer frame edge must retain its resize behavior");
+    require(selectionInteractionAtItems(items, 3, testProjection(), QPointF(100.0, 100.0)) ==
+                SelectionInteractionTarget::None,
+            "text interior must remain available to the editor");
+}
+
+void textEditorActivationPreservesSelectToolSelectionBox() {
+    ScopedRuntimeHandle runtime;
+    require(clip_runtime_create(runtime.outParam()) == CLIP_OK,
+            "runtime creation should succeed for selection box consistency");
+
+    ClipCanvasViewport viewport;
+    const ClipEngineConfig config = clip_canvas_viewport::defaultEngineConfig();
+    require(viewport.create(runtime.get(), config),
+            "viewport creation should succeed for selection box consistency");
+    require(clip_viewport_set_surface_size(runtime.get(), viewport.get(), 600, 400) == CLIP_OK,
+            "selection box consistency viewport should accept its surface size");
+
+    const QByteArray text = QByteArrayLiteral("selection reference");
+    require(clip_viewport_create_text(runtime.get(), viewport.get(), 0.0, 0.0, text.constData(),
+                                      static_cast<std::uint32_t>(text.size()), 260.0,
+                                      84.0) == CLIP_OK,
+            "selection box consistency test should create a text element");
+    ScopedChangedViewportList selectToolChange;
+    require(clip_viewport_set_active_tool_ex(runtime.get(), viewport.get(), CLIP_ACTIVE_TOOL_SELECT,
+                                             selectToolChange.outParam()) == CLIP_OK,
+            "selection box consistency test should activate the select tool");
+
+    const std::optional<ClipTextElementInfo> target =
+        clip_canvas_text_edit_target::resolveTextEditTarget(
+            runtime.get(), viewport.get(), QPointF(0.0, 0.0), QFont(), ClipTextStyle{}, false);
+    const ClipTextElementInfo& targetValue =
+        requireValue(target, "selection box consistency test should resolve the text element");
+    require(
+        clip_canvas_commands::selectElement(runtime.get(), viewport.get(), targetValue.id).success,
+        "selection box consistency test should select the text element");
+
+    ClipCanvasDisplayCache displayCache;
+    require(displayCache.sync(runtime.get(), viewport.get()),
+            "selection box consistency test should synchronize the select-tool frame");
+    const std::vector<ClipOverlayDisplayItem> selectControls = textSelectionControls(displayCache);
+    require(selectControls.size() == 7, "select tool should render all text selection controls");
+
+    ScopedChangedViewportList textToolChange;
+    require(clip_viewport_set_active_tool_ex(runtime.get(), viewport.get(), CLIP_ACTIVE_TOOL_TEXT,
+                                             textToolChange.outParam()) == CLIP_OK,
+            "selection box consistency test should activate the text tool");
+    require(displayCache.sync(runtime.get(), viewport.get()),
+            "selection box consistency test should synchronize the text tool");
+
+    QWidget editorHost;
+    ClipCanvasCursorController cursorController(editorHost);
+    ClipCanvasWidgetTextInteraction interaction(editorHost, cursorController);
+    const ClipCanvasWidgetTextInteraction::BeginResult beginResult = interaction.beginAt(
+        runtime.get(), viewport.get(), displayCache, QPointF(300.0, 200.0), ClipTextStyle{}, false);
+    require(beginResult.started, "selection box consistency test should activate text editing");
+    syncDisplayCacheForChangedViewport(
+        displayCache, runtime.get(), viewport, beginResult.firstChangedViewports.get(),
+        "selection box consistency test should synchronize the selection mutation");
+    syncDisplayCacheForChangedViewport(
+        displayCache, runtime.get(), viewport, beginResult.secondChangedViewports.get(),
+        "selection box consistency test should synchronize the draft mutation");
+    const std::vector<ClipOverlayDisplayItem> editingControls = textSelectionControls(displayCache);
+    requireSameTextSelectionControls(editingControls, selectControls);
+
+    const clip_canvas_render_geometry::ViewProjection projection =
+        clip_canvas_render_geometry::overlayProjection(displayCache.overlayInfo());
+    const ClipOverlayDisplayItem* selectionFrame = nullptr;
+    const ClipOverlayDisplayItem* textActualFrame = nullptr;
+    for (const ClipOverlayDisplayItem& control : editingControls) {
+        if (control.rect_kind == CLIP_OVERLAY_RECT_SELECTION_FRAME) {
+            selectionFrame = &control;
+        } else if (control.rect_kind == CLIP_OVERLAY_RECT_TEXT_ACTUAL_FRAME) {
+            textActualFrame = &control;
+        }
+        if (control.rect_kind == CLIP_OVERLAY_RECT_SELECTION_RESIZE_HANDLE ||
+            control.rect_kind == CLIP_OVERLAY_RECT_SELECTION_ROTATION_HANDLE) {
+            require(clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteraction(
+                        displayCache, clip_canvas_render_geometry::canvasToView(
+                                          projection, control.center_x, control.center_y)),
+                    "all canonical text selection handles should be interactive while editing");
+        }
+    }
+    require(selectionFrame != nullptr && textActualFrame != nullptr,
+            "text editing should expose both canonical selection frames");
+    const QPointF frameCenter(selectionFrame->center_x, selectionFrame->center_y);
+    require(interaction.hasSelectionInteraction(),
+            "an existing text draft must retain selection interaction routing");
+    const QPointF frameEdgeCanvas = clip_canvas_render_geometry::rotatePoint(
+        QPointF(selectionFrame->center_x - selectionFrame->width / 2.0, selectionFrame->center_y),
+        frameCenter, selectionFrame->rotation);
+    require(clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteraction(
+                displayCache, clip_canvas_render_geometry::canvasToView(
+                                  projection, frameEdgeCanvas.x(), frameEdgeCanvas.y())),
+            "the canonical text selection frame edge should be interactive while editing");
+    const QPointF moveRingCanvas = clip_canvas_render_geometry::rotatePoint(
+        QPointF(selectionFrame->center_x - (selectionFrame->width + textActualFrame->width) / 4.0,
+                selectionFrame->center_y),
+        frameCenter, selectionFrame->rotation);
+    require(clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteraction(
+                displayCache, clip_canvas_render_geometry::canvasToView(
+                                  projection, moveRingCanvas.x(), moveRingCanvas.y())),
+            "the canonical text padding move ring should be interactive while editing");
+    require(!clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteraction(
+                displayCache,
+                clip_canvas_render_geometry::canvasToView(projection, textActualFrame->center_x,
+                                                          textActualFrame->center_y)),
+            "the text interior should remain available for caret placement while editing");
+}
+
+void blankCanvasPressDeselectsBeforeBeginningNewText() {
+    ClipCanvasRuntime runtime;
+    require(runtime.isValid(), "blank-canvas deselect test should create a runtime");
+    ClipRuntime runtimeHandle = clip_canvas_runtime::Access::handle(runtime);
+
+    ClipCanvasViewport inspectionViewport;
+    const ClipEngineConfig config = clip_canvas_viewport::defaultEngineConfig();
+    require(inspectionViewport.create(runtimeHandle, config),
+            "blank-canvas deselect test should create a viewport");
+    require(clip_viewport_set_surface_size(runtimeHandle, inspectionViewport.get(), 600, 400) ==
+                CLIP_OK,
+            "blank-canvas deselect test should set the surface size");
+
+    const QByteArray text = QByteArrayLiteral("previous text");
+    require(clip_viewport_create_text(runtimeHandle, inspectionViewport.get(), 0.0, 0.0,
+                                      text.constData(), static_cast<std::uint32_t>(text.size()),
+                                      160.0, 50.0) == CLIP_OK,
+            "blank-canvas deselect test should create the previous text");
+    ClipElementId textId{};
+    std::uint8_t hit = 0;
+    require(clip_viewport_hit_text(runtimeHandle, inspectionViewport.get(), 0.0, 0.0, &textId,
+                                   &hit) == CLIP_OK &&
+                hit != 0,
+            "blank-canvas deselect test should resolve the previous text");
+
+    ClipCanvasWidget canvas(runtime);
+    canvas.resize(600, 400);
+    canvas.show();
+    QApplication::processEvents();
+    require(canvas.setViewportCamera(0.0, 0.0, 1.0),
+            "blank-canvas deselect test should configure the camera");
+    require(canvas.setCanvasTool(ClipCanvasTool::Text),
+            "blank-canvas deselect test should activate the text tool");
+    require(clip_canvas_commands::selectElement(runtimeHandle, inspectionViewport.get(), textId)
+                .success,
+            "blank-canvas deselect test should select the previous text");
+    require(isElementSelected(runtimeHandle, inspectionViewport.get(), textId),
+            "previous text should start selected");
+
+    const QPointF blank(500.0, 300.0);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, blank, Qt::LeftButton, Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, blank, Qt::LeftButton, Qt::NoButton);
+    QApplication::processEvents();
+
+    require(!isElementSelected(runtimeHandle, inspectionViewport.get(), textId),
+            "the first blank press should deselect the previously selected text");
+    ClipTextElementInfo draftInfo{};
+    ClipTextStyle draftStyle{};
+    std::uint8_t activeDraft = 0;
+    require(clip_viewport_get_active_text_draft_presentation(
+                runtimeHandle, inspectionViewport.get(), &draftInfo, &draftStyle, &activeDraft) ==
+                    CLIP_OK &&
+                activeDraft == 0,
+            "the first blank press must not begin a new text draft");
+
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, blank, Qt::LeftButton, Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, blank, Qt::LeftButton, Qt::NoButton);
+    QApplication::processEvents();
+    require(clip_viewport_get_active_text_draft_presentation(
+                runtimeHandle, inspectionViewport.get(), &draftInfo, &draftStyle, &activeDraft) ==
+                    CLIP_OK &&
+                activeDraft != 0,
+            "the blank press after deselecting should begin a new text draft");
+}
+
+void textFontWheelPreservesMixedSelectionStyles() {
+    ClipCanvasRuntime runtime;
+    const ClipRuntime handle = clip_canvas_runtime::Access::handle(runtime);
+    ClipCanvasViewport inspection;
+    require(inspection.create(handle, clip_canvas_viewport::defaultEngineConfig()),
+            "font wheel inspection viewport should be created");
+    require(clip_viewport_set_surface_size(handle, inspection.get(), 600, 400) == CLIP_OK,
+            "font wheel inspection viewport should include both text elements");
+    ClipCanvasWidget canvas(runtime);
+    canvas.resize(600, 400);
+    canvas.show();
+    QApplication::processEvents();
+    require(canvas.setViewportCamera(0.0, 0.0, 1.0), "font wheel camera should be configured");
+
+    ClipCanvasTextStyle styles[2];
+    styles[0].fontSize = 24.0;
+    styles[0].fontFamily = QStringLiteral("Arial");
+    styles[0].color = QColor(180, 20, 30);
+    styles[0].strokeWidth = 2.0;
+    styles[1] = styles[0];
+    styles[1].fontSize = 36.0;
+    styles[1].fontFamily = QStringLiteral("Times New Roman");
+    styles[1].color = QColor(20, 30, 180);
+    styles[1].strokeWidth = 5.0;
+    styles[1].opacity = 0.6;
+    ClipElementId ids[2]{};
+    for (int i = 0; i < 2; ++i) {
+        ClipTextCommitDraft draft{};
+        draft.auto_resize = static_cast<std::uint8_t>(i == 0);
+        draft.center_x = i == 0 ? -120.0 : 120.0;
+        draft.text_utf8 = "mixed fonts";
+        draft.text_utf8_len = 11;
+        draft.measured_layout = ClipTextLayoutSize{100.0, 50.0, 95.0, 50.0};
+        draft.style = clip_canvas_types::toEngineTextStyle(styles[i]);
+        ScopedChangedViewportList changed;
+        require(clip_viewport_commit_text_draft_payload_ex(handle, inspection.get(), &draft,
+                                                           changed.outParam()) == CLIP_OK,
+                "font wheel fixture should create differently styled text");
+        std::uint8_t hit = 0;
+        require(clip_viewport_hit_text(handle, inspection.get(), draft.center_x, 0.0, &ids[i],
+                                       &hit) == CLIP_OK &&
+                    hit != 0,
+                "font wheel fixture should resolve each text");
+    }
+    require(canvas.setCanvasTool(ClipCanvasTool::Select), "font wheel fixture should select text");
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, QPointF(20, 20), Qt::LeftButton,
+                         Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseMove, QPointF(580, 380), Qt::NoButton,
+                         Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, QPointF(580, 380), Qt::LeftButton,
+                         Qt::NoButton);
+    std::uint32_t count = 0;
+    require(clip_viewport_selected_text_count(handle, inspection.get(), &count) == CLIP_OK &&
+                count == 2,
+            "font wheel should start with both texts selected");
+    const double nextSize = canvas.canvasStyleToolbarState().textStyle.fontSize + 1.0;
+    int committed = 0;
+    QObject::connect(&canvas, &ClipCanvasWidget::styleEditCommitted, &canvas,
+                     [&](const ClipCanvasStyleEdit& edit) {
+                         const auto* patch = std::get_if<ClipCanvasTextEdit>(&edit);
+                         require(patch != nullptr &&
+                                     patch->properties == ClipCanvasTextStyleMixedFontSize,
+                                 "font stepping publishes only the explicitly changed property");
+                         ++committed;
+                     });
+    require(canvas.stepFontSize(1), "font wheel should update the selected text");
+    require(committed == 1, "font step publishes one successful user commit");
+
+    const auto verify = [&](bool stepped) {
+        for (int i = 0; i < 2; ++i) {
+            require(clip_canvas_commands::selectElement(handle, inspection.get(), ids[i]).success,
+                    "font wheel result should be inspectable");
+            ClipStyleToolbarState state{};
+            require(clip_viewport_get_style_toolbar_state(handle, inspection.get(), &state) ==
+                        CLIP_OK,
+                    "font wheel result should expose its style");
+            ClipCanvasTextStyle expected = styles[i];
+            if (stepped) {
+                expected.fontSize = nextSize;
+            }
+            require(clip_canvas_state::textStylesEqual(
+                        state.text_style, clip_canvas_types::toEngineTextStyle(expected)),
+                    "font wheel must change only font size, preserving each selected text style");
+            ClipTextElementInfo info{};
+            require(clip_runtime_get_text_element(handle, ids[i], &info) == CLIP_OK,
+                    "font wheel should preserve each text element");
+            require(info.auto_resize == static_cast<std::uint8_t>(i == 0),
+                    "font wheel should preserve the text sizing mode");
+            if (!stepped || i == 1) {
+                requireNear(info.width, 100.0, "font wheel should preserve fixed text width");
+            }
+            if (!stepped) {
+                requireNear(info.height, 50.0, "undo should restore the exact text geometry");
+            }
+        }
+    };
+    verify(true);
+    require(canvas.undo(), "font wheel change should be undoable");
+    verify(false);
+    require(canvas.redo(), "font wheel change should be redoable");
+    verify(true);
+
+    ClipTextElementInfo info{};
+    require(clip_runtime_get_text_element(handle, ids[1], &info) == CLIP_OK,
+            "draft patch fixture should read the resized text");
+    ClipCanvasDisplayCache cache;
+    ClipCanvasCursorController cursor(canvas);
+    ClipCanvasWidgetTextInteraction interaction(canvas, cursor);
+    require(cache.sync(handle, inspection.get()), "draft patch fixture should refresh its cache");
+    ClipCanvasTextStyle current = styles[1];
+    current.fontSize = nextSize;
+    ClipTextStyle currentStyle = clip_canvas_types::toEngineTextStyle(current);
+    require(interaction.beginForElement(info, cache, QPointF(420, 200), &currentStyle, false),
+            "draft patch fixture should begin editing existing text");
+    require(clip_canvas_state::textStylesEqual(interaction.currentTextStyle(), currentStyle),
+            "draft patch fixture should load the complete current text style");
+    ClipTextStyle staleStyle = clip_canvas_types::toEngineTextStyle(styles[0]);
+    staleStyle.stroke_width = 9.0;
+    require(interaction
+                .applyTextStyle(handle, inspection.get(), cache, staleStyle,
+                                CLIP_TEXT_STYLE_MIXED_STROKE_WIDTH)
+                .success,
+            "draft patch should accept a stroke width edit from stale style data");
+    currentStyle.stroke_width = 9.0;
+    require(clip_canvas_state::textStylesEqual(interaction.currentTextStyle(), currentStyle),
+            "the interaction layer must preserve unrequested draft properties itself");
+    requireNear(interaction.previewItem()->width, info.width,
+                "cosmetic draft edits should preserve text width");
+    requireNear(interaction.previewItem()->height, info.height,
+                "cosmetic draft edits should preserve text height");
+    const auto emptyPatch =
+        interaction.applyTextStyle(handle, inspection.get(), cache, staleStyle, 0);
+    require(emptyPatch.success && !emptyPatch.toolbarStateChanged,
+            "an empty draft patch should be a no-op");
+    require(!interaction
+                 .applyTextStyle(handle, inspection.get(), cache, staleStyle,
+                                 CLIP_TEXT_STYLE_ALL_PROPERTIES | (1u << 31))
+                 .success,
+            "draft patches should reject unknown properties");
+    require(clip_canvas_state::textStylesEqual(interaction.currentTextStyle(), currentStyle),
+            "empty and invalid patches must leave the draft unchanged");
+}
+
+void textToolInitialSelectionFrameRendersAndResizesThroughWidgetEvents() {
+    ClipCanvasRuntime runtime;
+    require(runtime.isValid(), "widget selection interaction runtime should be valid");
+    ClipRuntime runtimeHandle = clip_canvas_runtime::Access::handle(runtime);
+
+    ClipCanvasViewport inspectionViewport;
+    const ClipEngineConfig config = clip_canvas_viewport::defaultEngineConfig();
+    require(inspectionViewport.create(runtimeHandle, config),
+            "widget selection interaction viewport should be created");
+    require(clip_viewport_set_surface_size(runtimeHandle, inspectionViewport.get(), 600, 400) ==
+                CLIP_OK,
+            "widget selection interaction viewport should accept its surface size");
+
+    const QByteArray text = QByteArrayLiteral("interactive selection");
+    require(clip_viewport_create_text(runtimeHandle, inspectionViewport.get(), 0.0, 0.0,
+                                      text.constData(), static_cast<std::uint32_t>(text.size()),
+                                      220.0, 64.0) == CLIP_OK,
+            "widget selection interaction test should create text");
+    const std::optional<ClipTextElementInfo> target =
+        clip_canvas_text_edit_target::resolveTextEditTarget(runtimeHandle, inspectionViewport.get(),
+                                                            QPointF(0.0, 0.0), QFont(),
+                                                            ClipTextStyle{}, false);
+    const ClipElementId targetId =
+        requireValue(target, "widget selection interaction test should resolve its text").id;
+
+    ClipCanvasWidget canvas(runtime);
+    canvas.resize(600, 400);
+    canvas.show();
+    QApplication::processEvents();
+    require(canvas.setViewportCamera(0.0, 0.0, 1.0),
+            "widget selection interaction camera should be configured");
+    require(canvas.setCanvasTool(ClipCanvasTool::Text),
+            "widget selection interaction test should activate the text tool");
+
+    const QPointF textCenter(300.0, 200.0);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, textCenter, Qt::LeftButton,
+                         Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, textCenter, Qt::LeftButton,
+                         Qt::NoButton);
+    QApplication::processEvents();
+    require(isElementSelected(runtimeHandle, inspectionViewport.get(), targetId),
+            "the first text-tool click should select the text before any content change");
+
+    ClipCanvasTextStyle toolbarStyle = canvas.canvasStyleToolbarState().textStyle;
+    toolbarStyle.stroke = QColor(30, 90, 150);
+    require(canvas.setCanvasTextStyle(toolbarStyle),
+            "the selected text should accept a non-empty stroke color");
+    toolbarStyle = canvas.canvasStyleToolbarState().textStyle;
+    const ClipCanvasTextStyle staleStyle = toolbarStyle;
+    QObject::connect(
+        &canvas, &ClipCanvasWidget::styleToolbarStateChanged, &canvas,
+        [&canvas, &toolbarStyle]() { toolbarStyle = canvas.canvasStyleToolbarState().textStyle; });
+
+    ClipCanvasDisplayCache inspectionCache;
+    require(inspectionCache.sync(runtimeHandle, inspectionViewport.get()),
+            "widget selection interaction test should inspect the canonical engine overlay");
+    const std::vector<ClipOverlayDisplayItem> controls = textSelectionControls(inspectionCache);
+    require(controls.size() == 7, "text editing should expose all canonical selection controls");
+
+    const ClipOverlayDisplayItem* resizeHandle = nullptr;
+    for (const ClipOverlayDisplayItem& control : controls) {
+        if (control.rect_kind == CLIP_OVERLAY_RECT_SELECTION_RESIZE_HANDLE) {
+            resizeHandle = &control;
+            break;
+        }
+    }
+    require(resizeHandle != nullptr, "text editing should expose a resize handle");
+    const QPointF resizeHandlePosition = clip_canvas_render_geometry::canvasToView(
+        clip_canvas_render_geometry::overlayProjection(inspectionCache.overlayInfo()),
+        resizeHandle->center_x, resizeHandle->center_y);
+    const QRect handlePaintRegion(static_cast<int>(std::floor(resizeHandlePosition.x())) - 6,
+                                  static_cast<int>(std::floor(resizeHandlePosition.y())) - 6, 13,
+                                  13);
+    require(imageRegionContainsSelectionBlue(renderCanvasWidget(canvas), handlePaintRegion),
+            "the initial text-tool selection resize handle should be rendered by the widget");
+
+    ClipTextElementInfo beforeResize{};
+    ClipTextStyle beforeStyle{};
+    std::uint8_t activeDraft = 0;
+    require(clip_viewport_get_active_text_draft_presentation(
+                runtimeHandle, inspectionViewport.get(), &beforeResize, &beforeStyle,
+                &activeDraft) == CLIP_OK &&
+                activeDraft != 0,
+            "widget selection interaction test should expose the active text draft");
+
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, resizeHandlePosition, Qt::LeftButton,
+                         Qt::LeftButton);
+    require(isElementSelected(runtimeHandle, inspectionViewport.get(), targetId),
+            "pressing an editing-mode resize handle should not deselect the text");
+    const QPointF resizedPosition = resizeHandlePosition - QPointF(24.0, 16.0);
+    sendCanvasMouseEvent(canvas, QEvent::MouseMove, resizedPosition, Qt::NoButton, Qt::LeftButton);
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, resizedPosition, Qt::LeftButton,
+                         Qt::NoButton);
+    QApplication::processEvents();
+
+    ClipTextElementInfo afterResize{};
+    ClipTextStyle afterStyle{};
+    activeDraft = 0;
+    require(clip_viewport_get_active_text_draft_presentation(
+                runtimeHandle, inspectionViewport.get(), &afterResize, &afterStyle, &activeDraft) ==
+                    CLIP_OK &&
+                activeDraft != 0,
+            "resizing should keep the text draft active");
+    require(std::abs(afterResize.width - beforeResize.width) > 0.0001 ||
+                std::abs(afterResize.height - beforeResize.height) > 0.0001 ||
+                std::abs(afterResize.center_x - beforeResize.center_x) > 0.0001 ||
+                std::abs(afterResize.center_y - beforeResize.center_y) > 0.0001,
+            "dragging the editing-mode resize handle should transform the active text draft");
+    require(std::abs(afterStyle.font_size - beforeStyle.font_size) > 0.0001,
+            "the selection handle should resize the draft font");
+    requireNear(toolbarStyle.fontSize, afterStyle.font_size,
+                "the toolbar should receive the resized draft font size");
+
+    ClipCanvasTextStyle strokeWidthPatch = staleStyle;
+    strokeWidthPatch.strokeWidth += 2.0;
+    require(canvas.setCanvasTextStyle(strokeWidthPatch, ClipCanvasTextStyleMixedStrokeWidth),
+            "the Style Editor should update the selected text stroke width");
+    ClipTextElementInfo afterStrokeWidth{};
+    ClipTextStyle strokeStyle{};
+    activeDraft = 0;
+    require(clip_viewport_get_active_text_draft_presentation(
+                runtimeHandle, inspectionViewport.get(), &afterStrokeWidth, &strokeStyle,
+                &activeDraft) == CLIP_OK &&
+                activeDraft != 0,
+            "the stroke width edit should keep the text draft active");
+    requireNear(afterStrokeWidth.width, afterResize.width,
+                "stroke width should preserve the resized text width");
+    requireNear(afterStrokeWidth.height, afterResize.height,
+                "stroke width should preserve the resized text height");
+    requireNear(strokeStyle.font_size, afterStyle.font_size,
+                "stroke width should preserve the resized font size");
+    requireNear(strokeStyle.stroke_width, strokeWidthPatch.strokeWidth,
+                "the draft should receive the requested stroke width");
+    require(afterResize.content_width > 0.0 && afterResize.content_height > 0.0,
+            "the engine resize presentation must carry its measured content bounds");
+    require(canvas.resetEditingState(), "commit the resized draft through the widget");
+    ClipTextElementInfo committed{};
+    require(clip_runtime_get_text_element(runtimeHandle, targetId, &committed) == CLIP_OK,
+            "inspect committed resized text");
+    requireNear(committed.content_width, afterResize.content_width,
+                "widget commit must preserve the engine's resized content width");
+    requireNear(committed.content_height, afterResize.content_height,
+                "widget commit must preserve the engine's resized content height");
+}
+
+void textEditorDoesNotSynthesizeSelectionControlsWithoutEngineOverlay() {
+    ScopedRuntimeHandle runtime;
+    require(clip_runtime_create(runtime.outParam()) == CLIP_OK,
+            "runtime creation should succeed for canonical text selection controls");
+
+    ClipCanvasViewport viewport;
+    const ClipEngineConfig config = clip_canvas_viewport::defaultEngineConfig();
+    require(viewport.create(runtime.get(), config),
+            "viewport creation should succeed for canonical text selection controls");
+    require(clip_viewport_set_surface_size(runtime.get(), viewport.get(), 200, 200) == CLIP_OK,
+            "canonical text selection viewport should accept its surface size");
+
+    const QByteArray text = QByteArrayLiteral("selected");
+    require(clip_viewport_create_text(runtime.get(), viewport.get(), 0.0, 0.0, text.constData(),
+                                      static_cast<std::uint32_t>(text.size()), 40.0,
+                                      20.0) == CLIP_OK,
+            "canonical text selection test should create a text element");
+    ScopedChangedViewportList textToolChange;
+    require(clip_viewport_set_active_tool_ex(runtime.get(), viewport.get(), CLIP_ACTIVE_TOOL_TEXT,
+                                             textToolChange.outParam()) == CLIP_OK,
+            "canonical text selection test should activate the text tool");
+
+    ClipCanvasDisplayCache displayCache;
+    require(displayCache.sync(runtime.get(), viewport.get()),
+            "canonical text selection test should synchronize the display cache");
+    bool hasEngineTextSelectionFrame = false;
+    for (std::uint32_t index = 0; index < displayCache.overlayItemCount(); ++index) {
+        const ClipOverlayDisplayItem& item = displayCache.overlayItems()[index];
+        hasEngineTextSelectionFrame =
+            hasEngineTextSelectionFrame || (item.kind == CLIP_OVERLAY_DISPLAY_ITEM_DRAW_RECT &&
+                                            item.rect_kind == CLIP_OVERLAY_RECT_TEXT_ACTUAL_FRAME);
+    }
+    require(!hasEngineTextSelectionFrame,
+            "canonical text selection test requires a cache without an engine selection frame");
+
+    const std::optional<ClipTextElementInfo> target =
+        clip_canvas_text_edit_target::resolveTextEditTarget(
+            runtime.get(), viewport.get(), QPointF(0.0, 0.0), QFont(), ClipTextStyle{}, false);
+    require(target.has_value(), "canonical text selection test should resolve the created text");
+
+    QWidget editorHost;
+    ClipCanvasCursorController cursorController(editorHost);
+    ClipCanvasWidgetTextInteraction interaction(editorHost, cursorController);
+    require(
+        interaction.beginForElement(*target, displayCache, QPointF(100.0, 100.0), nullptr, false),
+        "canonical text selection test should begin an existing text edit");
+    require(!clip_canvas_widget_selection_hit_testing::pointerHitsSelectionInteraction(
+                displayCache, QPointF(66.0, 76.0)),
+            "text editing should not hit-test controls absent from the engine overlay");
+
+    QImage image(QSize(200, 200), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    interaction.renderEditorOverlay(painter, QFont(), displayCache);
+    painter.end();
+
+    require(!imageRegionContainsSelectionBlue(image, image.rect()),
+            "text editing should not paint selection controls absent from the engine overlay");
+}
+
+int renderedOverlayFillPixelCount(ClipFillStyle fillStyle, double strokeWidth = 0.0) {
+    QImage image(QSize(120, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipOverlayDisplayItem item{};
+    item.kind = CLIP_OVERLAY_DISPLAY_ITEM_DRAW_RECT;
+    item.rect_kind = CLIP_OVERLAY_RECT_SELECTION_CANDIDATE_FRAME;
+    item.width = 80.0;
+    item.height = 60.0;
+    item.fill = ClipColorRgba8{255, 0, 0, 255};
+    item.fill_style = fillStyle;
+    item.stroke_width = strokeWidth;
+
+    OverlayDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderOverlayItems(painter, displayInfo, &item, 1, QRegion(image.rect()));
+    painter.end();
+
+    int filledPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                ++filledPixels;
+            }
+        }
+    }
+    return filledPixels;
+}
+
+int renderedSceneRectangleFillPixelCount(const ClipCornerRadii& cornerRadii) {
+    QImage image(QSize(120, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipSceneDisplayItem borrowed{};
+    borrowed.kind = CLIP_SCENE_DISPLAY_ITEM_DRAW_RECT;
+    borrowed.width = 80.0;
+    borrowed.height = 60.0;
+    borrowed.fill = ClipColorRgba8{255, 0, 0, 255};
+    borrowed.fill_style = CLIP_FILL_STYLE_LINE;
+    borrowed.corner_radii = cornerRadii;
+    borrowed.opacity = 1.0;
+    ClipCanvasSceneItem item(borrowed);
+
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &displayInfo, &item, 1, QRegion(image.rect())});
+    painter.end();
+
+    int filledPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                ++filledPixels;
+            }
+        }
+    }
+    return filledPixels;
+}
+
+int renderedTextBackgroundPixelCount(ClipFillStyle fillStyle, double fontSize) {
+    QImage image(QSize(160, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipCanvasSceneItem item;
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.width = 120.0;
+    item.height = 80.0;
+    item.fill = ClipColorRgba8{255, 0, 0, 255};
+    item.fill_style = fillStyle;
+    item.font_size = fontSize;
+    item.opacity = 1.0;
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+    item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_CENTER;
+    item.setTextUtf8(QByteArrayLiteral("Texture"));
+
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &displayInfo, &item, 1, QRegion(image.rect())});
+    painter.end();
+
+    int filledPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                ++filledPixels;
+            }
+        }
+    }
+    return filledPixels;
+}
+
+int renderedClosedLineFillPixelCount(ClipFillStyle fillStyle, bool closed) {
+    QImage image(QSize(120, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    const ClipArrowPoint points[] = {
+        {20.0, 20.0},
+        {100.0, 20.0},
+        {60.0, 100.0},
+        {closed ? 20.0 : 30.0, closed ? 20.0 : 90.0},
+    };
+    ClipArrowPathCommand commands[4]{};
+    commands[0].kind = CLIP_ARROW_PATH_COMMAND_MOVE_TO;
+    commands[0].point = points[0];
+    for (int index = 1; index < 4; ++index) {
+        commands[index].kind = CLIP_ARROW_PATH_COMMAND_LINE_TO;
+        commands[index].point = points[index];
+    }
+
+    ClipSceneDisplayItem borrowed{};
+    borrowed.kind = CLIP_SCENE_DISPLAY_ITEM_ARROW;
+    borrowed.fill = ClipColorRgba8{255, 0, 0, 255};
+    borrowed.fill_style = fillStyle;
+    borrowed.stroke = ClipColorRgba8{0, 0, 0, 0};
+    borrowed.stroke_width = 2.0;
+    borrowed.arrow_point_count = 4;
+    borrowed.arrow_points = points;
+    borrowed.arrow_path_command_count = 4;
+    borrowed.arrow_path_commands = commands;
+    borrowed.arrow_type = CLIP_ARROW_TYPE_CURVE;
+    borrowed.opacity = 1.0;
+    ClipCanvasSceneItem item(borrowed);
+
+    ClipPathChunk chunk{};
+    chunk.stable_id = 1;
+    chunk.command_count = 4;
+    chunk.min_x = 20.0;
+    chunk.min_y = 20.0;
+    chunk.max_x = 100.0;
+    chunk.max_y = 100.0;
+    ClipPathChunkRange range{};
+    range.insert_chunk_count = 1;
+    require(item.applyPathGeometryPatch(0, 1, &range, 1, &chunk, 1, commands, 4, closed, true),
+            "Line path geometry patch should be accepted");
+
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &displayInfo, &item, 1, QRegion(image.rect())});
+    painter.end();
+
+    int filledPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                ++filledPixels;
+            }
+        }
+    }
+    return filledPixels;
+}
+
+void closedLineRendererHonorsFillStyleAndExactClosure() {
+    const int openPixels = renderedClosedLineFillPixelCount(CLIP_FILL_STYLE_SOLID, false);
+    const int solidPixels = renderedClosedLineFillPixelCount(CLIP_FILL_STYLE_SOLID, true);
+    const int linePixels = renderedClosedLineFillPixelCount(CLIP_FILL_STYLE_LINE, true);
+    const int crossLinePixels = renderedClosedLineFillPixelCount(CLIP_FILL_STYLE_CROSS_LINE, true);
+    require(openPixels == 0, "open Line paths must not render fill");
+    require(solidPixels > 0, "closed Line paths should render solid fill");
+    require(linePixels > 0, "closed Line paths should render line hatch fill");
+    require(crossLinePixels > linePixels,
+            "closed Line cross hatch should render both hatch directions");
+}
+
+void longOpenPathsRenderAllCommands() {
+    QImage image(QSize(240, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    std::vector<ClipArrowPathCommand> commands(3001);
+    commands[0].kind = CLIP_ARROW_PATH_COMMAND_MOVE_TO;
+    commands[0].point = ClipArrowPoint{0.0, 0.0};
+    for (std::size_t index = 1; index < commands.size(); ++index) {
+        commands[index].kind = CLIP_ARROW_PATH_COMMAND_LINE_TO;
+        commands[index].point = ClipArrowPoint{
+            static_cast<double>(index) / 15.0,
+            static_cast<double>(static_cast<int>(index % 5) - 2),
+        };
+    }
+    const ClipArrowPoint endpoints[] = {{0.0, 0.0}, {200.0, 0.0}};
+    ClipSceneDisplayItem borrowed{};
+    borrowed.kind = CLIP_SCENE_DISPLAY_ITEM_ARROW;
+    borrowed.stroke = ClipColorRgba8{255, 0, 0, 255};
+    borrowed.stroke_width = 2.0;
+    borrowed.arrow_point_count = 2;
+    borrowed.arrow_points = endpoints;
+    borrowed.arrow_path_command_count = static_cast<std::uint32_t>(commands.size());
+    borrowed.arrow_path_commands = commands.data();
+    borrowed.opacity = 1.0;
+    ClipCanvasSceneItem item(borrowed);
+    SceneDisplayInfo info{};
+    info.item_count = 1;
+    info.surface_width = image.width();
+    info.surface_height = image.height();
+    info.camera_center_x = 100.0;
+    info.camera_zoom = 1.0;
+
+    QPainter painter(&image);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(
+        clip_canvas_renderer::SceneRenderRequest{&painter, &info, &item, 1, QRegion(image.rect())});
+    painter.end();
+    bool tailVisible = false;
+    for (int y = 50; y < 70 && !tailVisible; ++y) {
+        for (int x = 210; x < 230; ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                tailVisible = true;
+                break;
+            }
+        }
+    }
+    require(tailVisible, "dynamic paths should render all path commands");
+    QPainter cachedPainter(&image);
+    cachedPainter.setClipRect(QRect(180, 0, 60, 120));
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &cachedPainter,
+        &info,
+        &item,
+        1,
+        QRegion(QRect(180, 0, 60, 120)),
+    });
+    cachedPainter.end();
+}
+
+int renderedSerialNumberBackgroundPixelCount(ClipFillStyle fillStyle, double fontSize) {
+    QImage image(QSize(120, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipCanvasSceneItem item;
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    item.width = 80.0;
+    item.height = 80.0;
+    item.fill = ClipColorRgba8{255, 0, 0, 255};
+    item.fill_style = fillStyle;
+    item.font_size = fontSize;
+    item.opacity = 1.0;
+
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &displayInfo, &item, 1, QRegion(image.rect())});
+    painter.end();
+
+    int filledPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() > 0) {
+                ++filledPixels;
+            }
+        }
+    }
+    return filledPixels;
+}
+
+QImage renderedSerialNumberType(ClipSerialNumberType type, ClipColorRgba8 color,
+                                ClipColorRgba8 fill, ClipFillStyle fillStyle, double strokeWidth,
+                                double fontSize = 0.0) {
+    QImage image(QSize(140, 140), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    ClipCanvasSceneItem item;
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    item.width = 80.0;
+    item.height = 80.0;
+    item.stroke = color;
+    item.text_color = color;
+    item.fill = fill;
+    item.fill_style = fillStyle;
+    item.stroke_width = strokeWidth;
+    item.serial_number_type = static_cast<std::uint8_t>(type);
+    item.corner_radii = ClipCornerRadii{6.0, 6.0, 6.0, 6.0};
+    item.font_size = fontSize;
+    item.serial_number = 1;
+    item.opacity = 1.0;
+
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &displayInfo, &item, 1, QRegion(image.rect())});
+    painter.end();
+    return image;
+}
+
+QRect visiblePixelBounds(const QImage& image) {
+    QRect bounds;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() == 0) {
+                continue;
+            }
+            bounds = bounds.isNull() ? QRect(x, y, 1, 1) : bounds.united(QRect(x, y, 1, 1));
+        }
+    }
+    return bounds;
+}
+
+void circleRendersFillAndStrokeWithoutNumber() {
+    const ClipColorRgba8 red{255, 0, 0, 255};
+    const ClipColorRgba8 green{0, 255, 0, 255};
+    const ClipColorRgba8 transparent{0, 0, 0, 0};
+    const QImage circle = renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_CIRCLE, red, transparent,
+                                                   CLIP_FILL_STYLE_SOLID, 6.0, 24.0);
+    const QImage unlabeledOutline = renderedSerialNumberType(
+        CLIP_SERIAL_NUMBER_TYPE_OUTLINED_CIRCLE, red, transparent, CLIP_FILL_STYLE_SOLID, 6.0);
+    require(circle == unlabeledOutline, "Circle should paint only its outline, with no number");
+    require(circle.pixelColor(70, 70).alpha() == 0,
+            "transparent Circle should have an empty center");
+    const QImage filled = renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_CIRCLE, red, green,
+                                                   CLIP_FILL_STYLE_SOLID, 6.0, 24.0);
+    require(filled.pixelColor(70, 70) == QColor(0, 255, 0),
+            "Circle should use its independently configured fill color");
+    for (ClipFillStyle style : {CLIP_FILL_STYLE_LINE, CLIP_FILL_STYLE_CROSS_LINE}) {
+        const QImage patterned =
+            renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_CIRCLE, red, green, style, 6.0, 24.0);
+        require(patterned != filled && patterned != circle,
+                "Circle should support each existing patterned fill");
+    }
+}
+
+void serialNumberTypesRenderExpectedSilhouettesAndSolidSemantics() {
+    const ClipColorRgba8 red{255, 0, 0, 255};
+    const ClipColorRgba8 transparent{0, 0, 0, 0};
+    const QImage outlineCircle = renderedSerialNumberType(
+        CLIP_SERIAL_NUMBER_TYPE_OUTLINED_CIRCLE, red, transparent, CLIP_FILL_STYLE_SOLID, 8.0);
+    const QImage solidCircle = renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_SOLID_CIRCLE, red,
+                                                        transparent, CLIP_FILL_STYLE_LINE, 8.0);
+    const QImage outlineSquare = renderedSerialNumberType(
+        CLIP_SERIAL_NUMBER_TYPE_OUTLINED_SQUARE, red, transparent, CLIP_FILL_STYLE_SOLID, 8.0);
+    const QImage solidSquare =
+        renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_SOLID_SQUARE, red,
+                                 ClipColorRgba8{0, 255, 0, 255}, CLIP_FILL_STYLE_CROSS_LINE, 8.0);
+
+    require(visiblePixelBounds(outlineCircle).size() == visiblePixelBounds(solidCircle).size(),
+            "solid and outlined circles should have the same outer size");
+    require(visiblePixelBounds(outlineSquare).size() == visiblePixelBounds(solidSquare).size(),
+            "solid and outlined squares should have the same outer size");
+    require(outlineCircle.pixelColor(30, 30).alpha() == 0,
+            "outlined circles should retain circular corners");
+    require(outlineSquare.pixelColor(34, 34).alpha() > 0,
+            "outlined squares should extend into rounded-square corners");
+    require(solidCircle.pixelColor(70, 70).red() > 240 &&
+                solidCircle.pixelColor(70, 70).green() < 10,
+            "solid circles should use the sequence-number color as their fill");
+    require(solidSquare.pixelColor(70, 70).red() > 240 &&
+                solidSquare.pixelColor(70, 70).green() < 10,
+            "solid squares should ignore stored fill color and fill style");
+}
+
+void solidSerialNumberChoosesFixedContrastLabelColors() {
+    const QImage dark =
+        renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_SOLID_CIRCLE, ClipColorRgba8{0, 0, 0, 255},
+                                 ClipColorRgba8{}, CLIP_FILL_STYLE_SOLID, 4.0, 36.0);
+    const QImage bright = renderedSerialNumberType(
+        CLIP_SERIAL_NUMBER_TYPE_SOLID_CIRCLE, ClipColorRgba8{255, 255, 255, 255}, ClipColorRgba8{},
+        CLIP_FILL_STYLE_SOLID, 4.0, 36.0);
+    const QImage saturated = renderedSerialNumberType(
+        CLIP_SERIAL_NUMBER_TYPE_SOLID_CIRCLE, ClipColorRgba8{255, 0, 0, 255}, ClipColorRgba8{},
+        CLIP_FILL_STYLE_SOLID, 4.0, 36.0);
+    const QImage transparentDark =
+        renderedSerialNumberType(CLIP_SERIAL_NUMBER_TYPE_SOLID_CIRCLE, ClipColorRgba8{0, 0, 0, 0},
+                                 ClipColorRgba8{}, CLIP_FILL_STYLE_SOLID, 4.0, 36.0);
+    bool foundOpaqueWhite = false;
+    bool foundBlackAlpha224 = false;
+    bool foundSaturatedWhite = false;
+    bool foundTransparentDarkWhite = false;
+    for (int y = 40; y < 100; ++y) {
+        for (int x = 40; x < 100; ++x) {
+            const QColor darkPixel = dark.pixelColor(x, y);
+            const QColor brightPixel = bright.pixelColor(x, y);
+            const QColor saturatedPixel = saturated.pixelColor(x, y);
+            const QColor transparentDarkPixel = transparentDark.pixelColor(x, y);
+            foundOpaqueWhite = foundOpaqueWhite || darkPixel == QColor(255, 255, 255, 255);
+            foundBlackAlpha224 = foundBlackAlpha224 || brightPixel == QColor(31, 31, 31, 255);
+            foundSaturatedWhite =
+                foundSaturatedWhite || saturatedPixel == QColor(255, 255, 255, 255);
+            foundTransparentDarkWhite =
+                foundTransparentDarkWhite || transparentDarkPixel == QColor(255, 255, 255, 255);
+        }
+    }
+    require(foundOpaqueWhite, "dark solid fills should render an opaque white label");
+    require(foundBlackAlpha224,
+            "bright solid fills should render the fixed black label alpha of 224");
+    require(foundSaturatedWhite,
+            "saturated red fills should choose white through WCAG contrast comparison");
+    require(foundTransparentDarkWhite,
+            "solid label contrast should ignore the sequence color's source alpha");
+}
+
+void overlayRectangleRendererHonorsFillStyle() {
+    const std::size_t cacheEntriesBefore =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int linePixels = renderedOverlayFillPixelCount(CLIP_FILL_STYLE_LINE);
+    const std::size_t cacheEntriesAfterLine =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int crossLinePixels = renderedOverlayFillPixelCount(CLIP_FILL_STYLE_CROSS_LINE);
+    const std::size_t cacheEntriesAfterCross =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int solidPixels = renderedOverlayFillPixelCount(CLIP_FILL_STYLE_SOLID);
+
+    require(linePixels > 0, "line fill preview should render hatch pixels");
+    require(crossLinePixels > linePixels,
+            "cross-line fill preview should render both hatch directions");
+    require(solidPixels > crossLinePixels,
+            "non-solid fill previews should retain transparent gaps");
+    require(cacheEntriesAfterLine <= cacheEntriesBefore + 1,
+            "line fill should create at most one semantic hatch texture");
+    require(cacheEntriesAfterCross == cacheEntriesAfterLine,
+            "cross-line fill should reuse the line texture for its mirrored pass");
+}
+
+void textHoverUnderlineRendererDrawsOnlyTheUnderline() {
+    QImage image(QSize(120, 120), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipOverlayDisplayItem item =
+        overlayRect(CLIP_OVERLAY_RECT_TEXT_HOVER_UNDERLINE, 0.0, 0.0, 80.0, 40.0);
+    item.stroke = ClipColorRgba8{0x40, 0x96, 0xff, 0xff};
+    item.stroke_width = 1.5;
+
+    OverlayDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderOverlayItems(painter, displayInfo, &item, 1, QRegion(image.rect()));
+    painter.end();
+
+    require(imageRegionContainsSelectionBlue(image, QRect(18, 78, 84, 5)),
+            "text hover feedback should render a blue underline");
+    require(!imageRegionContainsSelectionBlue(image, QRect(18, 17, 84, 5)),
+            "text hover feedback should not render a top selection-frame edge");
+    require(!imageRegionContainsSelectionBlue(image, QRect(18, 19, 5, 38)),
+            "text hover feedback should not render a side selection-frame edge");
+}
+
+void hatchTextureCacheReusesSaturatedStrokeWidths() {
+    const std::size_t cacheEntriesBefore =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    require(renderedOverlayFillPixelCount(CLIP_FILL_STYLE_LINE, 10.0) > 0,
+            "wide-stroke line fill should render hatch pixels");
+    const std::size_t cacheEntriesAfterFirstWideStroke =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+
+    for (double strokeWidth : {20.0, 100.0, 999.0}) {
+        require(renderedOverlayFillPixelCount(CLIP_FILL_STYLE_LINE, strokeWidth) > 0,
+                "saturated line fill should render hatch pixels");
+    }
+    const std::size_t cacheEntriesAfterAllWideStrokes =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+
+    require(cacheEntriesAfterFirstWideStroke <= cacheEntriesBefore + 1,
+            "the first saturated stroke width should create at most one hatch texture");
+    require(cacheEntriesAfterAllWideStrokes == cacheEntriesAfterFirstWideStroke,
+            "stroke widths above the hatch-spacing limit should share one cached texture");
+}
+
+void bindSerialToTextPreview(ClipSceneDisplayItem& serial, const ClipElementId& textId) {
+    serial.bound_text_element_index = textId.index;
+    serial.bound_text_element_generation = textId.generation;
+    serial.has_bound_text_element = 1;
+}
+
+void textEditorConnectorBuildsSerialBoundConnector() {
+    ClipSceneDisplayItem preview{};
+    preview.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    preview.element_id = ClipElementId{42, 7};
+    preview.center_x = 0.0;
+    preview.center_y = -60.0;
+    preview.width = 40.0;
+    preview.height = 20.0;
+
+    ClipSceneDisplayItem serial{};
+    serial.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    serial.element_id = ClipElementId{3, 11};
+    serial.center_x = 0.0;
+    serial.center_y = 0.0;
+    serial.width = 20.0;
+    serial.height = 20.0;
+    serial.stroke_width = 2.0;
+    serial.stroke = ClipColorRgba8{1, 2, 3, 255};
+    serial.opacity = 0.75;
+    bindSerialToTextPreview(serial, preview.element_id);
+
+    ClipCanvasSceneItem connector;
+    require(clip_canvas_text_editor_connector::itemBindsPreview(serial, &preview),
+            "serial item should decode bound text preview id");
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview, &connector),
+            "serial-bound preview should create a connector item");
+    require(connector.kind == CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER_CONNECTOR,
+            "serial-bound preview connector should use connector scene item kind");
+    require(connector.element_id.index == serial.element_id.index,
+            "connector should keep serial id index");
+    require(connector.element_id.generation == serial.element_id.generation,
+            "connector should keep serial id generation");
+    requireNear(connector.center_x, 0.0, "connector start x");
+    requireNear(connector.center_y, -18.0, "connector start y");
+    requireNear(connector.width, 0.0, "connector end x");
+    requireNear(connector.height, -49.0, "connector end y");
+    require(connector.arrow_point_count == 0,
+            "centered connector should not add a baseline segment");
+    requireNear(connector.stroke_width, 2.0, "connector should inherit serial stroke width");
+    requireNear(connector.opacity, 0.75, "connector should inherit serial opacity");
+
+    preview.center_x = 60.0;
+    preview.center_y = -60.0;
+    preview.width = 20.0;
+    preview.height = 20.0;
+    ClipCanvasSceneItem circleConnector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview,
+                                                                       &circleConnector),
+            "diagonal circle preview should create a connector item");
+
+    serial.serial_number_type = CLIP_SERIAL_NUMBER_TYPE_OUTLINED_SQUARE;
+    serial.corner_radii = ClipCornerRadii{2.0, 2.0, 2.0, 2.0};
+    ClipCanvasSceneItem squareConnector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview,
+                                                                       &squareConnector),
+            "diagonal square preview should create a connector item");
+    require(std::hypot(squareConnector.center_x, squareConnector.center_y) >
+                std::hypot(circleConnector.center_x, circleConnector.center_y),
+            "live-preview square connector should anchor at the rounded-square edge");
+
+    serial.serial_number_type = CLIP_SERIAL_NUMBER_TYPE_SOLID_SQUARE;
+    ClipCanvasSceneItem solidSquareConnector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview,
+                                                                       &solidSquareConnector),
+            "diagonal solid-square preview should create a connector item");
+    require(std::hypot(solidSquareConnector.center_x, solidSquareConnector.center_y) >
+                std::hypot(squareConnector.center_x, squareConnector.center_y),
+            "solid square connector should include the reserved stroke footprint");
+}
+
+// Canvas-space text paint bounds, straight from the engine's published paint
+// contract — the same bounds dirty regions derive from. Production code
+// currently has no canvas-space caller, so the helper lives with its only
+// consumer.
+QRectF textItemCanvasBounds(const ClipSceneDisplayItem& item) {
+    const ClipTextPaintBounds bounds = clip_scene_text_paint_bounds(&item);
+    return QRectF(QPointF(bounds.min_x, bounds.min_y), QPointF(bounds.max_x, bounds.max_y));
+}
+
+void textEditorConnectorAnchorsAtInkEdgeRegardlessOfFill() {
+    const char* text = "note";
+    ClipSceneDisplayItem preview{};
+    preview.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    preview.element_id = ClipElementId{42, 7};
+    preview.center_x = 130.0;
+    preview.center_y = 10.0;
+    preview.width = 80.0;
+    preview.height = 40.0;
+    preview.font_size = 40.0;
+    preview.fill = ClipColorRgba8{0xff, 0xff, 0xff, 0xff};
+    preview.text_utf8 = text;
+    preview.text_utf8_len = 4;
+
+    ClipSceneDisplayItem serial{};
+    serial.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    serial.element_id = ClipElementId{3, 11};
+    serial.center_x = 0.0;
+    serial.center_y = 0.0;
+    serial.width = 24.0;
+    serial.height = 24.0;
+    serial.stroke_width = 2.0;
+    bindSerialToTextPreview(serial, preview.element_id);
+
+    ClipCanvasSceneItem connector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview, &connector),
+            "filled bound text preview should create a connector item");
+    require(connector.arrow_point_count == 2,
+            "side-attached connector should add a baseline segment");
+
+    // The underline belongs on the text's aligned ink edge; the background fill
+    // padding moves the painted pill, never the connector geometry.
+    const double left = preview.center_x - preview.width / 2.0;
+    const double right = preview.center_x + preview.width / 2.0;
+    const double bottom = preview.center_y + preview.height / 2.0;
+    const QRectF paintedBounds = textItemCanvasBounds(preview);
+    require(paintedBounds.width() > preview.width &&
+                paintedBounds.bottom() > preview.center_y + preview.height / 2.0,
+            "filled text paint bounds should extend past the raw item rectangle");
+    requireNear(connector.arrow_points[0].x, left, "baseline start x");
+    requireNear(connector.arrow_points[0].y, bottom, "baseline start y");
+    requireNear(connector.arrow_points[1].x, right, "baseline end x");
+    requireNear(connector.arrow_points[1].y, bottom, "baseline end y");
+
+    // A dominant text stroke widens the stroke-inclusive bounds used for dirty
+    // regions but must not move the connector off the ink edge.
+    preview.stroke = ClipColorRgba8{0, 0, 0, 0xff};
+    preview.stroke_width = 40.0;
+    const ClipTextPaintOutset paintOutset = clip_scene_text_paint_outset(&preview);
+    const ClipTextPaintOutset fillOutset = clip_scene_text_fill_outset(&preview);
+    require(paintOutset.y > fillOutset.y,
+            "dominant stroke should widen the dirty-region outset beyond the pill padding");
+    ClipCanvasSceneItem strokedConnector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview,
+                                                                       &strokedConnector),
+            "stroked bound text preview should still create a connector item");
+    requireNear(strokedConnector.arrow_points[0].y, bottom, "stroked baseline start y");
+    requireNear(strokedConnector.arrow_points[1].y, bottom, "stroked baseline end y");
+    const QRectF strokedPaintBounds = textItemCanvasBounds(preview);
+    require(strokedPaintBounds.bottom() > bottom,
+            "dirty-region bounds should still cover the stroke halo");
+}
+
+void textEditorConnectorUnderlinesWrappedInkNotWrapRectangle() {
+    // A width-resized bound label: the wrap rectangle stays wide, but the
+    // aligned ink block hugs the narrower wrapped ink on the left and top.
+    ClipSceneDisplayItem preview{};
+    preview.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    preview.element_id = ClipElementId{42, 7};
+    preview.center_x = 130.0;
+    preview.center_y = 10.0;
+    preview.width = 160.0;
+    preview.height = 40.0;
+    preview.content_width = 60.0;
+    preview.content_height = 20.0;
+    preview.font_size = 40.0;
+    preview.fill = ClipColorRgba8{0xff, 0xff, 0xff, 0xff};
+    preview.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+    preview.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_TOP;
+    preview.text_utf8 = "note";
+    preview.text_utf8_len = 4;
+
+    ClipSceneDisplayItem serial{};
+    serial.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    serial.element_id = ClipElementId{3, 11};
+    serial.center_x = 0.0;
+    serial.center_y = 0.0;
+    serial.width = 24.0;
+    serial.height = 24.0;
+    serial.stroke_width = 2.0;
+    bindSerialToTextPreview(serial, preview.element_id);
+
+    ClipCanvasSceneItem connector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, preview, &connector),
+            "wrapped bound text preview should create a connector item");
+    require(connector.arrow_point_count == 2,
+            "side-attached connector should add a baseline segment");
+
+    // Left-aligned ink: the underline starts at the wrap rectangle's left edge.
+    const double inkLeft = preview.center_x - preview.width / 2.0;
+    // Top-aligned ink: the underline bottom is the item top plus the ink height.
+    const double inkBottom = preview.center_y - preview.height / 2.0 + preview.content_height;
+    requireNear(connector.arrow_points[0].x, inkLeft, "wrapped baseline start x");
+    requireNear(connector.arrow_points[1].x, inkLeft + preview.content_width,
+                "wrapped baseline end x");
+    requireNear(connector.arrow_points[0].y, inkBottom, "wrapped baseline start y");
+    requireNear(connector.arrow_points[1].y, inkBottom, "wrapped baseline end y");
+    // The underline must not reach the wrap rectangle's right edge.
+    require(connector.arrow_points[1].x <
+                preview.center_x + preview.width / 2.0 - preview.content_width / 2.0,
+            "underline must span the ink block, not the wrap rectangle");
+}
+
+void paintBoundsFollowAlignedWrappedInk() {
+    ClipSceneDisplayItem item{};
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.element_id = ClipElementId{42, 7};
+    item.center_x = 200.0;
+    item.center_y = 150.0;
+    item.width = 160.0;
+    item.height = 80.0;
+    item.content_width = 60.0;
+    item.content_height = 30.0;
+    item.font_size = 40.0;
+    item.fill = ClipColorRgba8{0xff, 0xff, 0xff, 0xff};
+    item.stroke = ClipColorRgba8{0, 0, 0, 0xff};
+    item.stroke_width = 30.0;
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_RIGHT;
+    item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_BOTTOM;
+    item.text_utf8 = "note";
+    item.text_utf8_len = 4;
+
+    const double lineHeight = qMax(1.0, item.font_size) * 1.2;
+    const double padX = lineHeight * 0.32;
+    const double padY = lineHeight * 0.1;
+    // Right/bottom-aligned ink: the pill block hugs the wrap rectangle's
+    // bottom-right corner.
+    const double pillRight = item.center_x + item.width / 2.0 + padX;
+    const double pillBottom = item.center_y + item.height / 2.0 + padY;
+    // The conservative paint bounds take the larger of fill padding and the
+    // stroke halo per axis: horizontally the fill padding (15.36) dominates
+    // the 15.0 halo, vertically the halo dominates the 4.8 padding.
+    const double halo = item.stroke_width / 2.0;
+
+    const QRectF bounds = textItemCanvasBounds(item);
+    requireNear(bounds.right(), pillRight, "paint bounds right edge follows aligned ink");
+    requireNear(bounds.bottom(), pillBottom + (halo - padY),
+                "paint bounds bottom edge covers the dominant stroke halo");
+    require(bounds.bottom() > pillBottom, "paint bounds should extend past the pill edge");
+    require(bounds.width() < item.width + 2.0 * (padX + halo) + 1.0,
+            "paint bounds should track the narrower ink box, not the wrap rectangle");
+}
+
+QRect alphaPixelBounds(const QImage& image) {
+    QRect bounds;
+    bool hasPixel = false;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            if (image.pixelColor(x, y).alpha() == 0) {
+                continue;
+            }
+            const QRect pixelRect(x, y, 1, 1);
+            bounds = hasPixel ? bounds.united(pixelRect) : pixelRect;
+            hasPixel = true;
+        }
+    }
+    return bounds;
+}
+
+void connectorAnchorIgnoresPillEdgeAtZoom(double zoom) {
+    const QString text = QStringLiteral("note");
+    ClipSceneDisplayItem item{};
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.element_id = ClipElementId{42, 7};
+    item.font_size = 40.0;
+    item.fill = ClipColorRgba8{0xff, 0x10, 0x10, 0xff};
+    // A dominant stroke proves the pill edge and the anchor stay put even when
+    // the stroke-inclusive dirty-region outset is much larger.
+    item.stroke = ClipColorRgba8{0, 0, 0, 0xff};
+    item.stroke_width = 30.0;
+    item.text_utf8 = "note";
+    item.text_utf8_len = 4;
+
+    const QFont baseFont = QApplication::font();
+    const QSizeF measured = clip_canvas_text_layout::measureNaturalText(text, baseFont, item, zoom);
+    item.width = measured.width();
+    item.height = measured.height();
+    item.center_x = 200.0;
+    item.center_y = 150.0;
+
+    const ClipTextPaintOutset fillOutset = clip_scene_text_fill_outset(&item);
+    const double contractBottom = item.center_y + item.height / 2.0 + fillOutset.y;
+    const double contractLeft = item.center_x - item.width / 2.0 - fillOutset.x;
+    const double inkBottom = item.center_y + item.height / 2.0;
+
+    ClipSceneDisplayItem serial{};
+    serial.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    serial.element_id = ClipElementId{3, 11};
+    serial.center_x = 0.0;
+    serial.center_y = 150.0;
+    serial.width = 24.0;
+    serial.height = 24.0;
+    serial.stroke_width = 2.0;
+    bindSerialToTextPreview(serial, item.element_id);
+    ClipCanvasSceneItem connector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, item, &connector),
+            "side-bound serial should attach to the preview text");
+    require(connector.arrow_point_count == 2, "side attachment should emit a baseline segment");
+    requireNear(connector.arrow_points[0].y, inkBottom,
+                "connector baseline should sit on the ink bottom edge, ignoring the fill padding");
+
+    const QSize imageSize(640, 480);
+    QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    {
+        QPainter painter(&image);
+        painter.setFont(baseFont);
+        const double width = item.width * zoom;
+        const double height = item.height * zoom;
+        const QRectF localRect(200.0 * zoom - width / 2.0, 150.0 * zoom - height / 2.0, width,
+                               height);
+        clip_canvas_text_render::drawBackground(painter, item, baseFont, localRect, zoom);
+    }
+
+    const QRect painted = alphaPixelBounds(image);
+    require(!painted.isEmpty(), "background pill should paint visible pixels");
+    // Pixel edges are inclusive row/column indices; the continuous edge sits
+    // within one pixel of the last painted row. The right edge is skipped:
+    // natural-width measurement adds a small safety margin the pill does not.
+    const double tolerance = 2.0;
+    const double paintedBottom = static_cast<double>(painted.bottom()) + 1.0;
+    const double paintedLeft = static_cast<double>(painted.left());
+    require(std::abs(paintedBottom - contractBottom * zoom) <= tolerance,
+            "painted pill bottom must match the published fill-padding contract");
+    require(std::abs(paintedLeft - contractLeft * zoom) <= tolerance,
+            "painted pill left must match the published fill-padding contract");
+    require(std::abs(paintedBottom - connector.arrow_points[0].y * zoom) > tolerance,
+            "connector baseline must stay off the padded pill edge the painter paints");
+}
+
+void connectorAnchorIgnoresPillEdge() {
+    connectorAnchorIgnoresPillEdgeAtZoom(1.0);
+    connectorAnchorIgnoresPillEdgeAtZoom(2.5);
+}
+
+void wrappedConnectorAnchorIgnoresPillEdge() {
+    // A width-resized label wraps inside an item rectangle wider than the ink.
+    // Top-aligned wrapped ink must keep the underline on the ink block's bottom
+    // edge, not on the wrap rectangle's bottom or the padded pill edge.
+    const QString text = QStringLiteral("a wrapped annotation note");
+    ClipSceneDisplayItem item{};
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.element_id = ClipElementId{42, 7};
+    item.font_size = 32.0;
+    item.fill = ClipColorRgba8{0xff, 0x10, 0x10, 0xff};
+    item.text_utf8 = "a wrapped annotation note";
+    item.text_utf8_len =
+        static_cast<std::uint32_t>(QStringLiteral("a wrapped annotation note").size());
+    item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_TOP;
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+
+    const QFont baseFont = QApplication::font();
+    // Wrap at the item width; the wrapped lines are narrower than the wrap
+    // rectangle, which is exactly the state a width-resized label paints.
+    item.width = 240.0;
+    const clip_canvas_text_layout::TextMeasuredLayout wrapped =
+        clip_canvas_text_layout::measureWrappedTextLayout(text, baseFont, item, item.width);
+    item.height = wrapped.layout.height();
+    item.content_width = wrapped.content.width();
+    item.content_height = wrapped.content.height();
+    require(wrapped.content.width() < item.width,
+            "fixture must wrap into ink narrower than the wrap rectangle");
+    item.center_x = 260.0;
+    item.center_y = 200.0;
+
+    const ClipTextPaintOutset fillOutset = clip_scene_text_fill_outset(&item);
+    const double contractBottom =
+        item.center_y - item.height / 2.0 + item.content_height + fillOutset.y;
+    const double contractLeft = item.center_x - item.width / 2.0 - fillOutset.x;
+    const double inkBottom = item.center_y - item.height / 2.0 + item.content_height;
+
+    ClipSceneDisplayItem serial{};
+    serial.kind = CLIP_SCENE_DISPLAY_ITEM_SERIAL_NUMBER;
+    serial.element_id = ClipElementId{3, 11};
+    serial.center_x = 0.0;
+    serial.center_y = 200.0;
+    serial.width = 24.0;
+    serial.height = 24.0;
+    serial.stroke_width = 2.0;
+    bindSerialToTextPreview(serial, item.element_id);
+    ClipCanvasSceneItem connector;
+    require(clip_canvas_text_editor_connector::connectorItemForPreview(serial, item, &connector),
+            "wrapped serial-bound text should attach to the preview text");
+    requireNear(connector.arrow_points[0].y, inkBottom,
+                "wrapped connector baseline must sit on the top-aligned ink bottom edge");
+
+    const double zoom = 1.0;
+    const QSize imageSize(720, 480);
+    QImage image(imageSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    {
+        QPainter painter(&image);
+        painter.setFont(baseFont);
+        const double width = item.width * zoom;
+        const double height = item.height * zoom;
+        const QRectF localRect(item.center_x * zoom - width / 2.0,
+                               item.center_y * zoom - height / 2.0, width, height);
+        clip_canvas_text_render::drawBackground(painter, item, baseFont, localRect, zoom);
+    }
+
+    const QRect painted = alphaPixelBounds(image);
+    require(!painted.isEmpty(), "wrapped background pills should paint visible pixels");
+    const double tolerance = 2.0;
+    const double paintedBottom = static_cast<double>(painted.bottom()) + 1.0;
+    const double paintedLeft = static_cast<double>(painted.left());
+    require(std::abs(paintedBottom - contractBottom * zoom) <= tolerance,
+            "painted wrapped pill bottom must match the aligned ink contract");
+    require(std::abs(paintedLeft - contractLeft * zoom) <= tolerance,
+            "painted wrapped pill left must match the aligned ink contract");
+    require(std::abs(paintedBottom - connector.arrow_points[0].y * zoom) > tolerance,
+            "wrapped connector baseline must stay off the padded pill edge");
+}
+
+void widgetPointerFlowPlansSuppressedTextCreate() {
+    const clip_canvas_widget_pointer_flow::PressPlan plan =
+        clip_canvas_widget_pointer_flow::planPress(clip_canvas_widget_pointer_flow::PressRequest{
+            true,
+            false,
+            false,
+            ClipCanvasTool::Text,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            false,
+            true,
+            false,
+        });
+
+    require(plan.shouldBeginText, "suppressed text press should still try to begin existing text");
+    require(!plan.allowCreateText, "suppressed text press should disable new text creation");
+    require(plan.suppressedTextCreateForPress,
+            "suppressed text press should be recorded in the plan");
+    require(plan.shouldAcceptSuppressedTextCreate,
+            "suppressed text press should accept when no existing text begins");
+}
+
+void widgetPointerFlowDispatchesShiftClickInTextToolToEngine() {
+    const clip_canvas_widget_pointer_flow::PressPlan plan =
+        clip_canvas_widget_pointer_flow::planPress(clip_canvas_widget_pointer_flow::PressRequest{
+            true,
+            false,
+            false,
+            ClipCanvasTool::Text,
+            Qt::LeftButton,
+            Qt::ShiftModifier,
+            false,
+            false,
+            false,
+        });
+
+    require(!plan.shouldBeginText,
+            "shift-click in the text tool should not start inline text editing");
+    require(plan.shouldDispatchToEngine,
+            "shift-click in the text tool should reach engine selection handling");
+}
+
+void widgetPointerFlowDispatchesTextToolSelectionPressWithoutCommit() {
+    const clip_canvas_widget_pointer_flow::PressPlan plan =
+        clip_canvas_widget_pointer_flow::planPress(clip_canvas_widget_pointer_flow::PressRequest{
+            true,
+            true,
+            false,
+            ClipCanvasTool::Text,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            true,
+            true,
+            true,
+        });
+
+    require(!plan.shouldHandleEditorPress,
+            "text selection interaction press should not be consumed as caret placement");
+    require(!plan.shouldCommitTextEditor,
+            "active text selection press should keep the draft active");
+    require(plan.shouldDispatchToEngine,
+            "text selection interaction press should dispatch to engine-owned selection geometry");
+    require(!plan.shouldAcceptIfTextBeginFails,
+            "text selection interaction press should not be consumed by editor commit");
+    require(
+        !plan.dispatchAfterCommitRequiresRestoredSelection,
+        "selection press should not require restored selection because it does not commit first");
+    require(plan.suppressedTextCreateRestoredSelection,
+            "planner should carry restored selection from suppressed text create state");
+}
+
+void widgetPointerFlowDispatchesSelectToolSelectionPressWithoutCommit() {
+    const clip_canvas_widget_pointer_flow::PressPlan plan =
+        clip_canvas_widget_pointer_flow::planPress(clip_canvas_widget_pointer_flow::PressRequest{
+            true,
+            true,
+            false,
+            ClipCanvasTool::Select,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            true,
+            false,
+            false,
+        });
+
+    require(!plan.shouldHandleEditorPress,
+            "select tool selection press should not be consumed as caret placement");
+    require(!plan.shouldCommitTextEditor,
+            "select tool selection press should keep the active draft");
+    require(plan.shouldDispatchToEngine, "select tool selection interaction press should dispatch "
+                                         "to engine-owned selection geometry");
+    require(!plan.shouldAcceptIfTextBeginFails,
+            "select tool selection interaction press should not be consumed by editor commit");
+    require(!plan.dispatchAfterCommitRequiresRestoredSelection,
+            "select tool selection press should not require restored selection");
+}
+
+void widgetPointerFlowDispatchesAnyToolSelectionPressWithoutCommit() {
+    const clip_canvas_widget_pointer_flow::PressPlan plan =
+        clip_canvas_widget_pointer_flow::planPress(clip_canvas_widget_pointer_flow::PressRequest{
+            true,
+            true,
+            false,
+            ClipCanvasTool::Arrow,
+            Qt::LeftButton,
+            Qt::NoModifier,
+            true,
+            false,
+            false,
+        });
+
+    require(!plan.shouldHandleEditorPress,
+            "selection interaction press should not be consumed as caret placement");
+    require(!plan.shouldCommitTextEditor,
+            "selection interaction press should keep the active draft");
+    require(plan.shouldDispatchToEngine, "selection interaction press should dispatch to "
+                                         "engine-owned selection geometry for any active tool");
+    require(
+        !plan.shouldAcceptIfTextBeginFails,
+        "selection interaction press should not be consumed by editor commit for any active tool");
+    require(
+        !plan.dispatchAfterCommitRequiresRestoredSelection,
+        "selection interaction press should not require restored selection for any active tool");
+}
+
+void requireSelectedTextCopyOwnsPress(const clip_canvas_widget_pointer_flow::PressPlan& plan,
+                                      bool editorActive) {
+    require(!plan.shouldHandleEditorPress, "selected-text copy must not enter the text editor");
+    require(plan.shouldCommitTextEditor == editorActive,
+            "selected-text copy commits only an active draft");
+    require(plan.shouldRestoreSelectionOnCommit == editorActive,
+            "selected-text copy restores selection after committing a draft");
+    require(plan.dispatchAfterCommitRequiresRestoredSelection == editorActive,
+            "selected-text copy dispatches only after restored selection");
+    require(plan.shouldDispatchToEngine, "selected-text copy must reach engine duplication");
+    require(!plan.shouldBeginText, "selected-text copy must not create text");
+    require(!plan.shouldBeginSelectedText, "selected-text copy must not reopen the editor");
+    require(!plan.allowCreateText, "selected-text copy must not create a new text draft");
+}
+
+void widgetPointerFlowDetectsSelectedTextCopyGesture() {
+    require(
+        clip_canvas_widget_pointer_flow::isSelectedTextCopyGesture(Qt::LeftButton, Qt::AltModifier),
+        "Alt left-press without Shift is the selected-text copy gesture");
+    require(!clip_canvas_widget_pointer_flow::isSelectedTextCopyGesture(
+                Qt::LeftButton, Qt::AltModifier | Qt::ShiftModifier),
+            "Shift+Alt is not a selected-text copy gesture");
+    require(
+        !clip_canvas_widget_pointer_flow::isSelectedTextCopyGesture(Qt::LeftButton, Qt::NoModifier),
+        "unmodified left-press is not a selected-text copy gesture");
+    require(!clip_canvas_widget_pointer_flow::isSelectedTextCopyGesture(Qt::RightButton,
+                                                                        Qt::AltModifier),
+            "Alt right-press is not a selected-text copy gesture");
+}
+
+void widgetPointerFlowGivesSelectedTextCopyExclusiveOwnership() {
+    for (const auto tool : {ClipCanvasTool::Select, ClipCanvasTool::Text}) {
+        const clip_canvas_widget_pointer_flow::PressPlan idlePlan =
+            clip_canvas_widget_pointer_flow::planPress(
+                clip_canvas_widget_pointer_flow::PressRequest{
+                    true,
+                    false,
+                    false,
+                    tool,
+                    Qt::LeftButton,
+                    Qt::AltModifier,
+                    false,
+                    false,
+                    false,
+                    true,
+                });
+        requireSelectedTextCopyOwnsPress(idlePlan, false);
+
+        const clip_canvas_widget_pointer_flow::PressPlan editingPlan =
+            clip_canvas_widget_pointer_flow::planPress(
+                clip_canvas_widget_pointer_flow::PressRequest{
+                    true,
+                    true,
+                    true,
+                    tool,
+                    Qt::LeftButton,
+                    Qt::AltModifier,
+                    false,
+                    false,
+                    false,
+                    true,
+                });
+        requireSelectedTextCopyOwnsPress(editingPlan, true);
+    }
+}
+
+void widgetPointerFlowResolvesCopyFromHitTargetAndModifiers() {
+    using namespace clip_canvas_widget_pointer_flow;
+    using clip_canvas_widget_selection_hit_testing::SelectionInteractionTarget;
+    for (const auto tool : {ClipCanvasTool::Select, ClipCanvasTool::Text}) {
+        PressRequest request;
+        request.hasEvent = true;
+        request.textEditorActive = true;
+        request.canvasTool = tool;
+        request.button = Qt::LeftButton;
+        request.modifiers = Qt::AltModifier;
+        request.pointerOverSelectionInteraction = true;
+        request.selectionTarget = SelectionInteractionTarget::Move;
+        requireSelectedTextCopyOwnsPress(planPress(request), true);
+
+        // A text hit can overlap a handle's tolerance. The handle must still win.
+        request.pointerHitsSelectedText = true;
+        request.selectionTarget = SelectionInteractionTarget::Handle;
+        const auto handlePlan = planPress(request);
+        require(!handlePlan.shouldCommitTextEditor && handlePlan.shouldDispatchToEngine,
+                "Alt on a selection handle must preserve the draft and reach the engine");
+        require(!handlePlan.shouldHandleEditorPress && !handlePlan.shouldBeginText,
+                "Alt on a selection handle must not activate caret placement or create text");
+
+        request.selectionTarget = SelectionInteractionTarget::None;
+        request.pointerOverSelectionInteraction = false;
+        request.pointerInsideTextEditor = true;
+        for (const auto modifiers : {Qt::KeyboardModifiers(Qt::NoModifier),
+                                     Qt::KeyboardModifiers(Qt::AltModifier | Qt::ShiftModifier)}) {
+            request.modifiers = modifiers;
+            const auto editorPlan = planPress(request);
+            require(editorPlan.shouldHandleEditorPress && !editorPlan.shouldCommitTextEditor &&
+                        !editorPlan.shouldDispatchToEngine,
+                    "ordinary and Shift+Alt text presses must remain editor interactions");
+        }
+    }
+}
+
+void widgetPointerFlowLetsEditorOwnPressInsideDraft() {
+    for (const auto tool : {ClipCanvasTool::Select, ClipCanvasTool::Text}) {
+        const clip_canvas_widget_pointer_flow::PressPlan plan =
+            clip_canvas_widget_pointer_flow::planPress(
+                clip_canvas_widget_pointer_flow::PressRequest{
+                    true,
+                    true,
+                    true,
+                    tool,
+                    Qt::LeftButton,
+                    Qt::NoModifier,
+                    false,
+                    false,
+                    false,
+                    false,
+                });
+
+        require(plan.shouldHandleEditorPress,
+                "left-press inside an active draft belongs to caret selection");
+        require(!plan.shouldCommitTextEditor,
+                "caret press inside an active draft must not commit the editor");
+        require(!plan.shouldBeginText, "caret press inside an active draft must not create text");
+        require(!plan.shouldBeginSelectedText,
+                "caret press inside an active draft must not reopen the editor");
+        require(!plan.shouldDispatchToEngine,
+                "caret press inside an active draft must not reach the engine");
+    }
+}
+
+void textEditorWheelPlansFontSizeStepping() {
+    const clip_canvas_text_editor_input::FontSizeWheelPlan angleWheel =
+        clip_canvas_text_editor_input::planFontSizeWheel(
+            clip_canvas_text_editor_input::FontSizeWheelRequest{
+                true,
+                ClipCanvasTool::Text,
+                Qt::NoModifier,
+                0,
+                120,
+            });
+
+    require(angleWheel.matchedToolWheel, "text tool wheel should be owned by font-size policy");
+    require(angleWheel.shouldStepFontSize, "non-zero text wheel delta should step font size");
+    require(angleWheel.increase, "positive angle delta should increase font size");
+
+    const clip_canvas_text_editor_input::FontSizeWheelPlan pixelWheel =
+        clip_canvas_text_editor_input::planFontSizeWheel(
+            clip_canvas_text_editor_input::FontSizeWheelRequest{
+                true,
+                ClipCanvasTool::Text,
+                Qt::NoModifier,
+                -1,
+                120,
+            });
+
+    require(pixelWheel.shouldStepFontSize, "pixel wheel delta should step font size");
+    require(!pixelWheel.increase, "negative pixel delta should decrease font size");
+
+    const clip_canvas_text_editor_input::FontSizeWheelPlan zoomWheel =
+        clip_canvas_text_editor_input::planFontSizeWheel(
+            clip_canvas_text_editor_input::FontSizeWheelRequest{
+                true,
+                ClipCanvasTool::Text,
+                Qt::ControlModifier,
+                0,
+                -120,
+            });
+
+    require(!zoomWheel.matchedToolWheel,
+            "modified wheel should remain available for generic viewport input");
+
+    const clip_canvas_text_editor_input::FontSizeWheelPlan zeroDelta =
+        clip_canvas_text_editor_input::planFontSizeWheel(
+            clip_canvas_text_editor_input::FontSizeWheelRequest{
+                true,
+                ClipCanvasTool::Text,
+                Qt::NoModifier,
+                0,
+                0,
+            });
+
+    require(zeroDelta.matchedToolWheel,
+            "zero-delta text wheel should still match font-size policy");
+    require(!zeroDelta.shouldStepFontSize,
+            "zero-delta text wheel should not request a font-size mutation");
+
+    const clip_canvas_text_editor_input::FontSizeWheelPlan serialWheel =
+        clip_canvas_text_editor_input::planFontSizeWheel(
+            clip_canvas_text_editor_input::FontSizeWheelRequest{
+                true,
+                ClipCanvasTool::SerialNumber,
+                Qt::NoModifier,
+                0,
+                -120,
+            });
+    require(serialWheel.matchedToolWheel,
+            "serial-number tool wheel should be owned by font-size policy");
+    require(serialWheel.shouldStepFontSize, "serial-number tool wheel should step font size");
+    require(!serialWheel.increase, "negative serial-number wheel delta should decrease font size");
+
+    requireNear(clip_canvas_text_measurement::steppedFontSize(21.0, true), 22.0,
+                "text wheel increase should use a one-pixel step");
+    requireNear(clip_canvas_text_measurement::steppedFontSize(21.0, false), 20.0,
+                "text wheel decrease should use a one-pixel step");
+    requireNear(clip_canvas_text_measurement::steppedFontSize(6.0, false), 6.0,
+                "text wheel decrease should stop at the minimum font size");
+    requireNear(clip_canvas_text_measurement::steppedFontSize(256.0, true), 256.0,
+                "text wheel increase should stop at the maximum font size");
+}
+
+void sceneRectangleRendererBuildsFillPathForEveryCornerStyle() {
+    require(renderedSceneRectangleFillPixelCount(ClipCornerRadii{}) > 0,
+            "square scene rectangles should render patterned fills");
+    require(renderedSceneRectangleFillPixelCount(ClipCornerRadii{6.0, 6.0, 6.0, 6.0}) > 0,
+            "uniformly rounded scene rectangles should render patterned fills");
+}
+
+void textBackgroundUsesRectangleHatchTexture() {
+    constexpr double fontSize = 30.0;
+    const std::size_t cacheEntriesBefore =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int linePixels = renderedTextBackgroundPixelCount(CLIP_FILL_STYLE_LINE, fontSize);
+    const std::size_t cacheEntriesAfterText =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int crossLinePixels =
+        renderedTextBackgroundPixelCount(CLIP_FILL_STYLE_CROSS_LINE, fontSize);
+
+    require(linePixels > 0, "line text fill should render hatch pixels");
+    require(crossLinePixels > linePixels,
+            "cross-line text fill should render both hatch directions");
+    require(cacheEntriesAfterText <= cacheEntriesBefore + 1,
+            "text fill should create at most one semantic hatch texture");
+
+    require(renderedOverlayFillPixelCount(CLIP_FILL_STYLE_LINE, fontSize / 24.0) > 0,
+            "equivalent rectangle stroke width should render hatch pixels");
+    require(clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread() ==
+                cacheEntriesAfterText,
+            "twenty-four pixels of text size should share one rectangle stroke-width texture");
+}
+
+void serialNumberBackgroundUsesTextHatchTexture() {
+    constexpr double fontSize = 30.0;
+    renderedTextBackgroundPixelCount(CLIP_FILL_STYLE_LINE, fontSize);
+    const std::size_t cacheEntriesAfterText =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int linePixels = renderedSerialNumberBackgroundPixelCount(CLIP_FILL_STYLE_LINE, fontSize);
+    const std::size_t cacheEntriesAfterSerialNumber =
+        clip_canvas_renderer::hatchTextureCacheEntryCountForCurrentThread();
+    const int crossLinePixels =
+        renderedSerialNumberBackgroundPixelCount(CLIP_FILL_STYLE_CROSS_LINE, fontSize);
+    const int solidPixels =
+        renderedSerialNumberBackgroundPixelCount(CLIP_FILL_STYLE_SOLID, fontSize);
+
+    require(linePixels > 0, "line serial-number fill should render hatch pixels");
+    require(crossLinePixels > linePixels,
+            "cross-line serial-number fill should render both hatch directions");
+    require(solidPixels > crossLinePixels,
+            "non-solid serial-number fills should retain transparent gaps");
+    require(cacheEntriesAfterSerialNumber == cacheEntriesAfterText,
+            "serial-number and text backgrounds should share one hatch texture");
+}
+
+void textDecorationsFollowAlignedLines() {
+    const QFont baseFont = QApplication::font();
+    for (const auto alignment : {CLIP_TEXT_HORIZONTAL_ALIGN_LEFT, CLIP_TEXT_HORIZONTAL_ALIGN_CENTER,
+                                 CLIP_TEXT_HORIZONTAL_ALIGN_RIGHT}) {
+        for (const double zoom : {0.75, 1.0, 2.5}) {
+            for (const QString& text : {QStringLiteral("ABB231\nADFA233213121231321"),
+                                        QStringLiteral("short words wrap across several lines")}) {
+                ClipCanvasSceneItem item;
+                item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+                item.font_size = 24.0;
+                item.width = 280.0;
+                item.height = 180.0;
+                item.fill = ClipColorRgba8{255, 180, 180, 255};
+                item.fill_style = CLIP_FILL_STYLE_SOLID;
+                item.corner_radii = {};
+                item.text_horizontal_align = alignment;
+                item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_CENTER;
+                clip_canvas_text::copyTextToSceneItem(item, text);
+                const QRectF localRect(50.0, 50.0, item.width * zoom, item.height * zoom);
+                auto layout = clip_canvas_text_layout::createDocumentLayout(item, baseFont, zoom,
+                                                                            text, false);
+                QImage background(900, 650, QImage::Format_ARGB32_Premultiplied);
+                QImage underline(background.size(), background.format());
+                background.fill(Qt::transparent);
+                underline.fill(Qt::transparent);
+                {
+                    QPainter painter(&background);
+                    clip_canvas_text_render::drawBackground(painter, item, baseFont, localRect,
+                                                            zoom);
+                }
+                {
+                    QPainter painter(&underline);
+                    clip_canvas_text_render::drawHoverUnderlines(painter, item, baseFont, localRect,
+                                                                 zoom, Qt::blue, 1.0);
+                }
+                const auto outset = clip_scene_text_fill_outset(&item);
+                const double scale = layout.resolution.scale;
+                auto& document = layout.textDocument();
+                for (auto block = document.begin(); block.isValid(); block = block.next()) {
+                    const auto blockRect = document.documentLayout()->blockBoundingRect(block);
+                    for (int index = 0; index < block.layout()->lineCount(); ++index) {
+                        const auto line = block.layout()->lineAt(index);
+                        // Cursor positions independently locate the aligned text, including
+                        // the last short line of a wrapped paragraph.
+                        int end = line.textStart() + line.textLength();
+                        while (end > line.textStart() && block.text().at(end - 1).isSpace()) {
+                            --end;
+                        }
+                        const double left =
+                            localRect.left() +
+                            (blockRect.left() + line.cursorToX(line.textStart())) * scale;
+                        const double right =
+                            localRect.left() + (blockRect.left() + line.cursorToX(end)) * scale;
+                        const double top = localRect.top() + layout.topOffset +
+                                           (blockRect.top() + line.y()) * scale;
+                        const int middle = qRound(top + line.height() * scale / 2.0);
+                        const QRect fillPixels = alphaPixelBounds(
+                            background.copy(QRect(0, middle, background.width(), 1)));
+                        require(std::abs(fillPixels.left() - (left - outset.x * zoom)) <= 2.0 &&
+                                    std::abs(fillPixels.right() + 1.0 -
+                                             (right + outset.x * zoom)) <= 2.0,
+                                "each background must follow its aligned text line");
+                        const int bottom = qRound(top + line.height() * scale);
+                        const QRect underlinePixels = alphaPixelBounds(
+                            underline.copy(QRect(0, bottom - 2, underline.width(), 5)));
+                        require(!underlinePixels.isEmpty() &&
+                                    std::abs(underlinePixels.left() - left) <= 2.0 &&
+                                    std::abs(underlinePixels.right() - right) <= 2.0,
+                                "each hover underline must follow its aligned text line");
+                    }
+                }
+            }
+        }
+    }
+}
+
+void multilineTextHoverRendererDrawsEveryLineUnderline() {
+    QImage image(QSize(160, 160), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipCanvasSceneItem textItem;
+    textItem.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    textItem.center_x = 0.0;
+    textItem.center_y = 0.0;
+    textItem.width = 100.0;
+    textItem.height = 90.0;
+    textItem.font_size = 18.0;
+    textItem.opacity = 1.0;
+    textItem.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_LEFT;
+    textItem.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_TOP;
+    clip_canvas_text::copyTextToSceneItem(textItem, QStringLiteral("a\nb\nc"));
+
+    ClipCanvasOverlayItem hoverItem;
+    hoverItem.kind = CLIP_OVERLAY_DISPLAY_ITEM_DRAW_RECT;
+    hoverItem.rect_kind = CLIP_OVERLAY_RECT_TEXT_HOVER_UNDERLINE;
+    hoverItem.center_x = textItem.center_x;
+    hoverItem.center_y = textItem.center_y;
+    hoverItem.width = textItem.width;
+    hoverItem.height = textItem.height;
+    hoverItem.rotation = textItem.rotation;
+    hoverItem.stroke = ClipColorRgba8{0x40, 0x96, 0xff, 0xff};
+    hoverItem.stroke_width = 1.5;
+
+    SceneDisplayInfo sceneInfo{};
+    sceneInfo.item_count = 1;
+    sceneInfo.surface_width = image.width();
+    sceneInfo.surface_height = image.height();
+    sceneInfo.camera_zoom = 1.0;
+    OverlayDisplayInfo overlayInfo{};
+    overlayInfo.item_count = 1;
+    overlayInfo.surface_width = image.width();
+    overlayInfo.surface_height = image.height();
+    overlayInfo.camera_zoom = 1.0;
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderOverlayItems(painter, overlayInfo, &hoverItem, 1,
+                                             QRegion(image.rect()), &sceneInfo, &textItem, 1);
+    painter.end();
+
+    int underlineRows = 0;
+    bool previousRowContainsBlue = false;
+    for (int y = 0; y < image.height(); ++y) {
+        const bool rowContainsBlue =
+            imageRegionContainsSelectionBlue(image, QRect(0, y, image.width(), 1));
+        if (rowContainsBlue && !previousRowContainsBlue) {
+            ++underlineRows;
+        }
+        previousRowContainsBlue = rowContainsBlue;
+    }
+    require(underlineRows == 3,
+            "multiline text hover feedback should draw one underline for every text line");
+}
+
+void compactSceneItemsOwnBorrowedPatchData() {
+    QByteArray text = QByteArrayLiteral("owned text");
+    std::vector<ClipArrowPoint> points{{1.0, 2.0}, {3.0, 4.0}};
+    ClipSceneDisplayItem borrowed{};
+    borrowed.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    borrowed.text_utf8 = text.constData();
+    borrowed.text_utf8_len = static_cast<std::uint32_t>(text.size());
+    borrowed.arrow_points = points.data();
+    borrowed.arrow_point_count = static_cast<std::uint32_t>(points.size());
+
+    ClipCanvasSceneItem owned(borrowed);
+    text.fill('x');
+    points.clear();
+
+    require(clip_canvas_text::textFromSceneItem(owned) == QStringLiteral("owned text"),
+            "owned scene item should outlive borrowed UTF-8 storage");
+    require(owned.arrow_point_count == 2, "owned scene item should retain borrowed arrow points");
+    requireNear(owned.arrow_points[1].x, 3.0, "owned arrow point x");
+}
+
+void adaptiveRepaintKeepsSparseRegionsSeparate() {
+    const QRect clip(0, 0, 1000, 1000);
+    QRegion sparse(QRect(10, 10, 20, 20));
+    sparse += QRect(900, 900, 20, 20);
+    const QRegion adaptive = clip_canvas_widget_repaint::adaptiveUpdateRegion(sparse, clip);
+    require(adaptive.rectCount() > 1, "distant dirty regions should remain separate");
+    require(!adaptive.contains(QPoint(500, 500)), "sparse repaint should not cover the gap");
+
+    QRegion nearby(QRect(10, 10, 20, 20));
+    nearby += QRect(32, 10, 20, 20);
+    const QRegion coalesced = clip_canvas_widget_repaint::adaptiveUpdateRegion(nearby, clip);
+    require(coalesced.rectCount() == 1, "nearby dirty regions should use their bounding rect");
+}
+
+void filterRendererClipsEffectAndPreservesContentAboveIt() {
+    QImage image(QSize(100, 100), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipSceneDisplayItem below{};
+    below.kind = CLIP_SCENE_DISPLAY_ITEM_DRAW_RECT;
+    below.width = 80.0;
+    below.height = 80.0;
+    below.fill = ClipColorRgba8{255, 0, 0, 255};
+    below.fill_style = CLIP_FILL_STYLE_SOLID;
+    below.opacity = 1.0;
+
+    ClipSceneDisplayItem filter{};
+    filter.kind = CLIP_SCENE_DISPLAY_ITEM_FILTER;
+    filter.width = 40.0;
+    filter.height = 40.0;
+    filter.filter = clip_filter_render_spec_resolve(3, 1.0);
+    filter.opacity = 1.0;
+
+    ClipSceneDisplayItem above = below;
+    above.width = 10.0;
+    above.height = 10.0;
+    above.fill = ClipColorRgba8{0, 255, 0, 255};
+
+    const ClipCanvasSceneItem items[] = {
+        ClipCanvasSceneItem(below),
+        ClipCanvasSceneItem(filter),
+        ClipCanvasSceneItem(above),
+    };
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 3;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+    displayInfo.camera_zoom = 1.0;
+
+    QPainter painter(&image);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter,
+        &displayInfo,
+        items,
+        3,
+        QRegion(image.rect()),
+        nullptr,
+        0,
+    });
+    painter.end();
+
+    require(image.pixelColor(60, 50) == QColor(0, 255, 255),
+            "inversion should affect content below inside the filter clip");
+    require(image.pixelColor(85, 50) == QColor(255, 0, 0),
+            "filter should not affect pixels outside its bounds");
+    require(image.pixelColor(50, 50) == QColor(0, 255, 0),
+            "content above the filter should remain unchanged");
+}
+
+void filterRendererAppliesToBackgroundContent() {
+    QImage image(QSize(100, 100), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QImage background(image.size(), QImage::Format_ARGB32_Premultiplied);
+    background.fill(QColor(255, 0, 0));
+
+    ClipSceneDisplayItem filter{};
+    filter.kind = CLIP_SCENE_DISPLAY_ITEM_FILTER;
+    filter.width = 40.0;
+    filter.height = 40.0;
+    filter.filter = clip_filter_render_spec_resolve(3, 1.0);
+    filter.opacity = 1.0;
+
+    const ClipCanvasSceneItem items[] = {ClipCanvasSceneItem(filter)};
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 1;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+    displayInfo.camera_zoom = 1.0;
+
+    QPainter painter(&image);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter,
+        &displayInfo,
+        items,
+        1,
+        QRegion(image.rect()),
+        nullptr,
+        0,
+        &background,
+    });
+    painter.end();
+
+    require(image.pixelColor(50, 50) == QColor(0, 255, 255),
+            "a filter-only scene should transform its background content");
+    require(image.pixelColor(85, 50) == QColor(255, 0, 0),
+            "background content outside the filter should remain unchanged");
+}
+
+void adjacentSameTypeFiltersShareTheirPreGroupScene() {
+    QImage image(QSize(80, 80), QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    ClipSceneDisplayItem below{};
+    below.kind = CLIP_SCENE_DISPLAY_ITEM_DRAW_RECT;
+    below.width = 60.0;
+    below.height = 60.0;
+    below.fill = ClipColorRgba8{255, 0, 0, 255};
+    below.fill_style = CLIP_FILL_STYLE_SOLID;
+    below.opacity = 1.0;
+    ClipSceneDisplayItem inversion{};
+    inversion.kind = CLIP_SCENE_DISPLAY_ITEM_FILTER;
+    inversion.width = 40.0;
+    inversion.height = 40.0;
+    inversion.filter = clip_filter_render_spec_resolve(3, 1.0);
+    inversion.opacity = 1.0;
+
+    const ClipCanvasSceneItem items[] = {
+        ClipCanvasSceneItem(below),
+        ClipCanvasSceneItem(inversion),
+        ClipCanvasSceneItem(inversion),
+    };
+    SceneDisplayInfo displayInfo{};
+    displayInfo.item_count = 3;
+    displayInfo.surface_width = image.width();
+    displayInfo.surface_height = image.height();
+    displayInfo.camera_zoom = 1.0;
+
+    QPainter painter(&image);
+    painter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &painter, &displayInfo, items, 3, QRegion(image.rect()), nullptr, 0});
+    painter.end();
+
+    require(image.pixelColor(40, 40) == QColor(0, 255, 255),
+            "overlapping adjacent same-type filters should sample one pre-group scene");
+    const clip_canvas_renderer::FilterRenderDiagnostics grouped =
+        clip_canvas_renderer::filterRenderDiagnosticsForCurrentThread();
+    require(grouped.recorderCount == 1 && grouped.filterLayerCount == 1 &&
+                grouped.originalFilterCount == 2 && grouped.effectDispatchCount == 1 &&
+                grouped.batchedFilterCount == 1 && grouped.maskPixelCount == 0 &&
+                grouped.opaqueRectDispatchCount == 1,
+            "same-effect filters should share one direct effect dispatch");
+    image.fill(Qt::transparent);
+    QPainter cachedPainter(&image);
+    cachedPainter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &cachedPainter, &displayInfo, items, 3, QRegion(image.rect()), nullptr, 0});
+    cachedPainter.end();
+    const clip_canvas_renderer::FilterRenderDiagnostics cached =
+        clip_canvas_renderer::filterRenderDiagnosticsForCurrentThread();
+    require(cached.usedFilterPath && cached.workingSurfacePixelCount <= 80u * 80u,
+            "an unchanged filter render should stay within the exposed surface bounds");
+
+    ClipSceneDisplayItem offscreen = inversion;
+    offscreen.center_x = 5000.0;
+    const ClipCanvasSceneItem culledItems[] = {
+        ClipCanvasSceneItem(below),
+        ClipCanvasSceneItem(offscreen),
+    };
+    image.fill(Qt::transparent);
+    QPainter culledPainter(&image);
+    culledPainter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &culledPainter,
+        &displayInfo,
+        culledItems,
+        2,
+        QRegion(image.rect()),
+        nullptr,
+        0,
+    });
+    culledPainter.end();
+    const clip_canvas_renderer::FilterRenderDiagnostics culled =
+        clip_canvas_renderer::filterRenderDiagnosticsForCurrentThread();
+    require(culled.recorderCount == 0 && culled.layerCount == 0 && culled.filterPassCount == 0,
+            "a wholly offscreen filter should stay on the zero-pass direct path");
+
+    ClipSceneDisplayItem mosaic = inversion;
+    mosaic.filter = clip_filter_render_spec_resolve(0, 0.5);
+    const ClipCanvasSceneItem mosaicItems[] = {
+        ClipCanvasSceneItem(below),
+        ClipCanvasSceneItem(mosaic),
+    };
+    image.fill(Qt::transparent);
+    QPainter mosaicPainter(&image);
+    mosaicPainter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &mosaicPainter,
+        &displayInfo,
+        mosaicItems,
+        2,
+        QRegion(image.rect()),
+        nullptr,
+        0,
+    });
+    mosaicPainter.end();
+    require(image.pixelColor(40, 40) == QColor(255, 0, 0),
+            "the CPU mosaic fallback should preserve visible uniform source content");
+    require(clip_canvas_renderer::filterRenderDiagnosticsForCurrentThread().filterPassCount == 1,
+            "the CPU mosaic fallback should report one completed filter pass");
+
+    ClipSceneDisplayItem shiftedMosaic = mosaic;
+    shiftedMosaic.center_x = 100.0;
+    shiftedMosaic.center_y = 100.0;
+    ClipSceneDisplayItem shiftedBelow = below;
+    shiftedBelow.center_x = 100.0;
+    shiftedBelow.center_y = 100.0;
+    const ClipCanvasSceneItem shiftedMosaicItems[] = {
+        ClipCanvasSceneItem(shiftedBelow),
+        ClipCanvasSceneItem(shiftedMosaic),
+    };
+    SceneDisplayInfo shiftedDisplayInfo = displayInfo;
+    shiftedDisplayInfo.camera_center_x = 100.0;
+    shiftedDisplayInfo.camera_center_y = 100.0;
+    image.fill(Qt::transparent);
+    QPainter shiftedMosaicPainter(&image);
+    shiftedMosaicPainter.setClipRect(image.rect());
+    clip_canvas_renderer::renderSceneItems(clip_canvas_renderer::SceneRenderRequest{
+        &shiftedMosaicPainter,
+        &shiftedDisplayInfo,
+        shiftedMosaicItems,
+        2,
+        QRegion(image.rect()),
+        nullptr,
+        0,
+    });
+    shiftedMosaicPainter.end();
+    require(clip_canvas_renderer::filterRenderDiagnosticsForCurrentThread().filterPassCount == 1,
+            "mosaic rendering should tolerate a negative tile origin");
+}
+
+void watermarkRendererIsViewportAnchoredAndSkipsLowAlpha() {
+    clip_canvas_renderer::resetWatermarkRenderCacheForCurrentThread();
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    const std::size_t buildsBefore =
+        clip_canvas_renderer::watermarkLayoutCacheBuildCountForCurrentThread();
+    WatermarkDisplayInfo info{};
+    info.surface_width = 320;
+    info.surface_height = 180;
+    info.watermark_color = ClipColorRgba8{20, 40, 60, 255};
+    const QByteArray text("DRAFT");
+    std::copy(text.begin(), text.end(), info.watermark_text.begin());
+    info.watermark_text_len = static_cast<std::uint16_t>(text.size());
+    info.watermark_font_size = 21;
+    info.watermark_gap = 40;
+    info.watermark_angle = 30;
+    info.watermark_opacity = 0.5;
+    QImage first(320, 180, QImage::Format_ARGB32_Premultiplied);
+    first.fill(Qt::transparent);
+    QPainter firstPainter(&first);
+    clip_canvas_renderer::renderWatermark(firstPainter, info);
+    firstPainter.end();
+    const std::size_t buildsAfterFirst =
+        clip_canvas_renderer::watermarkLayoutCacheBuildCountForCurrentThread();
+    require(buildsAfterFirst == buildsBefore + 1,
+            "first visible watermark render should build its text layout and tile once");
+    const clip_canvas_renderer::WatermarkRenderDiagnostics firstDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(firstDiagnostics.renderCallCount == 1 && firstDiagnostics.shapeMissCount == 1 &&
+                firstDiagnostics.unitMissCount == 1 && firstDiagnostics.tintBuildCount == 1 &&
+                firstDiagnostics.selectedStrategy ==
+                    clip_canvas_renderer::WatermarkRenderStrategy::SparseImage &&
+                firstDiagnostics.submittedFragmentCount > 0 &&
+                firstDiagnostics.fallbackGlyphDrawCount == 0,
+            "a cold watermark render should report shaping, rasterization, tint, and composition");
+
+    WatermarkDisplayInfo secondCanvasInfo = info;
+    secondCanvasInfo.surface_width = 640;
+    secondCanvasInfo.surface_height = 360;
+    QImage secondCanvas(640, 360, QImage::Format_ARGB32_Premultiplied);
+    secondCanvas.fill(Qt::transparent);
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QPainter secondCanvasPainter(&secondCanvas);
+    clip_canvas_renderer::renderWatermark(secondCanvasPainter, secondCanvasInfo);
+    secondCanvasPainter.end();
+    const clip_canvas_renderer::WatermarkRenderDiagnostics reusedDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(reusedDiagnostics.shapeHitCount == 1 && reusedDiagnostics.unitHitCount == 1 &&
+                reusedDiagnostics.shapeMissCount == 0 && reusedDiagnostics.unitMissCount == 0 &&
+                reusedDiagnostics.tintBuildCount == 0,
+            "multiple canvases should reuse the process-wide shaped and tinted unit");
+    const auto hasVisiblePixel = [](const QImage& image) {
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                if (image.pixelColor(x, y).alpha() > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    const QRect partialArea(90, 50, 140, 80);
+    QImage partial(320, 180, QImage::Format_ARGB32_Premultiplied);
+    partial.fill(Qt::transparent);
+    QPainter partialPainter(&partial);
+    clip_canvas_renderer::renderWatermark(partialPainter, info, partialArea);
+    partialPainter.end();
+    require(hasVisiblePixel(partial.copy(partialArea)),
+            "a partial watermark area should contain visible watermark pixels");
+    QImage outsidePartial = partial;
+    {
+        QPainter outsidePainter(&outsidePartial);
+        outsidePainter.setCompositionMode(QPainter::CompositionMode_Source);
+        outsidePainter.fillRect(partialArea, Qt::transparent);
+    }
+    require(!hasVisiblePixel(outsidePartial),
+            "a partial watermark area must clip every watermark pixel outside it");
+
+    info.camera_center_x = 1000;
+    info.camera_center_y = -500;
+    QImage second(320, 180, QImage::Format_ARGB32_Premultiplied);
+    second.fill(Qt::transparent);
+    QPainter secondPainter(&second);
+    clip_canvas_renderer::renderWatermark(secondPainter, info);
+    secondPainter.end();
+    require(first == second, "camera pan must not move the selection-anchored watermark");
+    require(clip_canvas_renderer::watermarkLayoutCacheBuildCountForCurrentThread() ==
+                buildsAfterFirst,
+            "camera changes should not rebuild viewport-anchored watermark text layout");
+
+    info.watermark_color = ClipColorRgba8{180, 30, 90, 255};
+    info.watermark_angle = -48;
+    info.watermark_opacity = 0.7;
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage retinted(320, 180, QImage::Format_ARGB32_Premultiplied);
+    retinted.fill(Qt::transparent);
+    QPainter retintedPainter(&retinted);
+    clip_canvas_renderer::renderWatermark(retintedPainter, info);
+    retintedPainter.end();
+    require(
+        clip_canvas_renderer::watermarkLayoutCacheBuildCountForCurrentThread() == buildsAfterFirst,
+        "color, opacity, and angle changes should reuse watermark text layout and tile geometry");
+    const clip_canvas_renderer::WatermarkRenderDiagnostics retintDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(retintDiagnostics.shapeHitCount == 1 && retintDiagnostics.unitHitCount == 1 &&
+                retintDiagnostics.unitMissCount == 0 && retintDiagnostics.tintBuildCount == 1 &&
+                retintDiagnostics.selectedStrategy !=
+                    clip_canvas_renderer::WatermarkRenderStrategy::None,
+            "color and opacity changes should rebuild only the tinted watermark unit");
+
+    info.watermark_angle = 12;
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage rerotated(320, 180, QImage::Format_ARGB32_Premultiplied);
+    rerotated.fill(Qt::transparent);
+    QPainter rerotatedPainter(&rerotated);
+    clip_canvas_renderer::renderWatermark(rerotatedPainter, info);
+    rerotatedPainter.end();
+    const clip_canvas_renderer::WatermarkRenderDiagnostics angleDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(angleDiagnostics.shapeHitCount == 1 && angleDiagnostics.unitHitCount == 1 &&
+                angleDiagnostics.unitMissCount == 0 && angleDiagnostics.tintBuildCount == 0 &&
+                angleDiagnostics.selectedStrategy !=
+                    clip_canvas_renderer::WatermarkRenderStrategy::None,
+            "angle-only changes should reuse every watermark cache layer");
+
+    info.watermark_gap = 120;
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage regapped(320, 180, QImage::Format_ARGB32_Premultiplied);
+    regapped.fill(Qt::transparent);
+    QPainter regappedPainter(&regapped);
+    clip_canvas_renderer::renderWatermark(regappedPainter, info);
+    regappedPainter.end();
+    const auto gapDiagnostics = clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(gapDiagnostics.unitHitCount == 1 && gapDiagnostics.unitMissCount == 0 &&
+                gapDiagnostics.tintBuildCount == 0,
+            "gap-only changes should reuse shaping, alpha, and tint unit data");
+
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage dprImage(QSize(480, 270), QImage::Format_ARGB32_Premultiplied);
+    dprImage.setDevicePixelRatio(1.5);
+    dprImage.fill(Qt::transparent);
+    QPainter dprPainter(&dprImage);
+    clip_canvas_renderer::renderWatermark(dprPainter, info);
+    dprPainter.end();
+    const auto dprDiagnostics = clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(dprDiagnostics.shapeHitCount == 1 && dprDiagnostics.unitMissCount == 1,
+            "fractional DPR should reuse shaping while building a distinct physical unit");
+
+    const std::size_t fallbacksBefore =
+        clip_canvas_renderer::watermarkDirectFallbackCountForCurrentThread();
+    const QByteArray oversizedText(255, 'W');
+    std::copy(oversizedText.begin(), oversizedText.end(), info.watermark_text.begin());
+    info.watermark_text_len = static_cast<std::uint16_t>(oversizedText.size());
+    info.watermark_font_size = 42;
+    info.watermark_gap = 10;
+    info.watermark_angle = 0;
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage oversized(320, 180, QImage::Format_ARGB32_Premultiplied);
+    oversized.fill(Qt::transparent);
+    QPainter oversizedPainter(&oversized);
+    clip_canvas_renderer::renderWatermark(oversizedPainter, info);
+    oversizedPainter.end();
+    const clip_canvas_renderer::WatermarkRenderDiagnostics segmentedDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(clip_canvas_renderer::watermarkDirectFallbackCountForCurrentThread() ==
+                    fallbacksBefore &&
+                segmentedDiagnostics.selectedStrategy ==
+                    clip_canvas_renderer::WatermarkRenderStrategy::SegmentedSparse &&
+                segmentedDiagnostics.segmentedChunkCount > 0,
+            "a wide unit should render as bounded overlapping chunks without glyph fallback");
+
+    info.watermark_text.fill(0);
+    info.watermark_text[0] = 'W';
+    info.watermark_text_len = 1;
+    info.watermark_font_size = 2000;
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage fallback(320, 180, QImage::Format_ARGB32_Premultiplied);
+    fallback.fill(Qt::transparent);
+    QPainter fallbackPainter(&fallback);
+    clip_canvas_renderer::renderWatermark(fallbackPainter, info);
+    fallbackPainter.end();
+    const auto fallbackDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(clip_canvas_renderer::watermarkDirectFallbackCountForCurrentThread() ==
+                    fallbacksBefore + 1 &&
+                fallbackDiagnostics.selectedStrategy ==
+                    clip_canvas_renderer::WatermarkRenderStrategy::GlyphFallback &&
+                fallbackDiagnostics.fallbackGlyphDrawCount > 0,
+            "a glyph exceeding the chunk dimension should use clipped glyph-run fallback");
+    info.watermark_opacity = 0.003;
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    QImage hidden(320, 180, QImage::Format_ARGB32_Premultiplied);
+    hidden.fill(Qt::transparent);
+    QPainter hiddenPainter(&hidden);
+    clip_canvas_renderer::renderWatermark(hiddenPainter, info);
+    hiddenPainter.end();
+    require(!hasVisiblePixel(hidden),
+            "effective alpha below the visibility threshold should render nothing");
+    const clip_canvas_renderer::WatermarkRenderDiagnostics hiddenDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(hiddenDiagnostics.renderCallCount == 1 && hiddenDiagnostics.earlyExitCount == 1 &&
+                hiddenDiagnostics.selectedStrategy ==
+                    clip_canvas_renderer::WatermarkRenderStrategy::None,
+            "hidden watermarks should report a cheap early exit");
+
+    clip_canvas_renderer::resetWatermarkRenderCacheForCurrentThread();
+    clip_canvas_renderer::resetWatermarkRenderDiagnosticsForCurrentThread();
+    for (int index = 0; index < 24; ++index) {
+        WatermarkDisplayInfo cacheEntryInfo = info;
+        const QByteArray cacheText = QStringLiteral("CACHE %1").arg(index).toUtf8();
+        std::copy(cacheText.begin(), cacheText.end(), cacheEntryInfo.watermark_text.begin());
+        cacheEntryInfo.watermark_text_len = static_cast<std::uint16_t>(cacheText.size());
+        cacheEntryInfo.watermark_font_size = 18;
+        cacheEntryInfo.watermark_opacity = 0.5;
+        QImage cacheImage(96, 64, QImage::Format_ARGB32_Premultiplied);
+        cacheImage.fill(Qt::transparent);
+        QPainter cachePainter(&cacheImage);
+        clip_canvas_renderer::renderWatermark(cachePainter, cacheEntryInfo);
+        cachePainter.end();
+    }
+    const clip_canvas_renderer::WatermarkRenderDiagnostics evictionDiagnostics =
+        clip_canvas_renderer::watermarkRenderDiagnosticsForCurrentThread();
+    require(evictionDiagnostics.cacheEvictionCount > 0 &&
+                clip_canvas_renderer::watermarkPatternCacheEntryCountForCurrentThread() <= 8 &&
+                clip_canvas_renderer::watermarkPatternCacheBytesForCurrentThread() <=
+                    16u * 1024u * 1024u,
+            "watermark pattern cache should evict within its entry and byte bounds");
+}
+
+void watermarkPreviewCoalescesAndCommitCancelsQueuedPreview() {
+    ClipCanvasWidget canvas;
+    int appliedCount = 0;
+    QObject::connect(&canvas, &ClipCanvasWidget::watermarkPreviewApplied,
+                     [&appliedCount]() { ++appliedCount; });
+
+    ClipCanvasWatermarkConfig first;
+    first.text = QStringLiteral("FIRST");
+    ClipCanvasWatermarkConfig latest = first;
+    latest.text = QStringLiteral("LATEST");
+    latest.angle = 72.0;
+    canvas.previewCanvasWatermarkConfig(first);
+    require(appliedCount == 1, "the first watermark preview should apply synchronously");
+    canvas.previewCanvasWatermarkConfig(latest);
+    canvas.previewCanvasWatermarkConfig(latest);
+    require(appliedCount == 1,
+            "later preview writes should coalesce until the refresh-paced callback");
+    QElapsedTimer previewWait;
+    previewWait.start();
+    while (appliedCount < 2 && previewWait.elapsed() < 100) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        QThread::msleep(1);
+    }
+    require(appliedCount == 2,
+            "the refresh-paced callback should deliver the latest pending preview once");
+
+    ClipCanvasWatermarkConfig stale = latest;
+    stale.text = QStringLiteral("STALE");
+    ClipCanvasWatermarkConfig committed = latest;
+    committed.text = QStringLiteral(" COMMITTED ");
+    canvas.previewCanvasWatermarkConfig(stale);
+    require(canvas.setCanvasWatermarkConfig(committed),
+            "watermark commit should succeed while a preview is queued");
+    QCoreApplication::processEvents();
+    require(appliedCount == 2,
+            "a persistent watermark commit should cancel its queued transient preview");
+    require(canvas.canvasWatermarkConfig().text == QStringLiteral("COMMITTED"),
+            "the committed normalized watermark should remain authoritative");
+
+    {
+        auto destroyedWithPendingPreview = std::make_unique<ClipCanvasWidget>();
+        destroyedWithPendingPreview->previewCanvasWatermarkConfig(first);
+        destroyedWithPendingPreview->previewCanvasWatermarkConfig(latest);
+        destroyedWithPendingPreview.reset();
+        QElapsedTimer destructionWait;
+        destructionWait.start();
+        while (destructionWait.elapsed() < 25) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+            QThread::msleep(1);
+        }
+    }
+}
+
+void watermarkWorkerRenderingMatchesGuiWithColdCache() {
+    WatermarkDisplayInfo info{};
+    info.surface_width = 640;
+    info.surface_height = 360;
+    info.watermark_color = ClipColorRgba8{20, 80, 140, 255};
+    const QByteArray text("EXPORT");
+    std::copy(text.begin(), text.end(), info.watermark_text.begin());
+    info.watermark_text_len = static_cast<std::uint16_t>(text.size());
+    info.watermark_font_size = 72;
+    info.watermark_gap = 56;
+    info.watermark_angle = 24;
+    info.watermark_opacity = 0.5;
+
+    const auto render = [&](clip_canvas_renderer::WatermarkRenderPurpose purpose) {
+        QImage image(1280, 720, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.scale(2.0, 2.0);
+        clip_canvas_renderer::WatermarkPatternRenderer::render(
+            painter, {info, QRectF(0, 0, 640, 360), QRectF(0, 0, 640, 360),
+                      QRegion(QRect(0, 0, 640, 360)), painter.deviceTransform(), purpose});
+        painter.end();
+        return image;
+    };
+    clip_canvas_renderer::resetWatermarkRenderCacheForCurrentThread();
+    const QImage expected = render(clip_canvas_renderer::WatermarkRenderPurpose::Widget);
+    clip_canvas_renderer::resetWatermarkRenderCacheForCurrentThread();
+    QImage actual;
+    std::atomic<bool> completed{false};
+    std::thread worker([&]() {
+        actual = render(clip_canvas_renderer::WatermarkRenderPurpose::ImageExport);
+        completed.store(true, std::memory_order_release);
+    });
+    while (!completed.load(std::memory_order_acquire)) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        QThread::msleep(1);
+    }
+    worker.join();
+    require(actual == expected,
+            "cold-cache worker export must preserve the GUI watermark's size and appearance");
+}
+
+void watermarkPreviewMatchesExportAtDisplayScale() {
+    WatermarkDisplayInfo info{};
+    info.watermark_color = ClipColorRgba8{20, 80, 140, 255};
+    const QByteArray text("EXPORT");
+    std::copy(text.begin(), text.end(), info.watermark_text.begin());
+    info.watermark_text_len = static_cast<std::uint16_t>(text.size());
+    info.watermark_font_size = 72;
+    info.watermark_gap = 56;
+    info.watermark_angle = 24;
+    info.watermark_opacity = 0.5;
+    const auto render = [&](double displayScale,
+                            clip_canvas_renderer::WatermarkRenderPurpose purpose, bool offset) {
+        const QRect selection(offset ? QPoint(80, 60) : QPoint(), QSize(640, 360));
+        QImage image(offset ? QSize(800, 480) : selection.size(),
+                     QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        painter.scale(displayScale, displayScale);
+        info.camera_zoom = 1.0 / displayScale;
+        const QRectF surface(0, 0, image.width() / displayScale, image.height() / displayScale);
+        const QRectF bounds(QPointF(selection.topLeft()) / displayScale,
+                            QSizeF(selection.size()) / displayScale);
+        clip_canvas_renderer::WatermarkPatternRenderer::render(
+            painter, {info, surface, bounds, QRegion(bounds.toAlignedRect()),
+                      painter.deviceTransform(), purpose});
+        painter.end();
+        return image.copy(selection);
+    };
+    for (double fontSize : {12.0, 36.0, 72.0}) {
+        info.watermark_font_size = fontSize;
+        for (double gap : {10.0, 56.0, 200.0}) {
+            info.watermark_gap = gap;
+            for (double angle : {0.0, 24.0, -48.0}) {
+                info.watermark_angle = angle;
+                for (bool offset : {false, true}) {
+                    const QImage expected = render(
+                        1.0, clip_canvas_renderer::WatermarkRenderPurpose::ImageExport, offset);
+                    if (offset && angle == 0.0) {
+                        require(
+                            expected ==
+                                render(1.0,
+                                       clip_canvas_renderer::WatermarkRenderPurpose::ImageExport,
+                                       false),
+                            "moving the selection must preserve watermark anchoring and clipping");
+                    }
+                    for (double displayScale : {0.5, 1.0, 1.25, 1.5, 2.0}) {
+                        const QImage actual =
+                            render(displayScale,
+                                   clip_canvas_renderer::WatermarkRenderPurpose::Widget, offset);
+                        require(actual == expected, "preview and export must retain watermark size "
+                                                    "and spacing across DPI and zoom");
+                    }
+                }
+            }
+        }
+    }
+}
+
+void watermarkCacheSupportsConcurrentImagesAndGuiPixmapLifecycle() {
+    clip_canvas_renderer::resetWatermarkRenderCacheForCurrentThread();
+    WatermarkDisplayInfo info{};
+    info.surface_width = 320;
+    info.surface_height = 180;
+    info.watermark_color = ClipColorRgba8{20, 80, 140, 255};
+    const QByteArray text("CONCURRENT");
+    std::copy(text.begin(), text.end(), info.watermark_text.begin());
+    info.watermark_text_len = static_cast<std::uint16_t>(text.size());
+    info.watermark_font_size = 20;
+    info.watermark_gap = 32;
+    info.watermark_angle = 24;
+    info.watermark_opacity = 0.5;
+
+    std::atomic<bool> rendered{true};
+    std::atomic<int> completedWorkers{0};
+    std::vector<std::thread> workers;
+    workers.reserve(4);
+    for (int workerIndex = 0; workerIndex < 4; ++workerIndex) {
+        workers.emplace_back([info, workerIndex, &rendered, &completedWorkers]() mutable {
+            info.watermark_angle += workerIndex;
+            for (int iteration = 0; iteration < 12; ++iteration) {
+                QImage image(320, 180, QImage::Format_ARGB32_Premultiplied);
+                image.fill(Qt::transparent);
+                QPainter painter(&image);
+                clip_canvas_renderer::renderWatermark(painter, info);
+                painter.end();
+                bool visible = false;
+                for (int y = 0; y < image.height() && !visible; ++y) {
+                    for (int x = 0; x < image.width(); ++x) {
+                        if (qAlpha(image.pixel(x, y)) != 0) {
+                            visible = true;
+                            break;
+                        }
+                    }
+                }
+                if (!visible) {
+                    rendered.store(false, std::memory_order_relaxed);
+                }
+            }
+            completedWorkers.fetch_add(1, std::memory_order_release);
+        });
+    }
+    while (completedWorkers.load(std::memory_order_acquire) < 4) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        QThread::msleep(1);
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+    require(rendered.load(std::memory_order_relaxed) &&
+                clip_canvas_renderer::watermarkPatternCacheEntryCountForCurrentThread() <= 8 &&
+                clip_canvas_renderer::watermarkPatternCacheBytesForCurrentThread() <=
+                    16u * 1024u * 1024u,
+            "concurrent image rendering should share a bounded, complete process cache");
+
+    QImage widgetTarget(320, 180, QImage::Format_ARGB32_Premultiplied);
+    widgetTarget.fill(Qt::transparent);
+    QPainter widgetPainter(&widgetTarget);
+    clip_canvas_renderer::WatermarkPatternRenderer::render(
+        widgetPainter, clip_canvas_renderer::WatermarkRenderRequest{
+                           info,
+                           QRectF(0, 0, 320, 180),
+                           QRectF(0, 0, 320, 180),
+                           QRegion(QRect(0, 0, 320, 180)),
+                           widgetPainter.deviceTransform(),
+                           clip_canvas_renderer::WatermarkRenderPurpose::Widget,
+                       });
+    widgetPainter.end();
+    std::thread eviction(
+        []() { clip_canvas_renderer::resetWatermarkRenderCacheForCurrentThread(); });
+    eviction.join();
+    QCoreApplication::processEvents();
+    require(clip_canvas_renderer::watermarkPatternCacheEntryCountForCurrentThread() == 0,
+            "worker eviction should release GUI mirrors through the GUI event queue");
+}
+
+void watermarkIsIncludedInRuntimeExport() {
+    ClipCanvasRuntime runtime;
+    ClipCanvasWidget canvas(runtime);
+    ClipCanvasWatermarkConfig config;
+    config.text = QStringLiteral("EXPORT");
+    config.color = Qt::black;
+    config.fontSize = 18.0;
+    config.angle = 0.0;
+    config.gap = 10.0;
+    config.opacity = 1.0;
+    require(canvas.setCanvasWatermarkConfig(config),
+            "the export test should configure a visible watermark");
+
+    const QRectF selection(-60.0, -40.0, 120.0, 80.0);
+    QImage background(120, 80, QImage::Format_ARGB32_Premultiplied);
+    background.fill(Qt::white);
+    const QImage output = runtime.renderToImage(selection, background.size(),
+                                                {CanvasExportSource{background, selection}});
+    require(!output.isNull(), "a valid runtime export should produce an image");
+    require(output.format() == QImage::Format_ARGB32_Premultiplied,
+            "runtime export should return its premultiplied working surface directly");
+
+    bool hasWatermarkPixel = false;
+    for (int y = 0; y < output.height() && !hasWatermarkPixel; ++y) {
+        for (int x = 0; x < output.width(); ++x) {
+            if (output.pixelColor(x, y).lightness() < 240) {
+                hasWatermarkPixel = true;
+                break;
+            }
+        }
+    }
+    require(hasWatermarkPixel,
+            "runtime export should composite the configured watermark over its sources");
+
+    QByteArray encoded;
+    QBuffer buffer(&encoded);
+    require(buffer.open(QIODevice::WriteOnly) && output.save(&buffer, "PNG"),
+            "callers should be able to save the premultiplied export without conversion");
+    const QImage decoded = QImage::fromData(encoded, "PNG");
+    require(!decoded.isNull() && decoded.size() == output.size(),
+            "a saved premultiplied export should decode with its dimensions intact");
+
+    QImage pinned = output;
+    const QColor originalCorner = output.pixelColor(0, 0);
+    {
+        QPainter stylePainter(&pinned);
+        stylePainter.fillRect(QRect(0, 0, 4, 4), Qt::red);
+    }
+    require(output.pixelColor(0, 0) == originalCorner && pinned.pixelColor(0, 0) != originalCorner,
+            "styling a pinned export copy should detach without mutating the returned image");
+    QImage repainted(output.size(), QImage::Format_ARGB32_Premultiplied);
+    repainted.fill(Qt::transparent);
+    {
+        QPainter repaintPainter(&repainted);
+        repaintPainter.drawImage(QPoint(0, 0), output);
+    }
+    require(!repainted.isNull() && repainted.pixelColor(0, 0).alpha() > 0,
+            "the returned premultiplied export should repaint through a normal Qt painter");
+}
+
+void freeDrawMoveBurstsAreFrameBounded() {
+    ClipCanvasWidget canvas;
+    canvas.resize(320, 240);
+    require(canvas.setCanvasTool(ClipCanvasTool::FreeDraw),
+            "free-draw batching test should activate the tool");
+    quint32 observedInputCount = 0;
+    quint32 observedDispatchCount = 0;
+    int batchCount = 0;
+    QObject::connect(&canvas, &ClipCanvasWidget::freeDrawMoveBatchProcessed,
+                     [&observedInputCount, &observedDispatchCount,
+                      &batchCount](quint32 inputCount, quint32 dispatchedCount) {
+                         observedInputCount = inputCount;
+                         observedDispatchCount = dispatchedCount;
+                         ++batchCount;
+                     });
+
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, QPointF(20.0, 120.0), Qt::LeftButton,
+                         Qt::LeftButton);
+    for (int index = 0; index < 240; ++index) {
+        sendCanvasMouseEvent(canvas, QEvent::MouseMove, QPointF(20.0 + index, 120.0 + (index % 7)),
+                             Qt::NoButton, Qt::LeftButton,
+                             (index >= 80 && index < 160) ? Qt::ShiftModifier : Qt::NoModifier);
+    }
+    require(batchCount == 0,
+            "free-draw move bursts should remain queued until the event-loop frame boundary");
+    QElapsedTimer batchWait;
+    batchWait.start();
+    while (batchCount == 0 && batchWait.elapsed() < 100) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        QThread::msleep(1);
+    }
+    require(batchCount == 1 && observedInputCount == 240 && observedDispatchCount == 96,
+            "one free-draw frame should uniformly reduce a burst to the 96-sample cap");
+
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, QPointF(280.0, 120.0), Qt::LeftButton,
+                         Qt::NoButton);
+}
+
+void eraserMoveBurstsUseTheLatestSamplePerFrame() {
+    ClipCanvasWidget canvas;
+    canvas.resize(320, 240);
+    require(canvas.setCanvasTool(ClipCanvasTool::Eraser),
+            "eraser frame test should activate the tool");
+    int processedFrames = 0;
+    QObject::connect(&canvas, &ClipCanvasWidget::eraserMoveFrameProcessed,
+                     [&processedFrames]() { ++processedFrames; });
+
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonPress, QPointF(20.0, 120.0), Qt::LeftButton,
+                         Qt::LeftButton);
+    for (int index = 0; index < 120; ++index) {
+        sendCanvasMouseEvent(canvas, QEvent::MouseMove, QPointF(20.0 + index, 120.0), Qt::NoButton,
+                             Qt::LeftButton);
+    }
+    require(processedFrames == 0,
+            "eraser move bursts should wait for the frame-aligned dispatcher");
+    QCoreApplication::processEvents();
+    require(processedFrames == 1,
+            "one event-loop frame should process only the latest queued eraser move");
+    sendCanvasMouseEvent(canvas, QEvent::MouseButtonRelease, QPointF(160.0, 120.0), Qt::LeftButton,
+                         Qt::NoButton);
+}
+
+// Keep this reference independent of the retained renderer.
+void drawUncachedTextPhase(QPainter& painter, const ClipSceneDisplayItem& item,
+                           const QFont& baseFont, const QRectF& localRect, double zoom, int phase) {
+    const QString text = clip_canvas_text::textFromSceneItem(item);
+    auto layout =
+        clip_canvas_text_layout::createDocumentLayout(item, baseFont, zoom, text, phase == 0);
+    auto& document = layout.textDocument();
+    std::optional<QTextCursor> cursor;
+    if (phase != 0) {
+        cursor.emplace(&document);
+        cursor->select(QTextCursor::Document);
+        QTextCharFormat format;
+        if (phase == 1) {
+            format.setForeground(QBrush(QColor(item.text_color.r, item.text_color.g,
+                                               item.text_color.b, item.text_color.a)));
+        } else {
+            QPen outline(QColor(item.stroke.r, item.stroke.g, item.stroke.b, item.stroke.a),
+                         item.stroke_width * zoom / layout.resolution.scale, Qt::SolidLine,
+                         Qt::RoundCap, Qt::RoundJoin);
+            outline.setMiterLimit(2.0);
+            format.setTextOutline(outline);
+            format.setForeground(QBrush(Qt::transparent));
+        }
+        cursor->mergeCharFormat(format);
+    }
+    painter.save();
+    painter.translate(localRect.left(), localRect.top() + layout.topOffset);
+    painter.scale(layout.resolution.scale, layout.resolution.scale);
+    if (phase == 0) {
+        const auto outset = clip_scene_text_fill_outset(&item);
+        const double scale = layout.safeZoom / layout.resolution.scale;
+        const double radius =
+            qMax(qMax(item.corner_radii.top_left, item.corner_radii.top_right),
+                 qMax(item.corner_radii.bottom_left, item.corner_radii.bottom_right)) *
+            scale;
+        painter.setPen(Qt::NoPen);
+        for (auto block = document.begin(); block.isValid(); block = block.next()) {
+            const auto* lines = block.layout();
+            if (lines == nullptr) {
+                continue;
+            }
+            const auto blockRect = document.documentLayout()->blockBoundingRect(block);
+            for (int index = 0; index < lines->lineCount(); ++index) {
+                const auto line = lines->lineAt(index);
+                if (!line.isValid()) {
+                    continue;
+                }
+                auto rect = line.naturalTextRect().translated(blockRect.topLeft());
+                rect.setWidth(qMax(1.0, rect.width()));
+                rect.setHeight(qMax(1.0, rect.height()));
+                rect.adjust(-outset.x * scale, -outset.y * scale, outset.x * scale,
+                            outset.y * scale);
+                QPainterPath path;
+                const double clamped = qMin(radius, qMin(rect.width(), rect.height()) / 2.0);
+                if (clamped > 0.0) {
+                    path.addRoundedRect(rect, clamped, clamped);
+                } else {
+                    path.addRect(rect);
+                }
+                clip_canvas_fill_render::drawTextBackgroundFill(
+                    painter, path, item.fill, item.fill_style, item.font_size, scale);
+            }
+        }
+    } else {
+        QAbstractTextDocumentLayout::PaintContext context;
+        context.clip = clip_canvas_text_layout::documentContentsRect(layout);
+        painter.save();
+        painter.setClipRect(context.clip, Qt::IntersectClip);
+        document.documentLayout()->draw(&painter, context);
+        painter.restore();
+    }
+    painter.restore();
+}
+
+QImage renderTextCacheSample(const ClipSceneDisplayItem& item, const QFont& font, double zoom,
+                             bool cached, bool strips, qreal dpr = 1.0,
+                             const QPointF& position = QPointF(350.0, 220.0)) {
+    QImage image(QSize(qRound(960 * dpr), qRound(720 * dpr)), QImage::Format_ARGB32_Premultiplied);
+    image.setDevicePixelRatio(dpr);
+    image.fill(QColor(63, 73, 83));
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setFont(font);
+    if (strips) {
+        painter.setClipRegion(QRegion(QRect(0, 210, 960, 7)) | QRect(345, 0, 5, 720));
+    }
+    painter.translate(position);
+    painter.rotate(item.rotation * 180.0 / 3.14159265358979323846);
+    painter.setOpacity(item.opacity);
+    const QRectF local(-item.width * zoom / 2.0, -item.height * zoom / 2.0, item.width * zoom,
+                       item.height * zoom);
+    for (const int phase : {0, 2, 1}) {
+        if (!cached) {
+            drawUncachedTextPhase(painter, item, font, local, zoom, phase);
+        } else if (phase == 0) {
+            clip_canvas_text_render::drawBackground(painter, item, font, local, zoom);
+        } else if (phase == 1) {
+            clip_canvas_text_render::drawContents(painter, item, font, local, zoom);
+        } else {
+            clip_canvas_text_render::drawStroke(painter, item, font, local, zoom);
+        }
+    }
+    painter.end();
+    return image;
+}
+
+ClipCanvasSceneItem textCacheSampleItem() {
+    ClipCanvasSceneItem item;
+    item.kind = CLIP_SCENE_DISPLAY_ITEM_TEXT;
+    item.width = 260.0;
+    item.height = 180.0;
+    item.font_size = 24.0;
+    item.opacity = 0.75;
+    item.fill = ClipColorRgba8{150, 210, 255, 180};
+    item.stroke = ClipColorRgba8{200, 40, 30, 200};
+    item.text_color = ClipColorRgba8{30, 100, 190, 220};
+    item.stroke_width = 2.25;
+    item.corner_radii = ClipCornerRadii{5.0, 5.0, 5.0, 5.0};
+    item.text_horizontal_align = CLIP_TEXT_HORIZONTAL_ALIGN_CENTER;
+    item.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_CENTER;
+    clip_canvas_text::copyTextToSceneItem(
+        item, QStringLiteral("Alpha beta wraps across several lines.\nSecond paragraph."));
+    return item;
+}
+
+void preparedTextLayoutsMatchUncachedPixelsAndTrackPaintInputs() {
+    using namespace clip_canvas_text_render;
+    clearRenderCacheForCurrentThread();
+    const auto base = textCacheSampleItem();
+    const QFont baseFont = QApplication::font();
+    const auto verify = [&](const ClipCanvasSceneItem& item, const QFont& font, double zoom,
+                            qreal dpr = 1.0) {
+        for (const bool strips : {false, true}) {
+            const auto beforeReference = renderCacheDiagnosticsForCurrentThread();
+            // Qt's first glyph rasterization can differ by a color level from subsequent draws.
+            // Warm it through the original implementation, independently of our retained cache.
+            static_cast<void>(renderTextCacheSample(item, font, zoom, false, strips, dpr));
+            const auto secondReference =
+                renderTextCacheSample(item, font, zoom, false, strips, dpr);
+            const auto reference = renderTextCacheSample(item, font, zoom, false, strips, dpr);
+            const auto afterReference = renderCacheDiagnosticsForCurrentThread();
+            require(
+                secondReference == reference,
+                "independent original text rendering must become pixel stable before comparison");
+            require(beforeReference.hits == afterReference.hits &&
+                        beforeReference.builds == afterReference.builds &&
+                        beforeReference.entries == afterReference.entries,
+                    "independent original renders must not access the prepared text cache");
+            const auto cold = renderTextCacheSample(item, font, zoom, true, strips, dpr);
+            const auto beforeWarm = renderCacheDiagnosticsForCurrentThread();
+            const auto warm = renderTextCacheSample(item, font, zoom, true, strips, dpr);
+            const auto afterWarm = renderCacheDiagnosticsForCurrentThread();
+            if (cold != reference || warm != reference) {
+                std::cerr << "text cache mismatch: width=" << item.width
+                          << ", height=" << item.height << ", fontSize=" << item.font_size
+                          << ", strokeWidth=" << item.stroke_width << ", zoom=" << zoom
+                          << ", dpr=" << dpr << ", strips=" << strips
+                          << ", rotation=" << item.rotation
+                          << ", text=" << clip_canvas_text::textFromSceneItem(item).toStdString()
+                          << ", cold=" << (cold == reference) << ", warm=" << (warm == reference)
+                          << ", coldWarm=" << (cold == warm) << '\n';
+            }
+            require(cold == reference && warm == reference,
+                    "cold and retained text layouts must match original uncached pixels exactly");
+            require(afterWarm.builds == beforeWarm.builds && afterWarm.hits == beforeWarm.hits + 3,
+                    "guide-only repaints must reuse every prepared text phase");
+        }
+    };
+    verify(base, baseFont, 1.0);
+    auto changed = base;
+    clip_canvas_text::copyTextToSceneItem(changed, QStringLiteral("Changed text\nA new paragraph"));
+    verify(changed, baseFont, 1.0);
+    changed = base;
+    changed.width = 170.0;
+    changed.height = 240.0;
+    verify(changed, baseFont, 1.0);
+    for (const auto alignment :
+         {CLIP_TEXT_HORIZONTAL_ALIGN_LEFT, CLIP_TEXT_HORIZONTAL_ALIGN_RIGHT}) {
+        changed = base;
+        changed.text_horizontal_align = alignment;
+        changed.text_vertical_align = CLIP_TEXT_VERTICAL_ALIGN_BOTTOM;
+        verify(changed, baseFont, 1.0);
+    }
+    changed = base;
+    changed.font_size = 31.5;
+    verify(changed, baseFont, 1.0);
+    QFont bold = baseFont;
+    bold.setBold(true);
+    bold.setItalic(true);
+    verify(base, bold, 1.0);
+    changed = base;
+    changed.setFontFamilyUtf8(QByteArray("monospace"));
+    verify(changed, baseFont, 1.0);
+    changed = base;
+    changed.stroke = ClipColorRgba8{10, 230, 50, 220};
+    changed.stroke_width = 5.0;
+    changed.text_color = ClipColorRgba8{240, 180, 30, 160};
+    verify(changed, baseFont, 1.0);
+    changed.stroke_width = 48.0;
+    verify(changed, bold, 1.0);
+    changed = base;
+    changed.fill_style = CLIP_FILL_STYLE_CROSS_LINE;
+    changed.fill = ClipColorRgba8{50, 200, 80, 160};
+    changed.corner_radii = ClipCornerRadii{12.0, 12.0, 12.0, 12.0};
+    verify(changed, baseFont, 1.0);
+    changed = base;
+    changed.rotation = 0.31;
+    changed.opacity = 0.45;
+    verify(changed, baseFont, 0.75);
+    verify(changed, baseFont, 2.0, 2.0);
+    const auto beforeTranslate = renderCacheDiagnosticsForCurrentThread();
+    const auto moved = renderTextCacheSample(changed, baseFont, 2.0, true, true, 2.0, {430, 260});
+    require(moved == renderTextCacheSample(changed, baseFont, 2.0, false, true, 2.0, {430, 260}),
+            "translated text must preserve original clipped rendering");
+    const auto afterTranslate = renderCacheDiagnosticsForCurrentThread();
+    require(afterTranslate.builds == beforeTranslate.builds &&
+                afterTranslate.hits == beforeTranslate.hits + 3,
+            "translation must reuse layouts without creating new cache entries");
+}
+
+void preparedTextLayoutsAreBoundedAndReleasedWithRenderingState() {
+    using namespace clip_canvas_text_render;
+    clearRenderCacheForCurrentThread();
+    QImage image(1, 1, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    auto item = textCacheSampleItem();
+    const QFont font = QApplication::font();
+    const QRectF local(0, 0, item.width, item.height);
+    for (std::size_t index = 0; index < kRenderCacheEntryLimit + 20; ++index) {
+        clip_canvas_text::copyTextToSceneItem(item, QStringLiteral("entry %1").arg(index));
+        drawContents(painter, item, font, local, 1.0);
+    }
+    auto diagnostics = renderCacheDiagnosticsForCurrentThread();
+    require(diagnostics.entries == kRenderCacheEntryLimit && diagnostics.evictions > 0 &&
+                diagnostics.retainedCharacters <= kRenderCacheCharacterLimit &&
+                diagnostics.estimatedBytes <= kRenderCacheByteLimit,
+            "prepared text cache must enforce its entry bound");
+    item.width = 10000000.0;
+    for (int index = 0; index < 40; ++index) {
+        clip_canvas_text::copyTextToSceneItem(item, QString(8192, QLatin1Char('x')) +
+                                                        QString::number(index));
+        drawContents(painter, item, font, local, 1.0);
+    }
+    diagnostics = renderCacheDiagnosticsForCurrentThread();
+    require(diagnostics.entries < kRenderCacheEntryLimit &&
+                diagnostics.retainedCharacters <= kRenderCacheCharacterLimit &&
+                diagnostics.estimatedBytes <= kRenderCacheByteLimit,
+            "prepared text cache must enforce its character and estimated memory bounds");
+    const auto beforeByteOversized = diagnostics;
+    clip_canvas_text::copyTextToSceneItem(
+        item, QString(static_cast<qsizetype>(kRenderCacheByteLimit / 64u + 1), QLatin1Char('x')));
+    drawContents(painter, item, font, local, 1.0);
+    diagnostics = renderCacheDiagnosticsForCurrentThread();
+    require(diagnostics.entries == beforeByteOversized.entries &&
+                diagnostics.retainedCharacters == beforeByteOversized.retainedCharacters &&
+                diagnostics.estimatedBytes == beforeByteOversized.estimatedBytes &&
+                diagnostics.builds == beforeByteOversized.builds + 1,
+            "text exceeding the memory budget must render without entering the retained cache");
+    const auto beforeOversized = diagnostics;
+    clip_canvas_text::copyTextToSceneItem(
+        item, QString(static_cast<qsizetype>(kRenderCacheCharacterLimit + 1), QLatin1Char('x')));
+    drawContents(painter, item, font, local, 1.0);
+    diagnostics = renderCacheDiagnosticsForCurrentThread();
+    require(diagnostics.entries == beforeOversized.entries &&
+                diagnostics.retainedCharacters == beforeOversized.retainedCharacters &&
+                diagnostics.builds == beforeOversized.builds + 1,
+            "oversized text must render without entering the retained cache");
+    painter.end();
+    ClipCanvasRuntime runtime;
+    runtime.clearRenderState();
+    diagnostics = renderCacheDiagnosticsForCurrentThread();
+    require(diagnostics.entries == 0 && diagnostics.retainedCharacters == 0 &&
+                diagnostics.estimatedBytes == 0,
+            "clearing runtime rendering state must release prepared text layouts");
+}
+
+void preparedTextLayoutsStayOnTheirThreadAndFollowFontDatabaseChanges() {
+    using namespace clip_canvas_text_render;
+    clearRenderCacheForCurrentThread();
+    const auto item = textCacheSampleItem();
+    const QFont font = QApplication::font();
+    const auto expected = renderTextCacheSample(item, font, 1.0, true, false);
+    require(renderCacheDiagnosticsForCurrentThread().entries == 3,
+            "GUI text cache must contain its three prepared phases");
+    std::promise<void> workerReady;
+    auto ready = workerReady.get_future();
+    std::promise<void> fontsChanged;
+    auto changed = fontsChanged.get_future();
+    std::atomic<bool> workerPassed = false;
+    std::thread worker([&] {
+        clearRenderCacheForCurrentThread();
+        const auto cold = renderTextCacheSample(item, font, 1.0, true, false);
+        const auto first = renderCacheDiagnosticsForCurrentThread();
+        workerReady.set_value();
+        changed.wait();
+        const auto rebuilt = renderTextCacheSample(item, font, 1.0, true, false);
+        const auto after = renderCacheDiagnosticsForCurrentThread();
+        workerPassed = cold == expected && rebuilt == expected && first.builds == 3 &&
+                       first.hits == 0 && after.builds == 3 && after.hits == 0;
+        clearRenderCacheForCurrentThread();
+    });
+    ready.wait();
+    require(renderCacheDiagnosticsForCurrentThread().entries == 3,
+            "worker rendering must not reuse or mutate GUI-owned QTextDocuments");
+    require(QMetaObject::invokeMethod(qGuiApp, "fontDatabaseChanged", Qt::DirectConnection),
+            "font database invalidation signal must be invokable");
+    require(renderCacheDiagnosticsForCurrentThread().entries == 0,
+            "font database changes must invalidate GUI layouts");
+    fontsChanged.set_value();
+    worker.join();
+    require(workerPassed, "font database changes must invalidate worker layouts on their thread");
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    QApplication app(argc, argv);
+#if defined(Q_OS_WIN)
+    require(QFontDatabase::addApplicationFont(QStringLiteral("C:/Windows/Fonts/segoeui.ttf")) >= 0,
+            "the watermark renderer test requires a system TrueType font");
+#endif
+
+    if (app.arguments().contains(QStringLiteral("--serial-number-only"))) {
+        serialNumberFormattedLabelsRenderAndFitBadges();
+        serialNumberBackgroundUsesTextHatchTexture();
+        circleRendersFillAndStrokeWithoutNumber();
+        serialNumberTypesRenderExpectedSilhouettesAndSolidSemantics();
+        solidSerialNumberChoosesFixedContrastLabelColors();
+        textEditorConnectorBuildsSerialBoundConnector();
+        return 0;
+    }
+    if (app.arguments().contains(QStringLiteral("--text-render-cache-only"))) {
+        preparedTextLayoutsMatchUncachedPixelsAndTrackPaintInputs();
+        preparedTextLayoutsAreBoundedAndReleasedWithRenderingState();
+        preparedTextLayoutsStayOnTheirThreadAndFollowFontDatabaseChanges();
+        textBackgroundUsesRectangleHatchTexture();
+        textHoverUnderlineRendererDrawsOnlyTheUnderline();
+        textDecorationsFollowAlignedLines();
+        multilineTextHoverRendererDrawsEveryLineUnderline();
+        paintBoundsFollowAlignedWrappedInk();
+        resizedAlignedTextKeepsCaretClickAndSelectionGeometryConsistent();
+        return 0;
+    }
+    preparedTextLayoutsMatchUncachedPixelsAndTrackPaintInputs();
+    preparedTextLayoutsAreBoundedAndReleasedWithRenderingState();
+    preparedTextLayoutsStayOnTheirThreadAndFollowFontDatabaseChanges();
+    serialNumberFormattedLabelsRenderAndFitBadges();
+    replacementNormalizesLineBreaksAndSupportsUndoRedo();
+    cursorPositionReportsOnlyRealStateChanges();
+    inputMethodPreeditDoesNotCommitUntilCommitString();
+    inputMethodCommitReplacementUsesCursorRelativeRange();
+    keyCommandsInsertTextAndReportEditorCommands();
+    deleteRequestsElementRemovalWhileBackspaceEditsCharacters();
+    keyCommandsDelegateCursorMovement();
+    keyCommandsReportNoChangeForNoopEdits();
+    finishedEditCommitPolicyRequiresViewportAndContent();
+    textLayoutMapsDocumentRectsToLocalItemRects();
+    resizedAlignedTextKeepsCaretClickAndSelectionGeometryConsistent();
+    textFontSizeFallbackIsSharedAcrossCreationAndMeasurement();
+    serialNumberBoundTextMeasurementUsesCreatedTextStyle();
+    bahnschriftCondensedMeasurementUsesDocumentHeight();
+    bahnschriftCondensedSerialNumberUsesResolvedGlyphBounds();
+    textElementInfoDecodingBuildsOwnedPreview();
+    textSceneItemCopyPreservesCompleteUtf8();
+    textStyleConversionsTruncateFontFamilyAtUtf8Boundaries();
+    textStyleStateEqualityBoundsFontFamilyLengths();
+    demoSerialNumberControlsRespectSelectedMixedDecreaseState();
+    demoSerialNumberControlsClampDefaultDecrease();
+    textMeasurementBuildsAutoResizeLayoutOverridesFromSnapshots();
+    textEditTargetResolvesCreateHitAndSelectedText();
+    textEditGeometryAnchorsRespectHorizontalAlignment();
+    textEditorViewMapsCanvasHitTestingAndEditingRegion();
+    textEditorCaretBlinksResetsAndHonorsSystemFlashTime();
+    selectionHitTestingUsesMinimumHandleHitSize();
+    selectionHitTestingTreatsTextFramePaddingAsMoveRing();
+    selectionHitTestingDistinguishesMoveFromHandles();
+    textEditorActivationPreservesSelectToolSelectionBox();
+    blankCanvasPressDeselectsBeforeBeginningNewText();
+    selectToolDragRendersSelectionMarquee();
+    textToolInitialSelectionFrameRendersAndResizesThroughWidgetEvents();
+    textFontWheelPreservesMixedSelectionStyles();
+    textEditorDoesNotSynthesizeSelectionControlsWithoutEngineOverlay();
+    overlayRectangleRendererHonorsFillStyle();
+    sceneRectangleRendererBuildsFillPathForEveryCornerStyle();
+    closedLineRendererHonorsFillStyleAndExactClosure();
+    longOpenPathsRenderAllCommands();
+    textBackgroundUsesRectangleHatchTexture();
+    serialNumberBackgroundUsesTextHatchTexture();
+    circleRendersFillAndStrokeWithoutNumber();
+    serialNumberTypesRenderExpectedSilhouettesAndSolidSemantics();
+    solidSerialNumberChoosesFixedContrastLabelColors();
+    textHoverUnderlineRendererDrawsOnlyTheUnderline();
+    textDecorationsFollowAlignedLines();
+    multilineTextHoverRendererDrawsEveryLineUnderline();
+    hatchTextureCacheReusesSaturatedStrokeWidths();
+    textEditorConnectorBuildsSerialBoundConnector();
+    textEditorConnectorAnchorsAtInkEdgeRegardlessOfFill();
+    textEditorConnectorUnderlinesWrappedInkNotWrapRectangle();
+    paintBoundsFollowAlignedWrappedInk();
+    connectorAnchorIgnoresPillEdge();
+    wrappedConnectorAnchorIgnoresPillEdge();
+    textEditorStylePopupInteractionPreservesDraftUntilItCloses();
+    cancelingAnActiveTextDraftDoesNotCommitIt();
+    inputMethodEnablementTracksInlineTextEditing();
+    widgetPointerFlowPlansSuppressedTextCreate();
+    widgetPointerFlowDispatchesShiftClickInTextToolToEngine();
+    widgetPointerFlowDispatchesTextToolSelectionPressWithoutCommit();
+    widgetPointerFlowDispatchesSelectToolSelectionPressWithoutCommit();
+    widgetPointerFlowDispatchesAnyToolSelectionPressWithoutCommit();
+    widgetPointerFlowDetectsSelectedTextCopyGesture();
+    widgetPointerFlowGivesSelectedTextCopyExclusiveOwnership();
+    widgetPointerFlowResolvesCopyFromHitTargetAndModifiers();
+    widgetPointerFlowLetsEditorOwnPressInsideDraft();
+    textEditorWheelPlansFontSizeStepping();
+    compactSceneItemsOwnBorrowedPatchData();
+    adaptiveRepaintKeepsSparseRegionsSeparate();
+    filterRendererClipsEffectAndPreservesContentAboveIt();
+    filterRendererAppliesToBackgroundContent();
+    watermarkRendererIsViewportAnchoredAndSkipsLowAlpha();
+    watermarkWorkerRenderingMatchesGuiWithColdCache();
+    watermarkPreviewMatchesExportAtDisplayScale();
+    watermarkCacheSupportsConcurrentImagesAndGuiPixmapLifecycle();
+    adjacentSameTypeFiltersShareTheirPreGroupScene();
+    watermarkPreviewCoalescesAndCommitCancelsQueuedPreview();
+    watermarkIsIncludedInRuntimeExport();
+    freeDrawMoveBurstsAreFrameBounded();
+    eraserMoveBurstsUseTheLatestSamplePerFrame();
+    return 0;
+}

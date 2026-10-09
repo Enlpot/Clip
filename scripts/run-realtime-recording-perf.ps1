@@ -34,8 +34,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 if ($AlignCapture -and $FreeRunningCapture) { throw 'Choose one capture pacing override.' }
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-Set-SnowBuildEnvironment -Preset windows-msvc-performance | Out-Null
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
+Set-ClipBuildEnvironment -Preset windows-msvc-performance | Out-Null
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $env:FFMPEG_DIR = Join-Path $repoRoot ".tools/vcpkg/installed/dynamic/x64-windows"
 $env:VCPKGRS_TRIPLET = "x64-windows"
@@ -79,17 +79,17 @@ if ($PreferHardware) {
     $benchmarkArguments += "--prefer-hardware"
 }
 
-$env:SNOW_BENCH_REVISION = (& git -C $repoRoot rev-parse HEAD).Trim()
+$env:CLIP_BENCH_REVISION = (& git -C $repoRoot rev-parse HEAD).Trim()
 # Synthetic overlay input is always required: the benchmark never injects OS
 # mouse or keyboard events, so the example target only builds with this feature.
 $features = @($Metrics -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $features += 'bench-synthetic-input'
 $features = @($features | Select-Object -Unique)
 $featureArguments = @("--features", ($features -join ','))
-Push-Location (Join-Path $repoRoot "snow-crates")
+Push-Location (Join-Path $repoRoot "clip-crates")
 try {
     if ([string]::IsNullOrWhiteSpace($Executable)) {
-        & cargo build -p snow-recording-runtime --release --target x86_64-pc-windows-msvc `
+        & cargo build -p clip-recording-runtime --release --target x86_64-pc-windows-msvc `
             --target-dir (Join-Path $repoRoot "build/windows-msvc-performance/cargo") `
             @featureArguments --example realtime_recording_benchmark
         if ($LASTEXITCODE -ne 0) { throw "Realtime recording benchmark build failed." }

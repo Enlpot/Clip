@@ -187,7 +187,7 @@ buffer history, cancellation and failed-worker acknowledgments. For the
 worker's fixed common text/edge/motion fixture and identical admitted PTS,
 inline and threaded H.264 packets are identical.
 
-The performance Release C FFI bundle and relevant Snow Shot targets were
+The performance Release C FFI bundle and relevant Clip targets were
 rebuilt for v19 (`qt-build-v19.log`). Exactly the requested controller,
 effects-preview and recording-workflow CTests passed (`ctest-recording-v19.log`).
 Final scoped instrumented/no-timing all-targets and production-library Clippy
@@ -289,6 +289,6 @@ The initial attempt overlapped a compiler build; a later candidate warmup
 failed with disk-full error 112. Both invalid attempts are retained, and the
 complete valid pairs were preserved before resuming. Completed hardware resize
 and sparse-partial artifacts were moved with per-file SHA-256 verification to
-`C:/Users/Magic/.codex/recording-benchmark-storage/snow-apps-594c7191/`.
+`C:/Users/Magic/.codex/recording-benchmark-storage/clip-apps-594c7191/`.
 Directory junctions preserve their original ignored build paths; transfer
 manifests remain alongside the benchmark results.

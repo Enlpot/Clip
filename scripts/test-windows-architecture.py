@@ -38,8 +38,8 @@ set(CMAKE_SYSTEM_PROCESSOR AMD64)
 set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID {architecture})
 include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
 {extra}
-snow_detect_rust_target(target)
-message(STATUS "SELECTED=${{SNOW_WINDOWS_ARCHITECTURE}};${{SNOW_WINDOWS_PLATFORM}};${{target}}")
+clip_detect_rust_target(target)
+message(STATUS "SELECTED=${{CLIP_WINDOWS_ARCHITECTURE}};${{CLIP_WINDOWS_PLATFORM}};${{target}}")
 '''
 
     def test_compiler_selects_target_independently_of_host(self):
@@ -50,14 +50,14 @@ message(STATUS "SELECTED=${{SNOW_WINDOWS_ARCHITECTURE}};${{SNOW_WINDOWS_PLATFORM
 
     def test_architecture_alias_and_matching_triplet(self):
         self.run_cmake(self.fixture('ARM64', '''
-set(SNOW_WINDOWS_ARCHITECTURE aarch64)
+set(CLIP_WINDOWS_ARCHITECTURE aarch64)
 set(VCPKG_TARGET_TRIPLET arm64-windows-static)
 '''))
 
     def test_rejects_architecture_triplet_and_rust_mismatches(self):
-        for selection in ['set(SNOW_WINDOWS_ARCHITECTURE x64)',
+        for selection in ['set(CLIP_WINDOWS_ARCHITECTURE x64)',
                           'set(VCPKG_TARGET_TRIPLET x64-windows-static)',
-                          'set(SNOW_RUST_TARGET x86_64-pc-windows-msvc)']:
+                          'set(CLIP_RUST_TARGET x86_64-pc-windows-msvc)']:
             with self.subTest(selection=selection):
                 self.assertIn('disagrees', self.run_cmake(self.fixture('ARM64', selection), False))
 
@@ -70,7 +70,7 @@ set(VCPKG_TARGET_TRIPLET arm64-windows-static)
 set(CMAKE_CXX_COMPILER "C:/VS/bin/Hostx64/arm64/cl.exe")
 set(CMAKE_LINKER "C:/VS/bin/Hostx64/arm64/link.exe")
 set(CMAKE_AR "C:/VS/bin/Hostx64/arm64/lib.exe")
-snow_windows_rust_environment(environment "${target}")
+clip_windows_rust_environment(environment "${target}")
 message(STATUS "ENVIRONMENT=${environment}")
 ''')
         self.assertIn('CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER=C:/VS/bin/Hostx64/arm64/link.exe', output)
@@ -82,7 +82,7 @@ set(WIN32 FALSE)
 set(APPLE TRUE)
 set(CMAKE_OSX_ARCHITECTURES arm64)
 include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
-snow_detect_rust_target(target)
+clip_detect_rust_target(target)
 message(STATUS "RUST=${{target}}")
 ''')
         self.assertIn('RUST=aarch64-apple-darwin', output)
@@ -135,10 +135,10 @@ message(STATUS "LINK_FLAGS=${{VCPKG_LINKER_FLAGS_RELEASE}}")
 
         for suffix in ('performance', 'release', 'fast'):
             with self.subTest(preset=suffix):
-                cache = variables(f'snow-shot-msvc-arm64-{suffix}')
+                cache = variables(f'clip-shot-msvc-arm64-{suffix}')
                 self.assertEqual(cache['CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE'], 'OFF')
-                self.assertEqual(cache['SNOW_RUST_TARGET'], 'aarch64-pc-windows-msvc')
-        for name in ('windows-msvc-performance', 'snow-shot-msvc-release'):
+                self.assertEqual(cache['CLIP_RUST_TARGET'], 'aarch64-pc-windows-msvc')
+        for name in ('windows-msvc-performance', 'clip-shot-msvc-release'):
             with self.subTest(preset=name):
                 self.assertEqual(variables(name)['CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE'],
                                  'ON')
@@ -161,7 +161,7 @@ message(STATUS "LINK_FLAGS=${{VCPKG_LINKER_FLAGS_RELEASE}}")
 set(WIN32 TRUE)
 set(ENV{{RUSTC}} "{rustc.as_posix()}")
 set(ENV{{LIBCLANG_PATH}} "")
-include("{ROOT.as_posix()}/cmake/SnowRustLibclang.cmake")
+include("{ROOT.as_posix()}/cmake/ClipRustLibclang.cmake")
 '''
 
     def test_libclang_environment_overrides_compatible_cached_paths(self):
@@ -172,9 +172,9 @@ include("{ROOT.as_posix()}/cmake/SnowRustLibclang.cmake")
             shutil.copytree(root / 'arm64', other)
             output = self.run_cmake(fixture + f'''
 set(ENV{{LIBCLANG_PATH}} "{(root / 'arm64').as_posix()}")
-set(SNOW_LIBCLANG_BIN_DIR "{other.as_posix()}" CACHE PATH "")
-snow_default_rust_libclang_directory(default)
-snow_resolve_rust_libclang_directory(selected)
+set(CLIP_LIBCLANG_BIN_DIR "{other.as_posix()}" CACHE PATH "")
+clip_default_rust_libclang_directory(default)
+clip_resolve_rust_libclang_directory(selected)
 message(STATUS "DEFAULT=${{default}};SELECTED=${{selected}}")
 ''')
             self.assertIn(f'DEFAULT={(root / "arm64").as_posix()};'
@@ -188,22 +188,22 @@ message(STATUS "DEFAULT=${{default}};SELECTED=${{selected}}")
                 fixture = self.libclang_fixture(root, host)
                 output = self.run_cmake(fixture + f'''
 set(CMAKE_HOST_SYSTEM_PROCESSOR ARM64)
-set(SNOW_RUST_TARGET {target}-pc-windows-msvc)
-set(SNOW_LIBCLANG_BIN_DIR "{(root / selected).as_posix()}")
-snow_resolve_rust_libclang_directory(selected)
+set(CLIP_RUST_TARGET {target}-pc-windows-msvc)
+set(CLIP_LIBCLANG_BIN_DIR "{(root / selected).as_posix()}")
+clip_resolve_rust_libclang_directory(selected)
 message(STATUS "SELECTED=${{selected}}")
 ''')
                 self.assertIn(f'SELECTED={(root / selected).as_posix()}', output)
 
     def test_libclang_rejects_stale_cache_before_environment_override(self):
-        for variable in ('SNOW_LIBCLANG_BIN_DIR', 'SNOW_SHOT_LIBCLANG_DIR'):
+        for variable in ('CLIP_LIBCLANG_BIN_DIR', 'CLIP_SHOT_LIBCLANG_DIR'):
             with self.subTest(variable=variable), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 fixture = self.libclang_fixture(root, 'aarch64')
                 output = self.run_cmake(fixture + f'''
 set(ENV{{LIBCLANG_PATH}} "{(root / 'arm64').as_posix()}")
 set({variable} "{(root / 'x64').as_posix()}" CACHE PATH "")
-snow_resolve_rust_libclang_directory(selected)
+clip_resolve_rust_libclang_directory(selected)
 ''', False)
                 self.assertIn(f'{variable} has x64 libclang', output)
                 self.assertIn('Rust host requires arm64', output)
@@ -214,13 +214,13 @@ snow_resolve_rust_libclang_directory(selected)
             fixture = self.libclang_fixture(root, 'aarch64')
             output = self.run_cmake(fixture + f'''
 set(ENV{{LIBCLANG_PATH}} "{(root / 'x64').as_posix()}")
-snow_resolve_rust_libclang_directory(selected)
+clip_resolve_rust_libclang_directory(selected)
 ''', False)
             self.assertIn('LIBCLANG_PATH has x64 libclang', output)
             (root / 'arm64/libclang.dll').write_bytes(b'MZ')
             output = self.run_cmake(fixture + f'''
-set(SNOW_LIBCLANG_BIN_DIR "{(root / 'arm64').as_posix()}")
-snow_resolve_rust_libclang_directory(selected)
+set(CLIP_LIBCLANG_BIN_DIR "{(root / 'arm64').as_posix()}")
+clip_resolve_rust_libclang_directory(selected)
 ''', False)
             self.assertIn('Invalid Windows libclang PE image', output)
 
@@ -244,10 +244,10 @@ set(CMAKE_CXX_COMPILER "C:/VS/bin/Hostx64/arm64/cl.exe")
 set(CMAKE_LINKER "C:/VS/bin/Hostx64/arm64/link.exe")
 set(CMAKE_AR "C:/VS/bin/Hostx64/arm64/lib.exe")
 set(CARGO_EXECUTABLE "{cargo.as_posix()}")
-set(SNOW_LIBCLANG_BIN_DIR "{(root / 'x64').as_posix()}")
+set(CLIP_LIBCLANG_BIN_DIR "{(root / 'x64').as_posix()}")
 include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
-snow_add_rust_static_library(fixture PACKAGE fixture MANIFEST_DIR "{root.as_posix()}")
-snow_add_rust_executable(fixture_executable PACKAGE fixture MANIFEST_DIR "{root.as_posix()}")
+clip_add_rust_static_library(fixture PACKAGE fixture MANIFEST_DIR "{root.as_posix()}")
+clip_add_rust_executable(fixture_executable PACKAGE fixture MANIFEST_DIR "{root.as_posix()}")
 ''', encoding='utf-8')
             build = root / 'build'
             result = subprocess.run([CMAKE, '-G', 'Ninja', '-S', str(root), '-B', str(build)],
@@ -260,24 +260,24 @@ snow_add_rust_executable(fixture_executable PACKAGE fixture MANIFEST_DIR "{root.
     def test_ffmpeg_arm_profile_retains_supported_encoders(self):
         port = ROOT / 'cmake/vcpkg-overlay-ports/ffmpeg'
         manifest = json.loads((port / 'vcpkg.json').read_text(encoding='utf-8'))
-        dependencies = manifest['features']['snow-shot-minimal']['dependencies']
+        dependencies = manifest['features']['clip-shot-minimal']['dependencies']
         common = next(dependency['features'] for dependency in dependencies
                       if dependency['name'] == 'ffmpeg' and 'platform' not in dependency)
         vendor = next(dependency for dependency in dependencies
                       if dependency['name'] == 'ffmpeg' and dependency.get('platform') == 'x64')
         text = (port / 'portfile.cmake').read_text(encoding='utf-8')
-        start = text.index('if("snow-shot-minimal" IN_LIST FEATURES)',
+        start = text.index('if("clip-shot-minimal" IN_LIST FEATURES)',
                            text.index('if("rubberband" IN_LIST FEATURES)'))
-        fragment = text[start:text.index('if("snow-macos-media" IN_LIST FEATURES)', start)]
+        fragment = text[start:text.index('if("clip-macos-media" IN_LIST FEATURES)', start)]
         for arch in ('arm64', 'x64'):
-            features = ['snow-shot-minimal', *common]
+            features = ['clip-shot-minimal', *common]
             if arch == 'x64':
                 features.extend(vendor['features'])
             output = self.run_cmake(f'''
 set(VCPKG_TARGET_IS_WINDOWS TRUE)
 set(FEATURES {';'.join(features)})
 {fragment}
-message(STATUS "ENCODERS=${{SNOW_SHOT_ENCODERS}}")
+message(STATUS "ENCODERS=${{CLIP_SHOT_ENCODERS}}")
 ''')
             self.assertIn('h264_mf', output)
             self.assertIn('libx264,libx265', output)
@@ -287,7 +287,7 @@ message(STATUS "ENCODERS=${{SNOW_SHOT_ENCODERS}}")
     def test_crashpad_uses_runnable_host_compilers_and_pinned_toolset(self):
         overlay = (ROOT / 'cmake/vcpkg-overlay-ports/crashpad/portfile.cmake').read_text(
             encoding='utf-8')
-        build_tools = re.search(r'set\(_snow_build_tools \[=\[(.*?)\]=\]\)', overlay,
+        build_tools = re.search(r'set\(_clip_build_tools \[=\[(.*?)\]=\]\)', overlay,
                                 re.DOTALL).group(1)
         original = '''
 vswhere_args = [vswhere_path, '-latest', '-property', 'installationPath']
@@ -326,7 +326,7 @@ endfunction()
             for host, expected in [('x64', ['amd64_x86', 'amd64', 'amd64_arm64']),
                                    ('arm64', ['arm64_x86', 'arm64_x64', 'arm64'])]:
                 with self.subTest(host=host), patch.dict(
-                        os.environ, {'SNOW_MSVC_HOST_ARCHITECTURE': host}, clear=True):
+                        os.environ, {'CLIP_MSVC_HOST_ARCHITECTURE': host}, clear=True):
                     arguments = list(namespace['toolchain_arguments']('vcvarsall.bat'))
                     self.assertEqual([argument[1] for argument in arguments], expected)
                     self.assertTrue(all(argument[2:] == ['-vcvars_ver=14.51', '&&', 'set']
@@ -360,7 +360,7 @@ project(ToolchainContract LANGUAGES NONE)
 set(WIN32 TRUE)
 set(_VCPKG_ROOT_DIR "{(root / 'vcpkg').as_posix()}")
 set(VCPKG_TARGET_ARCHITECTURE arm64)
-set(ENV{{SNOW_MSVC_HOST_ARCHITECTURE}} {host})
+set(ENV{{CLIP_MSVC_HOST_ARCHITECTURE}} {host})
 set(ENV{{VCToolsInstallDir}} "{msvc.as_posix()}")
 set(ENV{{WindowsSdkDir}} "{sdk.as_posix()}")
 set(ENV{{WindowsSDKVersion}} {version})

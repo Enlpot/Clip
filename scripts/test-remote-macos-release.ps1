@@ -1,33 +1,33 @@
 # Focused syntax/preview contracts. Never builds or connects to an SSH host.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-foreach ($name in @('publish-snow-shot-release.ps1', 'package-snow-shot-remote-macos.ps1',
-    'publish-snow-shot-release.local.example.ps1')) {
+foreach ($name in @('publish-clip-shot-release.ps1', 'package-clip-shot-remote-macos.ps1',
+    'publish-clip-shot-release.local.example.ps1')) {
     $tokens = $null
     $errors = $null
     $null = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$tokens, [ref]$errors)
     if ($errors.Count) { throw ($errors | Out-String) }
 }
-$publisher = Join-Path $PSScriptRoot 'publish-snow-shot-release.ps1'
-$version = [regex]::Match((Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'CMakeLists.txt')), 'set\(SNOW_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
+$publisher = Join-Path $PSScriptRoot 'publish-clip-shot-release.ps1'
+$version = [regex]::Match((Get-Content -Raw (Join-Path (Split-Path -Parent $PSScriptRoot) 'CMakeLists.txt')), 'set\(CLIP_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
 $settings = @{ WhatIf = $true }
 $windows = @(& $publisher @settings)
 if ($windows.Count -ne 52 -or @($windows | Where-Object { $_ -like '*-macos-*.dmg*' }).Count) { throw 'Windows preview changed unexpectedly.' }
-$combined = @(& $publisher @settings -MacHost 'mac.invalid' -MacUser 'test' -MacProjectDirectory '/Users/test/snow-apps')
-if ($combined.Count -ne 59 -or $combined[-1] -cne 'install-snow-shot-macos.sh') { throw 'Combined preview has the wrong file order/count.' }
-foreach ($name in @("snow-shot-$version-macos-arm64.dmg", "snow-shot-$version-macos-arm64.dmg.sha256", "snow-shot-mini-$version-macos-arm64.dmg", "snow-shot-mini-$version-macos-arm64.dmg.sha256", "snow-shot-$version-macos-x86_64.dmg", "snow-shot-$version-macos-x86_64.dmg.sha256", 'install-snow-shot-macos.sh')) {
+$combined = @(& $publisher @settings -MacHost 'mac.invalid' -MacUser 'test' -MacProjectDirectory '/Users/test/clip-apps')
+if ($combined.Count -ne 59 -or $combined[-1] -cne 'install-clip-shot-macos.sh') { throw 'Combined preview has the wrong file order/count.' }
+foreach ($name in @("clip-shot-$version-macos-arm64.dmg", "clip-shot-$version-macos-arm64.dmg.sha256", "clip-shot-mini-$version-macos-arm64.dmg", "clip-shot-mini-$version-macos-arm64.dmg.sha256", "clip-shot-$version-macos-x86_64.dmg", "clip-shot-$version-macos-x86_64.dmg.sha256", 'install-clip-shot-macos.sh')) {
     if ($combined -cnotcontains $name) { throw "Missing macOS artifact: $name" }
 }
-if (@($combined | Where-Object { $_ -like 'snow-shot-mini-*-macos-x86_64*' -or $_ -like '*-macos-x64*' }).Count) {
+if (@($combined | Where-Object { $_ -like 'clip-shot-mini-*-macos-x86_64*' -or $_ -like '*-macos-x64*' }).Count) {
     throw 'Intel releases must contain Full only and use the x86_64 asset suffix.'
 }
-$armOnly = @(& $publisher @settings -MacHost 'mac.invalid' -MacUser 'test' -MacProjectDirectory '/Users/test/snow-apps' -MacArchitectures arm64)
+$armOnly = @(& $publisher @settings -MacHost 'mac.invalid' -MacUser 'test' -MacProjectDirectory '/Users/test/clip-apps' -MacArchitectures arm64)
 if ($armOnly.Count -ne 57 -or @($armOnly | Where-Object { $_ -like '*-macos-x86_64*' }).Count) {
     throw 'Explicit ARM64 preview must preserve the paired macOS release.'
 }
-$intelOnly = @(& $publisher @settings -MacHost 'mac.invalid' -MacUser 'test' -MacProjectDirectory '/Users/test/snow-apps' -MacArchitectures x64)
-if ($intelOnly.Count -ne 55 -or $intelOnly -cnotcontains "snow-shot-$version-macos-x86_64.dmg" -or
-    @($intelOnly | Where-Object { $_ -like '*-macos-arm64*' -or $_ -like 'snow-shot-mini-*-macos-*' }).Count) {
+$intelOnly = @(& $publisher @settings -MacHost 'mac.invalid' -MacUser 'test' -MacProjectDirectory '/Users/test/clip-apps' -MacArchitectures x64)
+if ($intelOnly.Count -ne 55 -or $intelOnly -cnotcontains "clip-shot-$version-macos-x86_64.dmg" -or
+    @($intelOnly | Where-Object { $_ -like '*-macos-arm64*' -or $_ -like 'clip-shot-mini-*-macos-*' }).Count) {
     throw 'Explicit Intel preview must select only the Intel Full DMG.'
 }
 try {
@@ -42,14 +42,14 @@ try {
 } catch {
     if ($_.Exception.Message -cne 'MacProjectDirectory is required with MacHost.') { throw }
 }
-$fixture = Join-Path ([IO.Path]::GetTempPath()) "snow-remote-macos-tests-$([guid]::NewGuid().ToString('N'))"
+$fixture = Join-Path ([IO.Path]::GetTempPath()) "clip-remote-macos-tests-$([guid]::NewGuid().ToString('N'))"
 $null = New-Item -ItemType Directory -Path $fixture
 try {
     # Run the real request construction without starting SSH. The existing
     # single-architecture entry point remains ARM64 Full+Mini by default.
-    $wrapper = Get-Content -Raw (Join-Path $PSScriptRoot 'package-snow-shot-remote-macos.ps1')
+    $wrapper = Get-Content -Raw (Join-Path $PSScriptRoot 'package-clip-shot-remote-macos.ps1')
     $requestBuilder = [scriptblock]::Create(($wrapper -split '\$encoded =', 2)[0] + "`n" + '$request | ConvertTo-Json -Compress')
-    $parameters = @{ MacHost = 'mac.invalid'; MacUser = 'test'; MacProjectDirectory = '/Users/test/snow-apps';
+    $parameters = @{ MacHost = 'mac.invalid'; MacUser = 'test'; MacProjectDirectory = '/Users/test/clip-apps';
         Version = $version; OutputDirectory = $fixture }
     $request = (& $requestBuilder @parameters) | ConvertFrom-Json
     if ($request.architecture -cne 'arm64' -or ($request.editions -join ',') -cne 'Full,Mini') {
@@ -100,14 +100,14 @@ Write-Output $Architecture
         $node.Variable.VariablePath.UserPath -eq 'arch'
     }, $true)[0]
     $verifyPackages = [scriptblock]::Create($verification.Extent.Text)
-    $global:SnowRemoteTestDownloads = [Collections.Generic.List[string]]::new()
-    $global:SnowRemoteTestDirectory = $fixture
-    function Get-SnowGitHubAsset($Repository, $Version, $Name, $Directory) {
-        $global:SnowRemoteTestDownloads.Add($Name)
-        return Join-Path $global:SnowRemoteTestDirectory $Name
+    $global:ClipRemoteTestDownloads = [Collections.Generic.List[string]]::new()
+    $global:ClipRemoteTestDirectory = $fixture
+    function Get-ClipGitHubAsset($Repository, $Version, $Name, $Directory) {
+        $global:ClipRemoteTestDownloads.Add($Name)
+        return Join-Path $global:ClipRemoteTestDirectory $Name
     }
-    $macNames = @("snow-shot-$version-macos-arm64.dmg", "snow-shot-mini-$version-macos-arm64.dmg",
-        "snow-shot-$version-macos-x86_64.dmg")
+    $macNames = @("clip-shot-$version-macos-arm64.dmg", "clip-shot-mini-$version-macos-arm64.dmg",
+        "clip-shot-$version-macos-x86_64.dmg")
     $release = [pscustomobject]@{ assets = @() }
     foreach ($name in $macNames) {
         $image = Join-Path $fixture $name
@@ -118,28 +118,28 @@ Write-Output $Architecture
         $release.assets += [pscustomobject]@{ name = "$name.sha256" }
     }
     $verifiedMacPackages = @{}
-    $product = [pscustomobject]@{ Product = 'snow-shot' }
+    $product = [pscustomobject]@{ Product = 'clip-shot' }
     $verifyDirectory = $fixture
     $GitHubRepository = 'fixture/repository'
     & $verifyPackages
     & $verifyPackages
-    $product = [pscustomobject]@{ Product = 'snow-shot-mini' }
+    $product = [pscustomobject]@{ Product = 'clip-shot-mini' }
     & $verifyPackages
-    if ($global:SnowRemoteTestDownloads.Count -ne 6 -or
-        -not $global:SnowRemoteTestDownloads.Contains("snow-shot-$version-macos-x86_64.dmg")) {
+    if ($global:ClipRemoteTestDownloads.Count -ne 6 -or
+        -not $global:ClipRemoteTestDownloads.Contains("clip-shot-$version-macos-x86_64.dmg")) {
         throw 'Verification must audit Intel Full and both ARM64 editions without duplicate downloads.'
     }
-    [IO.File]::WriteAllText((Join-Path $fixture "snow-shot-$version-macos-x86_64.dmg.sha256"), '0' * 64)
+    [IO.File]::WriteAllText((Join-Path $fixture "clip-shot-$version-macos-x86_64.dmg.sha256"), '0' * 64)
     $verifiedMacPackages = @{}
-    $product = [pscustomobject]@{ Product = 'snow-shot' }
+    $product = [pscustomobject]@{ Product = 'clip-shot' }
     try {
         & $verifyPackages
         throw 'Expected the Intel checksum mismatch to be rejected.'
     } catch {
-        if ($_.Exception.Message -cne "GitHub macOS checksum failed: snow-shot-$version-macos-x86_64.dmg") { throw }
+        if ($_.Exception.Message -cne "GitHub macOS checksum failed: clip-shot-$version-macos-x86_64.dmg") { throw }
     }
 } finally {
-    Remove-Variable -Scope Global -Name 'SnowRemoteTest*' -ErrorAction SilentlyContinue
+    Remove-Variable -Scope Global -Name 'ClipRemoteTest*' -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $fixture -Recurse -Force
 }
 Write-Output 'PASS: PowerShell syntax, Windows and architecture-selective macOS previews, metadata order, invalid configuration.'

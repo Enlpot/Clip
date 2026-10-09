@@ -1,0 +1,159 @@
+#ifndef CLIP_SHOT_PRESENTATION_SCREENSHOTTOOLPALETTESTYLEMODEL_H
+#define CLIP_SHOT_PRESENTATION_SCREENSHOTTOOLPALETTESTYLEMODEL_H
+
+#include "clip_draw_engine_qt/clip_canvas_types.h"
+
+#include <QColor>
+#include <QVector>
+
+#include <optional>
+
+class ScreenshotToolPaletteRectangleStyleModel final {
+  public:
+    explicit ScreenshotToolPaletteRectangleStyleModel(double minimumStrokeWidth = 1.0);
+
+    void reset();
+    [[nodiscard]] ClipCanvasShapeStyle rectangleStyle() const;
+    void setRectangleStyle(const ClipCanvasShapeStyle& style);
+
+    [[nodiscard]] double strokeWidth() const;
+    [[nodiscard]] const QColor& strokeColor() const;
+    [[nodiscard]] ClipCanvasStrokeStyle strokeStyle() const;
+    [[nodiscard]] const QColor& fillColor() const;
+    [[nodiscard]] ClipCanvasFillStyle fillStyle() const;
+    [[nodiscard]] ClipCanvasArrowType arrowType() const;
+    [[nodiscard]] int cornerRadius() const;
+    [[nodiscard]] ClipCanvasRectangleShape shape() const;
+    [[nodiscard]] const QVector<double>& strokeWidthValues() const;
+    [[nodiscard]] const QVector<QColor>& strokeColorValues() const;
+    [[nodiscard]] const QVector<QColor>& fillColorValues() const;
+
+    [[nodiscard]] bool stepStrokeWidth(int direction);
+    [[nodiscard]] bool setStrokeWidth(double strokeWidth);
+    [[nodiscard]] bool cycleStrokeWidth();
+    [[nodiscard]] bool setStrokeColor(const QColor& color);
+    [[nodiscard]] bool setStrokeStyle(ClipCanvasStrokeStyle strokeStyle);
+    [[nodiscard]] bool setFillColor(const QColor& color);
+    [[nodiscard]] bool setFillStyle(ClipCanvasFillStyle fillStyle);
+    [[nodiscard]] bool setArrowType(ClipCanvasArrowType arrowType);
+    [[nodiscard]] bool stepCornerRadius(int direction);
+    [[nodiscard]] bool setCornerRadius(int cornerRadius);
+    [[nodiscard]] bool setShape(ClipCanvasRectangleShape shape);
+
+  private:
+    [[nodiscard]] double clampedStrokeWidth(double strokeWidth) const;
+    [[nodiscard]] static double clampedCornerRadius(double cornerRadius);
+
+    QVector<double> m_strokeWidthValues;
+    QVector<QColor> m_strokeColorValues;
+    QVector<QColor> m_fillColorValues;
+    double m_minimumStrokeWidth = 1.0;
+    double m_strokeWidth = 2.0;
+    QColor m_strokeColor;
+    ClipCanvasStrokeStyle m_strokeStyle = ClipCanvasStrokeStyle::Solid;
+    QColor m_fillColor;
+    ClipCanvasFillStyle m_fillStyle = ClipCanvasFillStyle::Solid;
+    ClipCanvasArrowType m_arrowType = ClipCanvasArrowType::Straight;
+    ClipCanvasCornerRadii m_cornerRadii;
+    double m_opacity = 1.0;
+    ClipCanvasHighlightShape m_highlightShape = ClipCanvasHighlightShape::Rectangle;
+    ClipCanvasRectangleShape m_shape = ClipCanvasRectangleShape::Rectangle;
+};
+
+class ScreenshotToolPaletteTextStyleModel final {
+  public:
+    ScreenshotToolPaletteTextStyleModel();
+
+    void reset();
+    [[nodiscard]] const ClipCanvasTextStyle& textStyle() const;
+    void setTextStyle(const ClipCanvasTextStyle& style);
+
+    [[nodiscard]] const QVector<double>& fontSizeValues() const;
+    [[nodiscard]] const QVector<double>& strokeWidthValues() const;
+    [[nodiscard]] const QVector<QColor>& colorValues() const;
+    [[nodiscard]] const QVector<QColor>& fillColorValues() const;
+
+    [[nodiscard]] bool setColor(const QColor& color);
+    [[nodiscard]] bool setFontSize(double fontSize);
+    [[nodiscard]] bool stepFontSize(int direction);
+    [[nodiscard]] bool cycleFontSize();
+    [[nodiscard]] bool setFontFamily(const QString& fontFamily);
+    [[nodiscard]] bool setStrokeColor(const QColor& color);
+    [[nodiscard]] bool setStrokeWidth(double strokeWidth);
+    [[nodiscard]] bool stepStrokeWidth(int direction);
+    [[nodiscard]] bool setFillColor(const QColor& color);
+    [[nodiscard]] bool setFillStyle(ClipCanvasFillStyle fillStyle);
+    [[nodiscard]] bool setCornerRadius(int cornerRadius);
+    [[nodiscard]] bool stepCornerRadius(int direction);
+    [[nodiscard]] bool setHorizontalAlign(ClipCanvasTextHorizontalAlign alignment);
+
+  private:
+    [[nodiscard]] static double clampedFontSize(double fontSize);
+    [[nodiscard]] static double clampedStrokeWidth(double strokeWidth);
+    [[nodiscard]] static double clampedCornerRadius(double cornerRadius);
+
+    QVector<double> m_fontSizeValues;
+    QVector<double> m_strokeWidthValues;
+    QVector<QColor> m_colorValues;
+    QVector<QColor> m_fillColorValues;
+    ClipCanvasTextStyle m_style;
+};
+
+struct ScreenshotToolPaletteStyleState {
+    ScreenshotToolPaletteStyleState() = default;
+    explicit ScreenshotToolPaletteStyleState(const ClipCanvasStyleDefaults& defaults);
+
+    void reset(const ClipCanvasStyleDefaults& defaults);
+
+    ScreenshotToolPaletteRectangleStyleModel m_creationRectangleStyle;
+    ScreenshotToolPaletteRectangleStyleModel m_rectangleStyle;
+    ScreenshotToolPaletteRectangleStyleModel m_creationLineStyle;
+    ScreenshotToolPaletteRectangleStyleModel m_lineStyle;
+    ScreenshotToolPaletteRectangleStyleModel m_creationFreeDrawStyle;
+    ScreenshotToolPaletteRectangleStyleModel m_freeDrawStyle;
+    ScreenshotToolPaletteRectangleStyleModel m_creationHighlightStyle{0.0};
+    ScreenshotToolPaletteRectangleStyleModel m_highlightStyle{0.0};
+    ClipCanvasShapeStyle m_creationPenHighlightStyle;
+    ClipCanvasShapeStyle m_penHighlightStyle;
+    ClipCanvasArrowStyle m_creationArrowStyle;
+    ClipCanvasArrowStyle m_arrowStyle;
+    ClipCanvasDistanceStyle creationDistanceStyle;
+    ClipCanvasDistanceStyle distanceStyle;
+    quint32 distanceStyleMixed = 0;
+    bool showingSelectedDistance = false;
+    bool distanceControlsActive = false;
+    ScreenshotToolPaletteTextStyleModel m_creationTextStyle;
+    ScreenshotToolPaletteTextStyleModel m_textStyle;
+    ClipCanvasSerialNumberStyle m_creationSerialNumberStyle;
+    ClipCanvasSerialNumberStyle m_serialNumberStyle;
+    ClipCanvasFilterStyle creationRectangleFilterStyle;
+    ClipCanvasFilterStyle rectangleFilterStyle;
+    ClipCanvasFilterStyle creationPenFilterStyle;
+    ClipCanvasFilterStyle penFilterStyle;
+    ClipCanvasBrushEraserStyle creationBrushEraserStyle;
+    ClipCanvasBrushEraserStyle brushEraserStyle;
+    ClipCanvasWatermarkConfig creationWatermarkConfig;
+    ClipCanvasSpotlightConfig creationSpotlightConfig;
+    ClipCanvasWatermarkConfig m_watermarkConfig;
+    ClipCanvasSpotlightConfig spotlightConfig;
+    ClipCanvasRectangleShape creationSpotlightShape = ClipCanvasRectangleShape::Rectangle;
+    ClipCanvasRectangleShape spotlightShape = ClipCanvasRectangleShape::Rectangle;
+    bool showingSelectedSpotlight = false;
+    quint32 spotlightShapeMixed = 0;
+    bool m_arrowControlsActive = false;
+    bool m_lineControlsActive = false;
+    bool m_freeDrawControlsActive = false;
+    bool m_highlightControlsActive = false;
+    bool m_penHighlightControlsActive = false;
+    bool m_textControlsActive = false;
+    bool m_showingSelectedStyle = false;
+    bool m_showingSelectedTextStyle = false;
+    quint32 m_selectedStyleMixed = 0;
+    quint32 m_textStyleMixed = 0;
+    quint32 m_serialNumberStyleMixed = 0;
+    std::optional<ClipCanvasStyleToolbarSource> m_styleSource;
+    quint32 filterStyleMixed = 0;
+    std::optional<ClipCanvasStyleToolbarSource> filterStyleSource;
+};
+
+#endif // CLIP_SHOT_PRESENTATION_SCREENSHOTTOOLPALETTESTYLEMODEL_H

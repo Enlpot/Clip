@@ -1,0 +1,17 @@
+[package]
+name = "clip-draw-engine-c"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clip-draw-engine-core = { path = "../clip-draw-engine-core" }
+clip-draw-engine-document = { path = "../clip-draw-engine-document" }
+clip-draw-engine = { path = "../clip-draw-engine" }
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+path = "src/lib.rs"

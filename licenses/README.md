@@ -1,6 +1,6 @@
 # Canonical License Texts
 
-These files are canonical fallback license texts used by the Snow Shot release
+These files are canonical fallback license texts used by the Clip release
 license collector when an upstream Cargo package declares a license but omits
 the corresponding text from its crate archive.
 

@@ -3,8 +3,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 case "${1:-$(uname -m)}" in
-  arm64|aarch64) triplet=arm64-osx-snow-media ;;
-  x64|x86_64) triplet=x64-osx-snow-media ;;
+  arm64|aarch64) triplet=arm64-osx-clip-media ;;
+  x64|x86_64) triplet=x64-osx-clip-media ;;
   *) echo "usage: $0 [arm64|x86_64]" >&2; exit 2 ;;
 esac
 # vcpkg needs a host pkg-config before it can build even its first library.

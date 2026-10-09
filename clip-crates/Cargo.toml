@@ -1,0 +1,111 @@
+[workspace]
+members = [
+    "crates/clip-memory",
+    "crates/clip-media",
+    "crates/clip-macos",
+    "crates/visual-region-detector",
+    "crates/clip-visual-region-detector-c",
+    "crates/clip-core",
+    "crates/clip-d3d11",
+    "crates/clip-diagnostics",
+    "crates/clip-diagnostics-test",
+    "crates/clip-cursor",
+    "crates/clip-pipeline",
+    "crates/clip-capture",
+    "crates/clip-capture-c",
+    "crates/clip-recording-c",
+    "crates/clip-ui-selector",
+    "crates/clip-ui-selector-c",
+    "crates/clip-selected-text",
+    "crates/clip-selected-text-c",
+    "crates/clip-stitch-images",
+    "crates/clip-stitch-images-c",
+    "crates/clip-ocr-process",
+    "crates/clip-audio-recorder",
+    "crates/rapid-ocr-rs",
+    "crates/clip-recording-model",
+    "crates/clip-recording-runtime",
+    "crates/clip-recording-effects",
+    "crates/clip-recording-effects-c",
+    "crates/clip-recording-export",
+    "crates/clip-screen-recorder",
+]
+resolver = "3"
+
+[patch.crates-io]
+# Preserve native diagnostics; see ../docs/ort-native-logging-patch.md.
+# Keep the wrapper and its native API types on the same Git revision.
+ort = { git = "https://github.com/mg-chao/ort.git", rev = "90018ee581fb1bb1baf8e82eba8e679728ff27dc" }
+ort-sys = { git = "https://github.com/mg-chao/ort.git", rev = "90018ee581fb1bb1baf8e82eba8e679728ff27dc" }
+
+[workspace.package]
+license = "Apache-2.0"
+
+[workspace.dependencies]
+anyhow = "1.0.102"
+bincode = "1.3.3"
+crossbeam-channel = "0.5"
+ffmpeg-next = { version = "9.0.0", default-features = false, features = ["codec", "format", "software-resampling", "software-scaling"] }
+half = "2.7.1"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+png = "0.18.1"
+rand = "0.9.5"
+rayon = "1.11.0"
+rustc-hash = "2.1.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+smallvec = "1"
+tempfile = "3"
+thiserror = "2.0.17"
+tokio = { version = "1.49.0", default-features = false }
+uuid = { version = "1.18.1", features = ["v4"] }
+windows = "0.62.2"
+windows-core = "0.62.2"
+num_cpus = "1.17.0"
+rstar = "0.12.2"
+zstd = "0.13.3"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
+panic = "abort"
+debug = 0
+incremental = false
+overflow-checks = false
+
+# Keep host proc-macro symbol tables intact. LLVM's debug-only Mach-O stripping
+# can produce an unaligned LINKEDIT pool rejected by the macOS 27 loader.
+# These host tools are not part of the shipped static libraries.
+[profile.release.build-override]
+strip = "none"
+
+[profile.dev.package.clip-stitch-images]
+opt-level = 3
+
+[profile.dev.package.clip-capture]
+opt-level = 3
+
+[profile.dev.package.clip-cursor]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.rayon]
+opt-level = 3
+
+[profile.dev-fast]
+inherits = "dev"
+opt-level = 3
+debug = true
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 2
+codegen-units = 16
+lto = "thin"
+incremental = true
+
+[profile.bench]
+debug = true

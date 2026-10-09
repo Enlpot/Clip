@@ -4,7 +4,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-. (Join-Path $repoRoot "snow_shot/scripts/performance-environment.ps1")
+. (Join-Path $repoRoot "clip_shot/scripts/performance-environment.ps1")
 
 function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -31,15 +31,15 @@ foreach ($name in $environmentNames) {
 }
 $testRoot = Join-Path $repoRoot ("build/performance-qt-contract-" + [guid]::NewGuid().ToString("N"))
 try {
-    $script:SnowPerformanceFixtureHost = 'x64'
-    function Get-SnowWindowsHostArchitecture { return $script:SnowPerformanceFixtureHost }
-    Require ((Get-SnowPerformanceTarget).Preset -ceq 'windows-msvc-performance') `
+    $script:ClipPerformanceFixtureHost = 'x64'
+    function Get-ClipWindowsHostArchitecture { return $script:ClipPerformanceFixtureHost }
+    Require ((Get-ClipPerformanceTarget).Preset -ceq 'windows-msvc-performance') `
         'The default performance preset must retain its x64 identity.'
-    $armTarget = Get-SnowPerformanceTarget -Architecture arm64
-    Require ($armTarget.Preset -ceq 'snow-shot-msvc-arm64-performance' -and
+    $armTarget = Get-ClipPerformanceTarget -Architecture arm64
+    Require ($armTarget.Preset -ceq 'clip-shot-msvc-arm64-performance' -and
         $armTarget.Configuration -ceq 'Release' -and -not $armTarget.IsStatic) `
         'ARM64 benchmarks must use the dedicated Release performance preset.'
-    Require-Rejected { Get-SnowPerformanceTarget -Architecture arm64 -RequireNative } `
+    Require-Rejected { Get-ClipPerformanceTarget -Architecture arm64 -RequireNative } `
         'Cross builds may configure benchmarks but cannot execute them.'
     $kit = Join-Path $testRoot "Qt kit"
     $qtDir = Join-Path $kit "lib/cmake/Qt6"
@@ -54,13 +54,13 @@ try {
     $originalPath = $env:PATH
 
     Set-Content -LiteralPath $coreTargets -Value 'QT_ENABLED_PUBLIC_FEATURES "static;timezone"'
-    $snapshot = Set-SnowPerformanceQtRuntime -Platform offscreen
+    $snapshot = Set-ClipPerformanceQtRuntime -Platform offscreen
     Require ($env:QT_QPA_PLATFORM -ceq "offscreen") "Static replay must select offscreen QPA."
     Require ([string]::IsNullOrEmpty($env:QT_QPA_PLATFORM_PLUGIN_PATH)) `
         "Static Qt must not inherit a stale external platform plugin directory."
     Require (-not (Test-Path -LiteralPath (Join-Path $bin "Qt6Core.dll"))) `
         "The static fixture must work without any Qt DLL."
-    Restore-SnowPerformanceQtRuntime -Snapshot $snapshot
+    Restore-ClipPerformanceQtRuntime -Snapshot $snapshot
     Require ($env:PATH -ceq $originalPath -and
         $env:QT_QPA_PLATFORM -ceq "original-platform" -and
         $env:QT_QPA_PLATFORM_PLUGIN_PATH -ceq "original-plugin-path") `
@@ -68,92 +68,92 @@ try {
 
     Set-Content -LiteralPath $coreTargets -Value 'QT_ENABLED_PUBLIC_FEATURES "shared;timezone"'
     $rejected = $false
-    try { Set-SnowPerformanceQtRuntime | Out-Null }
-    catch { $rejected = $_.Exception.Message -match "selected shared Qt $script:SnowQtVersion runtime" }
+    try { Set-ClipPerformanceQtRuntime | Out-Null }
+    catch { $rejected = $_.Exception.Message -match "selected shared Qt $script:ClipQtVersion runtime" }
     Require $rejected "A shared kit without its runtime DLL must fail before launching benchmarks."
     Require ($env:PATH -ceq $originalPath -and $env:QT_QPA_PLATFORM -ceq "original-platform") `
         "Failed shared-kit validation must preserve the environment."
     Write-PeFixture (Join-Path $bin 'Qt6Core.dll') 0x8664
-    $snapshot = Set-SnowPerformanceQtRuntime
+    $snapshot = Set-ClipPerformanceQtRuntime
     Require ($env:QT_QPA_PLATFORM -ceq "windows" -and
         $env:QT_QPA_PLATFORM_PLUGIN_PATH -ceq (Join-Path $kit "plugins/platforms")) `
         "Shared native benchmarks must use the selected kit's platform plugins."
-    Restore-SnowPerformanceQtRuntime -Snapshot $snapshot
+    Restore-ClipPerformanceQtRuntime -Snapshot $snapshot
     Write-PeFixture (Join-Path $bin 'Qt6Core.dll') 0xAA64
-    Require-Rejected { Set-SnowPerformanceQtRuntime } 'Wrong-machine shared Qt cannot run a benchmark.'
+    Require-Rejected { Set-ClipPerformanceQtRuntime } 'Wrong-machine shared Qt cannot run a benchmark.'
     Require ($env:PATH -ceq $originalPath) 'Wrong-machine runtime validation must preserve PATH.'
-    $script:SnowPerformanceFixtureHost = 'arm64'
-    $snapshot = Set-SnowPerformanceQtRuntime -Architecture arm64
+    $script:ClipPerformanceFixtureHost = 'arm64'
+    $snapshot = Set-ClipPerformanceQtRuntime -Architecture arm64
     Require ($env:PATH -like "*$($armTarget.InstalledRoot)*arm64-windows*bin*") `
         'Native ARM64 benchmarks must load dependencies from the ARM64 triplet.'
-    Restore-SnowPerformanceQtRuntime -Snapshot $snapshot
+    Restore-ClipPerformanceQtRuntime -Snapshot $snapshot
     $benchmark = Join-Path $testRoot 'benchmark.exe'
     Write-PeFixture $benchmark 0xAA64
-    Assert-SnowPerformanceExecutable -Path $benchmark -Architecture arm64
+    Assert-ClipPerformanceExecutable -Path $benchmark -Architecture arm64
     Write-PeFixture $benchmark 0x8664
-    Require-Rejected { Assert-SnowPerformanceExecutable -Path $benchmark -Architecture arm64 } `
+    Require-Rejected { Assert-ClipPerformanceExecutable -Path $benchmark -Architecture arm64 } `
         'Native ARM64 must reject an emulated x64 benchmark.'
-    $script:SnowPerformanceFixtureHost = 'x64'
+    $script:ClipPerformanceFixtureHost = 'x64'
 
-    function Set-SnowQtEnvironment {
+    function Set-ClipQtEnvironment {
         param([string]$Qt6Dir, [string]$Preset)
-        $global:SnowPerformanceFixtureQtDir = $Qt6Dir
-        $global:SnowPerformanceFixtureQtPreset = $Preset
+        $global:ClipPerformanceFixtureQtDir = $Qt6Dir
+        $global:ClipPerformanceFixtureQtPreset = $Preset
     }
-    function Set-SnowBuildEnvironment {
+    function Set-ClipBuildEnvironment {
         param([string]$Preset)
-        $global:SnowPerformanceFixtureBuildPreset = $Preset
+        $global:ClipPerformanceFixtureBuildPreset = $Preset
     }
-    Initialize-SnowPerformanceEnvironment -QtBin $bin
-    Require ($global:SnowPerformanceFixtureQtDir -ceq $qtDir -and
-        $global:SnowPerformanceFixtureQtPreset -ceq "windows-msvc-performance" -and
-        $global:SnowPerformanceFixtureBuildPreset -ceq "windows-msvc-performance") `
+    Initialize-ClipPerformanceEnvironment -QtBin $bin
+    Require ($global:ClipPerformanceFixtureQtDir -ceq $qtDir -and
+        $global:ClipPerformanceFixtureQtPreset -ceq "windows-msvc-performance" -and
+        $global:ClipPerformanceFixtureBuildPreset -ceq "windows-msvc-performance") `
         "An explicit Qt bin must select the same kit for the Release performance build."
-    Initialize-SnowPerformanceEnvironment -QtBin $bin -Architecture arm64
-    Require ($global:SnowPerformanceFixtureQtPreset -ceq 'snow-shot-msvc-arm64-performance' -and
-        $global:SnowPerformanceFixtureBuildPreset -ceq 'snow-shot-msvc-arm64-performance') `
+    Initialize-ClipPerformanceEnvironment -QtBin $bin -Architecture arm64
+    Require ($global:ClipPerformanceFixtureQtPreset -ceq 'clip-shot-msvc-arm64-performance' -and
+        $global:ClipPerformanceFixtureBuildPreset -ceq 'clip-shot-msvc-arm64-performance') `
         'ARM64 configure must select the target kit and performance preset consistently.'
 
     # Exercise the actual configure wrapper with stubbed toolchain/native calls.
     # No compiler, network, Rust run, benchmark, or interactive window is started.
-    $fixtureScripts = Join-Path $testRoot "workspace/snow_shot/scripts"
+    $fixtureScripts = Join-Path $testRoot "workspace/clip_shot/scripts"
     New-Item -ItemType Directory -Path $fixtureScripts -Force | Out-Null
     $configure = Join-Path $fixtureScripts "configure-msvc-perf.ps1"
-    Copy-Item -LiteralPath (Join-Path $repoRoot "snow_shot/scripts/configure-msvc-perf.ps1") `
+    Copy-Item -LiteralPath (Join-Path $repoRoot "clip_shot/scripts/configure-msvc-perf.ps1") `
         -Destination $configure
     Set-Content -LiteralPath (Join-Path $fixtureScripts "performance-environment.ps1") -Value @'
-function Initialize-SnowPerformanceEnvironment {
+function Initialize-ClipPerformanceEnvironment {
     param([string]$QtBin, [string]$Architecture)
-    $global:SnowPerformanceFixtureInitialized = $QtBin
-    $global:SnowPerformanceFixtureArchitecture = $Architecture
+    $global:ClipPerformanceFixtureInitialized = $QtBin
+    $global:ClipPerformanceFixtureArchitecture = $Architecture
 }
-function Get-SnowPerformanceTarget {
+function Get-ClipPerformanceTarget {
     param([string]$Architecture)
-    return [pscustomobject]@{ Preset = $(if ($Architecture -eq 'arm64') { 'snow-shot-msvc-arm64-performance' } else { 'windows-msvc-performance' }) }
+    return [pscustomobject]@{ Preset = $(if ($Architecture -eq 'arm64') { 'clip-shot-msvc-arm64-performance' } else { 'windows-msvc-performance' }) }
 }
-function Get-SnowConfigureArguments {
+function Get-ClipConfigureArguments {
     param([string]$Preset, [string]$BuildDirectory)
     $arguments = @("--preset", $Preset, "-B", $BuildDirectory)
-    if ($global:SnowPerformanceFixtureAlignedFresh) { $arguments = @("--fresh") + $arguments }
+    if ($global:ClipPerformanceFixtureAlignedFresh) { $arguments = @("--fresh") + $arguments }
     return $arguments
 }
 '@
     function cmake {
-        $global:SnowPerformanceFixtureArguments = @($args)
+        $global:ClipPerformanceFixtureArguments = @($args)
         $global:LASTEXITCODE = 0
     }
     foreach ($architecture in @('x64', 'arm64')) {
       foreach ($alreadyFresh in @($false, $true)) {
-        $global:SnowPerformanceFixtureAlignedFresh = $alreadyFresh
+        $global:ClipPerformanceFixtureAlignedFresh = $alreadyFresh
         & $configure -Fresh -QtBin $bin -Architecture $architecture
-        Require ($global:SnowPerformanceFixtureInitialized -ceq $bin) `
+        Require ($global:ClipPerformanceFixtureInitialized -ceq $bin) `
             "Configure must initialize the selected toolchain in the current PowerShell host."
-        Require (@($global:SnowPerformanceFixtureArguments | Where-Object { $_ -ceq "--fresh" }).Count -eq 1) `
+        Require (@($global:ClipPerformanceFixtureArguments | Where-Object { $_ -ceq "--fresh" }).Count -eq 1) `
             "Explicit Fresh and automatic cache alignment must not duplicate --fresh."
-        $expectedPreset = if ($architecture -eq 'arm64') { 'snow-shot-msvc-arm64-performance' } else { 'windows-msvc-performance' }
-        Require ($global:SnowPerformanceFixtureArguments -contains $expectedPreset -and
-            $global:SnowPerformanceFixtureArguments -contains (Join-Path (Split-Path -Parent (Split-Path -Parent $fixtureScripts)) "build/$expectedPreset") -and
-            $global:SnowPerformanceFixtureArchitecture -ceq $architecture) `
+        $expectedPreset = if ($architecture -eq 'arm64') { 'clip-shot-msvc-arm64-performance' } else { 'windows-msvc-performance' }
+        Require ($global:ClipPerformanceFixtureArguments -contains $expectedPreset -and
+            $global:ClipPerformanceFixtureArguments -contains (Join-Path (Split-Path -Parent (Split-Path -Parent $fixtureScripts)) "build/$expectedPreset") -and
+            $global:ClipPerformanceFixtureArchitecture -ceq $architecture) `
             "Benchmarks must configure the dedicated Release performance preset."
       }
     }
@@ -162,7 +162,7 @@ function Get-SnowConfigureArguments {
             "run-toolbar-perf", "run-toolbar-display-perf", "run-pin-to-screen-perf",
             "run-capture-startup-perf", "run-file-pin-batch-perf", "run-pinned-lifecycle-perf",
             "run-recording-window-startup-perf", "run-uia-perf")) {
-        $path = Join-Path $repoRoot "snow_shot/scripts/$name.ps1"
+        $path = Join-Path $repoRoot "clip_shot/scripts/$name.ps1"
         $errors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$errors)
         Require ($errors.Count -eq 0) "$name must parse successfully."
@@ -175,7 +175,7 @@ function Get-SnowConfigureArguments {
         if ($name -like 'run-*-perf') {
             $nativeGuard = $ast.Find({ param($node)
                 $node -is [System.Management.Automation.Language.CommandAst] -and
-                $node.GetCommandName() -ceq 'Get-SnowPerformanceTarget' -and
+                $node.GetCommandName() -ceq 'Get-ClipPerformanceTarget' -and
                 $node.CommandElements.Extent.Text -ccontains '-RequireNative'
             }, $true)
             Require ($null -ne $nativeGuard) "$name must check the native host before running benchmarks."

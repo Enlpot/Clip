@@ -15,17 +15,17 @@ import sys
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().with_name('install-snow-shot-macos.sh')
-PREFLIGHT = SCRIPT.with_name('prepare-snow-shot-homebrew.sh')
+SCRIPT = Path(__file__).resolve().with_name('install-clip-shot-macos.sh')
+PREFLIGHT = SCRIPT.with_name('prepare-clip-shot-homebrew.sh')
 FINGERPRINT = 'A' * 40
-REQUIREMENT = 'identifier "com.snowshot.snow_shot" and anchor = H"' + FINGERPRINT + '"'
-API = 'https://api.github.com/repos/mg-chao/snow-apps/releases?per_page=100&page=1'
-GITEE_API = 'https://gitee.com/api/v5/repos/mg-chao/snow-apps/releases?per_page=100&page=1'
-GITEE_ATTACH = 'https://gitee.com/api/v5/repos/mg-chao/snow-apps/releases/123/attach_files?per_page=100'
-ASSET = 'snow-shot-1.2.3-macos-arm64.dmg'
-TAG = 'v1.2.3_snow-shot'
-GITHUB = 'https://github.com/mg-chao/snow-apps/releases/download/' + TAG + '/' + ASSET
-GITEE = 'https://gitee.com/mg-chao/snow-apps/releases/download/' + TAG + '/' + ASSET
+REQUIREMENT = 'identifier "com.clipshot.clip_shot" and anchor = H"' + FINGERPRINT + '"'
+API = 'https://api.github.com/repos/mg-chao/clip-apps/releases?per_page=100&page=1'
+GITEE_API = 'https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases?per_page=100&page=1'
+GITEE_ATTACH = 'https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases/123/attach_files?per_page=100'
+ASSET = 'clip-shot-1.2.3-macos-arm64.dmg'
+TAG = 'v1.2.3_clip-shot'
+GITHUB = 'https://github.com/mg-chao/clip-apps/releases/download/' + TAG + '/' + ASSET
+GITEE = 'https://gitee.com/mg-chao/clip-apps/releases/download/' + TAG + '/' + ASSET
 
 MOCK = r'''#!/usr/bin/env python3
 import hashlib, json, os, pathlib, plistlib, shutil, signal, subprocess, sys, time
@@ -56,7 +56,7 @@ elif name == 'hdiutil':
     elif args[0] == 'attach':
         if os.environ.get('FAIL_ATTACH'): fail()
         mount = pathlib.Path(args[args.index('-mountpoint') + 1])
-        shutil.copytree(root / 'bundle', mount / os.environ.get('BUNDLE_NAME', 'Snow Shot.app'), dirs_exist_ok=True)
+        shutil.copytree(root / 'bundle', mount / os.environ.get('BUNDLE_NAME', 'Clip.app'), dirs_exist_ok=True)
         (root / 'mounted').write_text(str(mount))
     elif args[0] == 'detach':
         if os.environ.get('FAIL_DETACH'): fail()
@@ -77,17 +77,17 @@ elif name == 'file': print('Mach-O 64-bit executable ' + os.environ.get('BINARY_
 elif name == 'codesign':
     if '--force' in args:
         assert '--deep' not in args
-        executable = pathlib.Path(args[-1]) / 'Contents/MacOS/snow_shot'
+        executable = pathlib.Path(args[-1]) / 'Contents/MacOS/clip_shot'
         executable.write_bytes(executable.read_bytes() + b' locally signed')
     elif '-d' in args: print('designated => ' + os.environ['REQUIREMENT'])
     elif (pathlib.Path(args[-1]) / 'reject-signature').exists(): fail()
-    elif os.environ.get('FAIL_FINAL') and args[-1] == str(root / 'Applications/Snow Shot.app'): fail()
+    elif os.environ.get('FAIL_FINAL') and args[-1] == str(root / 'Applications/Clip.app'): fail()
     elif os.environ.get('FAIL_REQUIREMENT') and '-R' in args: fail()
 elif name == 'ditto': shutil.copytree(args[0], args[1], dirs_exist_ok=True, symlinks=True)
 elif name == 'security':
     if os.environ.get('FAIL_SECURITY'): fail()
     if args[0] == 'find-identity':
-        print('0 valid identities found' if os.environ.get('MISSING_IDENTITY') else '1) ' + 'A'*40 + ' "Snow Shot Local Installer"')
+        print('0 valid identities found' if os.environ.get('MISSING_IDENTITY') else '1) ' + 'A'*40 + ' "Clip Local Installer"')
 elif name == 'openssl':
     if args[0] == 'req':
         pathlib.Path(args[args.index('-keyout')+1]).write_text('private fixture')
@@ -122,11 +122,11 @@ else: raise RuntimeError(name)
 
 class InstallerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='snow installer tests ')
+        self.temp = tempfile.TemporaryDirectory(prefix='clip installer tests ')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.home = self.root / 'home'
-        self.state = self.home / 'Library/Application Support/Snow Shot/Installer'
+        self.state = self.home / 'Library/Application Support/Clip/Installer'
         self.state.mkdir(parents=True)
         (self.home / 'Library/Keychains').mkdir()
         (self.home / 'Library/Keychains/login.keychain-db').touch()
@@ -134,16 +134,16 @@ class InstallerTests(unittest.TestCase):
         self.work.mkdir()
         self.apps = self.root / 'Applications'
         self.apps.mkdir()
-        self.destination = self.apps / 'Snow Shot.app'
+        self.destination = self.apps / 'Clip.app'
         self.bundle = self.root / 'bundle'
         (self.bundle / 'Contents/MacOS').mkdir(parents=True)
         (self.bundle / 'Contents/Resources/assets/ocr').mkdir(parents=True)
-        self.info = dict(CFBundleIdentifier='com.snowshot.snow_shot', CFBundleExecutable='snow_shot', LSMinimumSystemVersion='15.0')
+        self.info = dict(CFBundleIdentifier='com.clipshot.clip_shot', CFBundleExecutable='clip_shot', LSMinimumSystemVersion='15.0')
         self.write_info()
-        self.executable = self.bundle / 'Contents/MacOS/snow_shot'
+        self.executable = self.bundle / 'Contents/MacOS/clip_shot'
         self.executable.write_bytes(b'fixture executable')
         self.executable.chmod(0o755)
-        (self.bundle / 'Contents/MacOS/snow-ocr-process').write_bytes(b'signed helper')
+        (self.bundle / 'Contents/MacOS/clip-ocr-process').write_bytes(b'signed helper')
         (self.bundle / 'Contents/Resources/assets/ocr/asset-manifest.json').write_bytes(b'unchanged manifest')
         self.dmg = self.root / 'package.dmg'
         self.dmg.write_bytes(b'GOOD fixture disk image')
@@ -178,8 +178,8 @@ class InstallerTests(unittest.TestCase):
 
     def test_accepts_legacy_dmg_bundle_name(self):
         self.shell('validate_and_stage "$FIXTURE/package.dmg" "$FIXTURE/package.dmg.sha256"',
-                   BUNDLE_NAME='snow_shot.app')
-        self.assertTrue((self.work / 'snow_shot.app/Contents/MacOS/snow_shot').is_file())
+                   BUNDLE_NAME='clip_shot.app')
+        self.assertTrue((self.work / 'clip_shot.app/Contents/MacOS/clip_shot').is_file())
 
     def write_info(self):
         (self.bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps(self.info))
@@ -208,7 +208,7 @@ class InstallerTests(unittest.TestCase):
         return [call for call in calls if name is None or call[0] == name]
 
     def stage(self):
-        shutil.copytree(self.bundle, self.work / 'snow_shot.app')
+        shutil.copytree(self.bundle, self.work / 'clip_shot.app')
 
     def identity(self):
         (self.state / 'identity').write_text(FINGERPRINT + '\n')
@@ -225,7 +225,7 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn('\x1b', result.stdout)
 
     def test_invalid_arguments(self):
-        for args in [['--lang'], ['--lang', 'fr'], ['--dmg'], ['--prepare-app'], ['--prepare-app', '/tmp/snow-shot-test.app'], ['--unexpected']]:
+        for args in [['--lang'], ['--lang', 'fr'], ['--dmg'], ['--prepare-app'], ['--prepare-app', '/tmp/clip-shot-test.app'], ['--unexpected']]:
             self.assertNotEqual(subprocess.run(['/bin/bash', str(SCRIPT)] + args, capture_output=True).returncode, 0)
 
     def test_language_detection(self):
@@ -263,7 +263,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(API, calls)
         self.assertIn(GITEE_API, calls)
         self.assertTrue(GITHUB in calls or GITEE in calls)
-        self.assertTrue((self.work / 'snow_shot.app').is_dir())
+        self.assertTrue((self.work / 'clip_shot.app').is_dir())
         self.assertFalse((self.root / 'mounted').exists())
         self.assertFalse(self.calls('security'))
 
@@ -290,7 +290,7 @@ class InstallerTests(unittest.TestCase):
                     (self.root / name).unlink(missing_ok=True)
                 self.shell('obtain_package; [[ -z "$github_pid" && -z "$gitee_pid" ]]',
                            BLOCK_URL=blocked, WAIT_FOR_BLOCK_URL=winner)
-                self.assertTrue((self.work / 'snow_shot.app/Contents/MacOS/snow_shot').is_file())
+                self.assertTrue((self.work / 'clip_shot.app/Contents/MacOS/clip_shot').is_file())
                 self.assertTrue((self.root / 'blocked-stopped').exists())
                 pid = int((self.root / 'blocked-ready').read_text())
                 with self.assertRaises(ProcessLookupError): os.kill(pid, 0)
@@ -331,14 +331,14 @@ class InstallerTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'darwin', 'Requires built-in JXA')
     def test_preview_and_newest_semver(self):
         preview = json.loads(json.dumps(self.metadata))
-        preview['tag_name'] = 'v2.0.0-beta_snow-shot'
+        preview['tag_name'] = 'v2.0.0-beta_clip-shot'
         preview['prerelease'] = True
         for asset in preview['assets']:
             asset['name'] = asset['name'].replace('1.2.3', '2.0.0-beta')
-            asset['browser_download_url'] = asset['browser_download_url'].replace('v1.2.3/', 'v2.0.0-beta_snow-shot/').replace('1.2.3', '2.0.0-beta')
+            asset['browser_download_url'] = asset['browser_download_url'].replace('v1.2.3/', 'v2.0.0-beta_clip-shot/').replace('1.2.3', '2.0.0-beta')
         self.release.write_text(json.dumps([self.metadata, preview]))
         result = self.shell('release_urls "$FIXTURE/metadata.json" github')
-        self.assertTrue(result.stdout.startswith('v2.0.0-beta_snow-shot\n'))
+        self.assertTrue(result.stdout.startswith('v2.0.0-beta_clip-shot\n'))
 
     @unittest.skipUnless(sys.platform == 'darwin', 'Requires built-in JXA')
     def test_gitee_attachment_validation_and_exact_version(self):
@@ -377,7 +377,7 @@ class InstallerTests(unittest.TestCase):
         self.shell('trap cleanup EXIT; detect_architecture; local_dmg="$FIXTURE/package.dmg"; '
                    'obtain_package; requirement="$REQUIREMENT"; launch=0; install_application',
                    MACHINE='x86_64', ARM_CAPABLE='0', BINARY_ARCH='x86_64')
-        self.assertTrue((self.destination / 'Contents/MacOS/snow_shot').is_file())
+        self.assertTrue((self.destination / 'Contents/MacOS/clip_shot').is_file())
         self.assertFalse((self.destination / 'old-marker').exists())
         self.assertFalse(self.calls('curl'))
         self.assertFalse(self.calls('open'))
@@ -426,7 +426,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(imported[imported.index('-P')+1], 'B'*64)
         exported = next(c for c in self.calls('openssl') if c[1] == 'pkcs12')
         self.assertEqual(exported[exported.index('-passout')+1],
-                         'env:SNOW_INSTALLER_P12_PASSWORD')
+                         'env:CLIP_INSTALLER_P12_PASSWORD')
         self.assertFalse((self.work / 'private.pem').exists())
         self.assertFalse((self.work / 'identity.p12').exists())
 
@@ -456,18 +456,18 @@ openssl x509 -in "$work/certificate.pem" -noout -text > "$FIXTURE/certificate.tx
     def test_native_outer_resigning_preserves_embedded_code(self):
         # System binaries supply a fixture without a compiler or developer tools.
         shutil.copyfile('/bin/echo', self.executable)
-        helper = self.bundle / 'Contents/MacOS/snow-ocr-process'
+        helper = self.bundle / 'Contents/MacOS/clip-ocr-process'
         shutil.copyfile('/bin/echo', helper)
         helper.chmod(0o755)
         self.stage()
         # Ad-hoc fixture tests sealing only; permission continuity needs a real identity.
-        (self.state / 'requirement').write_text('identifier "com.snowshot.snow_shot"')
+        (self.state / 'requirement').write_text('identifier "com.clipshot.clip_shot"')
         self.shell('''codesign() { /usr/bin/codesign "$@"; }
 prepare_identity() { signing_identity=-; }
 sign_application
 ''')
-        for path in ['Contents/MacOS/snow-ocr-process', 'Contents/Resources/assets/ocr/asset-manifest.json']:
-            self.assertEqual((self.bundle / path).read_bytes(), (self.work / 'snow_shot.app' / path).read_bytes())
+        for path in ['Contents/MacOS/clip-ocr-process', 'Contents/Resources/assets/ocr/asset-manifest.json']:
+            self.assertEqual((self.bundle / path).read_bytes(), (self.work / 'clip_shot.app' / path).read_bytes())
 
     def test_missing_identity_never_regenerates(self):
         self.identity()
@@ -488,8 +488,8 @@ sign_application
         self.stage()
         self.identity()
         self.shell('sign_application')
-        for path in ['Contents/MacOS/snow-ocr-process', 'Contents/Resources/assets/ocr/asset-manifest.json']:
-            self.assertEqual((self.bundle / path).read_bytes(), (self.work / 'snow_shot.app' / path).read_bytes())
+        for path in ['Contents/MacOS/clip-ocr-process', 'Contents/Resources/assets/ocr/asset-manifest.json']:
+            self.assertEqual((self.bundle / path).read_bytes(), (self.work / 'clip_shot.app' / path).read_bytes())
         signing = [c for c in self.calls('codesign') if '--force' in c]
         self.assertEqual(len(signing), 1)
         self.assertNotIn('--deep', signing[0])
@@ -554,7 +554,7 @@ sign_application''', success=False)
     def prepare_code(self):
         return '''trap cleanup EXIT
 local_dmg="$FIXTURE/package.dmg"
-prepare_app="$FIXTURE/Prepared Snow Shot.app"
+prepare_app="$FIXTURE/Prepared Clip.app"
 validate_prepare_output
 prepare_state
 obtain_package
@@ -566,13 +566,13 @@ prepare_application
         self.previous()
         self.identity()
         self.shell(self.prepare_code())
-        output = self.root / 'Prepared Snow Shot.app'
-        self.assertTrue((output / 'Contents/MacOS/snow_shot').exists())
+        output = self.root / 'Prepared Clip.app'
+        self.assertTrue((output / 'Contents/MacOS/clip_shot').exists())
         self.assertTrue((self.destination / 'old-marker').exists())
         self.assertEqual((self.state / 'requirement').read_text().strip(), REQUIREMENT)
         for name in ('curl', 'open', 'sudo', 'osascript', 'pgrep', 'openssl'):
             self.assertFalse(self.calls(name), name)
-        for path in ['Contents/MacOS/snow-ocr-process', 'Contents/Resources/assets/ocr/asset-manifest.json']:
+        for path in ['Contents/MacOS/clip-ocr-process', 'Contents/Resources/assets/ocr/asset-manifest.json']:
             self.assertEqual((self.bundle / path).read_bytes(), (output / path).read_bytes())
         self.assertFalse(self.work.exists())
         self.assertFalse((self.state / 'lock').exists())
@@ -594,7 +594,7 @@ prepare_application
         (self.state / 'requirement').write_text(REQUIREMENT)
         self.shell(self.prepare_code(), success=False, FAIL_REQUIREMENT='1')
         self.assertTrue((self.destination / 'old-marker').exists())
-        self.assertFalse((self.root / 'Prepared Snow Shot.app').exists())
+        self.assertFalse((self.root / 'Prepared Clip.app').exists())
         self.assertFalse(self.work.exists())
         self.assertFalse((self.state / 'lock').exists())
         self.assertEqual((self.state / 'requirement').read_text(), REQUIREMENT)
@@ -605,7 +605,7 @@ prepare_application
         code = self.prepare_code().replace('prepare_application', '''ditto() { return 1; }
 prepare_application''')
         self.shell(code, success=False)
-        self.assertFalse((self.root / 'Prepared Snow Shot.app').exists())
+        self.assertFalse((self.root / 'Prepared Clip.app').exists())
         self.assertFalse((self.state / 'requirement').exists())
         self.assertTrue((self.destination / 'old-marker').exists())
 
@@ -613,7 +613,7 @@ prepare_application''')
         self.sum.write_text('0' * 64)
         self.shell(self.prepare_code(), success=False)
         self.assertFalse(self.calls('security'))
-        self.assertFalse((self.root / 'Prepared Snow Shot.app').exists())
+        self.assertFalse((self.root / 'Prepared Clip.app').exists())
         self.assertFalse((self.state / 'lock').exists())
 
     def test_prepare_concurrent_install_retains_other_lock(self):
@@ -624,16 +624,16 @@ prepare_application''')
 
     def test_legacy_installation_migrates_to_product_name(self):
         self.stage()
-        legacy = self.apps / 'snow_shot.app'
+        legacy = self.apps / 'clip_shot.app'
         legacy.mkdir()
         (legacy / 'old-marker').write_text('previous application')
         self.shell('trap cleanup EXIT; requirement="$REQUIREMENT"; install_application')
         self.assertFalse(legacy.exists())
-        self.assertTrue((self.destination / 'Contents/MacOS/snow_shot').is_file())
+        self.assertTrue((self.destination / 'Contents/MacOS/clip_shot').is_file())
 
     def test_failed_legacy_migration_restores_original_path(self):
         self.stage()
-        legacy = self.apps / 'snow_shot.app'
+        legacy = self.apps / 'clip_shot.app'
         legacy.mkdir()
         (legacy / 'old-marker').write_text('previous application')
         self.shell('trap cleanup EXIT; requirement="$REQUIREMENT"; install_application',
@@ -646,8 +646,8 @@ prepare_application''')
         self.stage()
         self.shell('trap cleanup EXIT; requirement="$REQUIREMENT"; launch=0; install_application')
         self.assertFalse((self.destination / 'old-marker').exists())
-        self.assertTrue((self.destination / 'Contents/MacOS/snow_shot').exists())
-        self.assertFalse(list(self.apps.glob('.snow-shot-install.*')))
+        self.assertTrue((self.destination / 'Contents/MacOS/clip_shot').exists())
+        self.assertFalse(list(self.apps.glob('.clip-shot-install.*')))
         self.assertEqual((self.state / 'requirement').read_text().strip(), REQUIREMENT)
         self.assertFalse(self.calls('open'))
         self.assertFalse(self.calls('sudo'))
@@ -657,7 +657,7 @@ prepare_application''')
         self.stage()
         self.shell('trap cleanup EXIT; requirement="$REQUIREMENT"; install_application', success=False, FAIL_FINAL='1')
         self.assertTrue((self.destination / 'old-marker').exists())
-        self.assertFalse(list(self.apps.glob('.snow-shot-install.*')))
+        self.assertFalse(list(self.apps.glob('.clip-shot-install.*')))
         self.assertFalse((self.state / 'requirement').exists())
 
     def test_failed_first_install_leaves_no_partial_app(self):
@@ -669,7 +669,7 @@ prepare_application''')
         self.previous()
         self.stage()
         self.shell('trap cleanup EXIT; requirement="$REQUIREMENT"; install_application', success=False, FAIL_OPEN='1')
-        self.assertTrue((self.destination / 'Contents/MacOS/snow_shot').exists())
+        self.assertTrue((self.destination / 'Contents/MacOS/clip_shot').exists())
         self.assertFalse((self.destination / 'old-marker').exists())
 
     def test_running_app_is_never_force_killed(self):
@@ -681,17 +681,17 @@ prepare_application''')
 
     def test_interrupt_between_moves_restores_previous_app(self):
         self.previous()
-        self.shell('trap cleanup EXIT; previous_destination="$destination"; slot=$(mktemp -d "$FIXTURE/Applications/.snow-shot-install.XXXXXX"); mv "$destination" "$slot/previous.app"; exit 143', success=False)
+        self.shell('trap cleanup EXIT; previous_destination="$destination"; slot=$(mktemp -d "$FIXTURE/Applications/.clip-shot-install.XXXXXX"); mv "$destination" "$slot/previous.app"; exit 143', success=False)
         self.assertTrue((self.destination / 'old-marker').exists())
 
     def test_failed_recovery_preserves_backup(self):
         self.previous()
         self.shell('''trap cleanup EXIT
-previous_destination="$destination"; slot=$(mktemp -d "$FIXTURE/Applications/.snow-shot-install.XXXXXX")
+previous_destination="$destination"; slot=$(mktemp -d "$FIXTURE/Applications/.clip-shot-install.XXXXXX")
 mv "$destination" "$slot/previous.app"
 as_install() { return 1; }
 exit 1''', success=False)
-        backups = list(self.apps.glob('.snow-shot-install.*/previous.app/old-marker'))
+        backups = list(self.apps.glob('.clip-shot-install.*/previous.app/old-marker'))
         self.assertEqual(len(backups), 1)
 
     def test_root_rejected_before_keychain_operations(self):

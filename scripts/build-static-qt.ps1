@@ -16,16 +16,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
-if ([string]::IsNullOrWhiteSpace($QtVersion)) { $QtVersion = $script:SnowQtVersion }
-if ($QtVersion -cne $script:SnowQtVersion) {
-    throw "The audited Qt toolchain requires Qt $script:SnowQtVersion, requested $QtVersion."
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
+if ([string]::IsNullOrWhiteSpace($QtVersion)) { $QtVersion = $script:ClipQtVersion }
+if ($QtVersion -cne $script:ClipQtVersion) {
+    throw "The audited Qt toolchain requires Qt $script:ClipQtVersion, requested $QtVersion."
 }
-$hostArchitecture = Get-SnowWindowsHostArchitecture
+$hostArchitecture = Get-ClipWindowsHostArchitecture
 $crossCompilation = $Architecture -cne $hostArchitecture
-if ($crossCompilation) { $HostQtPrefix = Resolve-SnowQtHostPrefix -HostQtPrefix $HostQtPrefix }
+if ($crossCompilation) { $HostQtPrefix = Resolve-ClipQtHostPrefix -HostQtPrefix $HostQtPrefix }
 else { $HostQtPrefix = "" }
-Add-SnowMsvcToolsToPath -Architecture $Architecture | Out-Null
+Add-ClipMsvcToolsToPath -Architecture $Architecture | Out-Null
 $enableDevelopmentModules = $DevelopmentModules -or $Configuration -eq "Debug"
 
 function Invoke-Checked {
@@ -219,7 +219,7 @@ function Assert-QtDependencyArchitecture {
 
     # The pinned zlib-ng port names its static MSVC library zlibstatic.lib.
     foreach ($library in @('zlibstatic.lib', 'libpng16.lib')) {
-        if (-not (Test-SnowWindowsLibraryArchitecture -Path (Join-Path $Prefix "lib/$library") `
+        if (-not (Test-ClipWindowsLibraryArchitecture -Path (Join-Path $Prefix "lib/$library") `
                 -Architecture $Architecture)) {
             throw "Static Qt dependency $library does not match target architecture $Architecture."
         }
@@ -230,8 +230,8 @@ function Assert-QtSourceArchive {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $actualHash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actualHash -cne $script:SnowQtToolchain.sourceArchiveSha256) {
-        throw "Qt $script:SnowQtVersion source archive SHA256 mismatch: $Path"
+    if ($actualHash -cne $script:ClipQtToolchain.sourceArchiveSha256) {
+        throw "Qt $script:ClipQtVersion source archive SHA256 mismatch: $Path"
     }
 }
 
@@ -242,14 +242,14 @@ function Test-InstalledQtSystemCodecs {
         [ValidateSet("x64", "arm64")][string]$Architecture = "x64"
     )
 
-    return Test-SnowQtSystemCodecKit -Qt6Dir (Join-Path $Prefix "lib\cmake\Qt6") `
+    return Test-ClipQtSystemCodecKit -Qt6Dir (Join-Path $Prefix "lib\cmake\Qt6") `
         -Configuration $Configuration -Architecture $Architecture
 }
 
 function Test-InstalledQtLicenseBundle {
     param([Parameter(Mandatory = $true)][string]$Prefix)
 
-    $licenseRoot = Join-Path $Prefix "share\snow-apps\qt-licenses"
+    $licenseRoot = Join-Path $Prefix "share\clip-apps\qt-licenses"
     foreach ($requiredLicenseFile in @(
             "manifest.json",
             "root\REUSE.toml",
@@ -266,8 +266,8 @@ function Test-InstalledQtLicenseBundle {
     try {
         $manifest = Get-Content -LiteralPath (Join-Path $licenseRoot "manifest.json") -Raw |
             ConvertFrom-Json
-        if ($manifest.SchemaVersion -ne 1 -or $manifest.QtVersion -cne $script:SnowQtVersion -or
-            $manifest.SourceArchiveSha256 -cne $script:SnowQtToolchain.sourceArchiveSha256) {
+        if ($manifest.SchemaVersion -ne 1 -or $manifest.QtVersion -cne $script:ClipQtVersion -or
+            $manifest.SourceArchiveSha256 -cne $script:ClipQtToolchain.sourceArchiveSha256) {
             return $false
         }
         foreach ($component in @("root", "qtbase", "qtsvg", "qttools", "qttranslations")) {
@@ -275,7 +275,7 @@ function Test-InstalledQtLicenseBundle {
         }
     }
     catch { return $false }
-    foreach ($patch in $script:SnowStaticQtSourcePatches) {
+    foreach ($patch in $script:ClipStaticQtSourcePatches) {
         $patchPath = Join-Path $licenseRoot "patches\$($patch.File)"
         if (-not (Test-Path -LiteralPath $patchPath -PathType Leaf) -or
             (Get-FileHash -LiteralPath $patchPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
@@ -288,13 +288,13 @@ function Install-QtSourcePatches {
     param([Parameter(Mandatory = $true)][string]$Source)
 
     $versionPath = Join-Path $Source "qtbase/.cmake.conf"
-    $expectedVersion = [regex]::Escape($script:SnowQtVersion)
+    $expectedVersion = [regex]::Escape($script:ClipQtVersion)
     if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf) -or
         (Get-Content -LiteralPath $versionPath -Raw) -notmatch
             "(?m)^set\(QT_REPO_MODULE_VERSION `"$expectedVersion`"\)\r?`$") {
-        throw "The audited Qt source patches require qtbase $($script:SnowQtVersion): $versionPath"
+        throw "The audited Qt source patches require qtbase $($script:ClipQtVersion): $versionPath"
     }
-    foreach ($patch in $script:SnowStaticQtSourcePatches) {
+    foreach ($patch in $script:ClipStaticQtSourcePatches) {
         $patchPath = Join-Path $PSScriptRoot $patch.File
         $previousGitCeiling = $env:GIT_CEILING_DIRECTORIES
         # A source tree inside this repository must not inherit its patch root.
@@ -327,7 +327,7 @@ function Install-QtLicenseBundle {
         [Parameter(Mandatory = $true)][string]$SourceArchive
     )
 
-    $licenseRoot = Join-Path $Prefix "share\snow-apps\qt-licenses"
+    $licenseRoot = Join-Path $Prefix "share\clip-apps\qt-licenses"
     if (-not (Test-PathIsSameOrDescendant -Path $licenseRoot -Parent $Prefix)) {
         throw "The Qt license bundle destination escapes the install prefix: $licenseRoot"
     }
@@ -364,17 +364,17 @@ function Install-QtLicenseBundle {
     }
     $patchesDirectory = Join-Path $licenseRoot "patches"
     New-Item -ItemType Directory -Path $patchesDirectory -Force | Out-Null
-    foreach ($patch in $script:SnowStaticQtSourcePatches) {
+    foreach ($patch in $script:ClipStaticQtSourcePatches) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $patch.File) -Destination $patchesDirectory
     }
 
     [ordered]@{
         SchemaVersion = 1
         QtVersion = $Version
-        SourceArchiveSha256 = $script:SnowQtToolchain.sourceArchiveSha256
+        SourceArchiveSha256 = $script:ClipQtToolchain.sourceArchiveSha256
         SourceArchive = $SourceArchive
         Components = @($licenseSources.Keys)
-        SourcePatches = $script:SnowStaticQtSourcePatches
+        SourcePatches = $script:ClipStaticQtSourcePatches
     } | ConvertTo-Json -Depth 3 | Set-Content `
         -LiteralPath (Join-Path $licenseRoot "manifest.json") -Encoding utf8
 }
@@ -389,7 +389,7 @@ function Write-StaticQtBuildStamp {
         [Parameter(Mandatory = $true)][int]$BuildParallelism,
         [bool]$WithDevelopmentModules = ($BuildConfiguration -eq "Debug"),
         [ValidateSet("x64", "arm64")][string]$Architecture = "x64",
-        [string]$HostArchitecture = (Get-SnowWindowsHostArchitecture),
+        [string]$HostArchitecture = (Get-ClipWindowsHostArchitecture),
         [string]$HostQtPrefix = ""
     )
 
@@ -399,9 +399,9 @@ function Write-StaticQtBuildStamp {
         $HostQtPrefix = Split-Path -Parent (Split-Path -Parent $stampDirectory)
     }
     [ordered]@{
-        SchemaVersion = $script:SnowStaticQtSchemaVersion
+        SchemaVersion = $script:ClipStaticQtSchemaVersion
         QtVersion = $Version
-        SourceArchiveSha256 = $script:SnowQtToolchain.sourceArchiveSha256
+        SourceArchiveSha256 = $script:ClipQtToolchain.sourceArchiveSha256
         Configuration = $BuildConfiguration
         Architecture = $Architecture
         HostArchitecture = $HostArchitecture
@@ -414,14 +414,14 @@ function Write-StaticQtBuildStamp {
         } else { @() }
         DevelopmentModules = $WithDevelopmentModules
         DependencyFingerprint = $Fingerprint
-        FeatureFingerprint = $script:SnowStaticQtFeatureFingerprint
-        SourcePatches = $script:SnowStaticQtSourcePatches
-        Ltcg = (Get-SnowStaticQtLtcgEnabled -Configuration $BuildConfiguration -Architecture $Architecture)
+        FeatureFingerprint = $script:ClipStaticQtFeatureFingerprint
+        SourcePatches = $script:ClipStaticQtSourcePatches
+        Ltcg = (Get-ClipStaticQtLtcgEnabled -Configuration $BuildConfiguration -Architecture $Architecture)
         SystemPng = ($BuildConfiguration -eq "Release")
         SystemZlib = ($BuildConfiguration -eq "Release")
         Timezone = $true
         TimezoneLocale = $false
-        LicenseBundle = "share/snow-apps/qt-licenses"
+        LicenseBundle = "share/clip-apps/qt-licenses"
         SourceArchive = $SourceArchive
         Submodules = @("qtbase", "qtsvg", "qttools", "qttranslations")
         SkippedSubmodules = @(
@@ -463,7 +463,7 @@ function Assert-CacheEntry {
 }
 
 if ([string]::IsNullOrWhiteSpace($DependencyPrefix)) {
-    $releaseTarget = Get-SnowWindowsTarget -Architecture $Architecture
+    $releaseTarget = Get-ClipWindowsTarget -Architecture $Architecture
     $DependencyPrefix = Join-Path $releaseTarget.InstalledRoot $releaseTarget.Triplet
 }
 $dependencyPrefix = [System.IO.Path]::GetFullPath($DependencyPrefix)
@@ -482,7 +482,7 @@ Assert-QtDependencyArchitecture -Prefix $dependencyPrefix -Architecture $Archite
 
 $installPrefix = [System.IO.Path]::GetFullPath($InstallPrefix)
 $qtConfig = Join-Path $installPrefix "lib\cmake\Qt6\Qt6Config.cmake"
-$stampPath = Join-Path $installPrefix "share\snow-apps\static-qt-build.json"
+$stampPath = Join-Path $installPrefix "share\clip-apps\static-qt-build.json"
 
 $workRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
@@ -491,7 +491,7 @@ else {
     [System.IO.Path]::GetTempPath()
 }
 if ([string]::IsNullOrWhiteSpace($SourceDirectory)) {
-    $SourceDirectory = Join-Path $workRoot "snow-qt-$QtVersion-$Architecture/qt-everywhere-src-$QtVersion"
+    $SourceDirectory = Join-Path $workRoot "clip-qt-$QtVersion-$Architecture/qt-everywhere-src-$QtVersion"
 }
 $sourceDirectory = [System.IO.Path]::GetFullPath($SourceDirectory)
 if ([string]::IsNullOrWhiteSpace($BuildDirectory)) {
@@ -510,24 +510,24 @@ if (Test-Path -LiteralPath $qtConfig -PathType Leaf) {
     $binaryStampMatches = $false
     if (Test-Path -LiteralPath $stampPath -PathType Leaf) {
         $stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
-        $binaryStampMatches = (Test-SnowStaticQtStamp -Stamp $stamp -Version $QtVersion `
+        $binaryStampMatches = (Test-ClipStaticQtStamp -Stamp $stamp -Version $QtVersion `
             -Configuration $Configuration -Architecture $Architecture -HostArchitecture $hostArchitecture) -and
             $stamp.DependencyFingerprint -eq $dependencyFingerprint
         if ($binaryStampMatches) {
             $toolPrefix = if ($crossCompilation) { $HostQtPrefix } else { $installPrefix }
-            $binaryStampMatches = Test-SnowQtHostToolHashes -Stamp $stamp -Prefix $toolPrefix
+            $binaryStampMatches = Test-ClipQtHostToolHashes -Stamp $stamp -Prefix $toolPrefix
             if ($crossCompilation) { $binaryStampMatches = $binaryStampMatches -and $stamp.HostQtPrefix -ceq $HostQtPrefix }
         }
         $stampMatches = $binaryStampMatches
     }
     $systemCodecsMatch = Test-InstalledQtSystemCodecs -Prefix $installPrefix -Configuration $Configuration -Architecture $Architecture
     $systemCodecsMatch = $systemCodecsMatch -and
-        (Get-SnowQtKitVersion -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6")) -ceq $QtVersion -and
-        (Test-SnowQtArchitecture -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6") `
+        (Get-ClipQtKitVersion -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6")) -ceq $QtVersion -and
+        (Test-ClipQtArchitecture -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6") `
             -Architecture $Architecture -Configuration $Configuration)
     $developmentModulesMatch = -not $enableDevelopmentModules -or
-        (Test-SnowQtDevelopmentModules -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6"))
-    $translationsMatch = Test-SnowQtTranslationKit -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6")
+        (Test-ClipQtDevelopmentModules -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6"))
+    $translationsMatch = Test-ClipQtTranslationKit -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6")
     if ($stampMatches -and $systemCodecsMatch -and
         $developmentModulesMatch -and $translationsMatch -and
         (Test-InstalledQtLicenseBundle -Prefix $installPrefix)) {
@@ -555,7 +555,7 @@ if ($Force -and (Test-Path -LiteralPath $buildDirectory -PathType Container)) {
 }
 
 $configurationArgument = if ($Configuration -eq "Debug") { "-debug" } else { "-release" }
-$ltcgEnabled = Get-SnowStaticQtLtcgEnabled -Configuration $Configuration -Architecture $Architecture
+$ltcgEnabled = Get-ClipStaticQtLtcgEnabled -Configuration $Configuration -Architecture $Architecture
 $ltcgArgument = if ($ltcgEnabled) { "-ltcg" } else { "-no-ltcg" }
 $zlibArgument = if ($Configuration -eq "Debug") { "-qt-zlib" } else { "-system-zlib" }
 $pngArgument = if ($Configuration -eq "Debug") { "-qt-libpng" } else { "-system-libpng" }
@@ -613,7 +613,7 @@ if ($refreshLicenseBundleOnly) {
         -BuildConfiguration $Configuration -Fingerprint $dependencyFingerprint `
         -SourceArchive $sourceUrls[-1] -BuildParallelism $Parallelism `
         -Architecture $Architecture -HostArchitecture $hostArchitecture -HostQtPrefix $HostQtPrefix `
-        -WithDevelopmentModules (Test-SnowQtDevelopmentModules -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6"))
+        -WithDevelopmentModules (Test-ClipQtDevelopmentModules -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6"))
     Write-Output "Validated static Qt $QtVersion ($Configuration) and refreshed its license provenance at $installPrefix"
     exit 0
 }
@@ -757,13 +757,13 @@ Invoke-Checked -Command "cmake" -Arguments @(
 if (-not (Test-Path -LiteralPath $qtConfig -PathType Leaf)) {
     throw "Qt $QtVersion installation did not produce $qtConfig"
 }
-if (-not (Test-SnowQtTranslationKit -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6"))) {
+if (-not (Test-ClipQtTranslationKit -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6"))) {
     throw "The installed Qt kit does not provide Simplified and Traditional Chinese stock-dialog translations."
 }
 if (-not (Test-InstalledQtSystemCodecs -Prefix $installPrefix -Configuration $Configuration -Architecture $Architecture)) {
     throw "The installed Qt targets do not export the audited $Configuration codec/LTCG/timezone feature policy."
 }
-if (-not (Test-SnowQtArchitecture -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6") `
+if (-not (Test-ClipQtArchitecture -Qt6Dir (Join-Path $installPrefix "lib/cmake/Qt6") `
         -Architecture $Architecture -Configuration $Configuration)) {
     throw "The installed Qt libraries do not match the requested $Architecture target."
 }

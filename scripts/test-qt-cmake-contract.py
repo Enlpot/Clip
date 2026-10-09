@@ -66,8 +66,8 @@ endif()
     def configure(self, contents, success=True):
         (self.source / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.25)
-project(SnowQtContract NONE)
-include("{ROOT.as_posix()}/cmake/SnowQt.cmake")
+project(ClipQtContract NONE)
+include("{ROOT.as_posix()}/cmake/ClipQt.cmake")
 {contents}
 ''', encoding='utf-8')
         result = subprocess.run([
@@ -85,16 +85,16 @@ include("{ROOT.as_posix()}/cmake/SnowQt.cmake")
         child = self.source / 'child'
         child.mkdir()
         (child / 'CMakeLists.txt').write_text(f'''
-include("{ROOT.as_posix()}/cmake/SnowQt.cmake")
-snow_find_qt(COMPONENTS Core)
+include("{ROOT.as_posix()}/cmake/ClipQt.cmake")
+clip_find_qt(COMPONENTS Core)
 get_property(definitions DIRECTORY PROPERTY COMPILE_DEFINITIONS)
 if(NOT "QT_DISABLE_DEPRECATED_UP_TO={DEPRECATION_VERSION}" IN_LIST definitions)
     message(FATAL_ERROR "Nested project lost the deprecation policy")
 endif()
 ''', encoding='utf-8')
         self.configure(f'''
-snow_find_qt(COMPONENTS Core Gui GLOBAL)
-if(NOT SNOW_QT_VERSION STREQUAL "{QT_VERSION}")
+clip_find_qt(COMPONENTS Core Gui GLOBAL)
+if(NOT CLIP_QT_VERSION STREQUAL "{QT_VERSION}")
     message(FATAL_ERROR "Qt version does not match the manifest")
 endif()
 get_target_property(definitions Qt6::Core INTERFACE_COMPILE_DEFINITIONS)
@@ -106,7 +106,7 @@ add_subdirectory(child)
 
     def test_wrong_public_version_is_rejected(self):
         self.write_qt(version='6.11.1')
-        output = self.configure('snow_find_qt(COMPONENTS Core)', success=False)
+        output = self.configure('clip_find_qt(COMPONENTS Core)', success=False)
         self.assertIn(QT_VERSION, output)
 
     def test_qt_package_version_bypass_cannot_accept_an_unaudited_kit(self):
@@ -117,16 +117,16 @@ set(PACKAGE_VERSION "6.11.1")
 set(PACKAGE_VERSION_COMPATIBLE TRUE)
 set(PACKAGE_VERSION_EXACT TRUE)
 ''', encoding='utf-8')
-        output = self.configure('snow_find_qt(COMPONENTS Core)', success=False)
+        output = self.configure('clip_find_qt(COMPONENTS Core)', success=False)
         self.assertIn('does not match the audited Qt', output)
 
     def test_private_module_matches_resolved_public_kit_and_is_global(self):
         self.write_qt()
         child = self.source / 'child'
         child.mkdir()
-        (child / 'CMakeLists.txt').write_text('snow_find_qt_private(Gui)\n', encoding='utf-8')
+        (child / 'CMakeLists.txt').write_text('clip_find_qt_private(Gui)\n', encoding='utf-8')
         self.configure('''
-snow_find_qt(COMPONENTS Core Gui GLOBAL)
+clip_find_qt(COMPONENTS Core Gui GLOBAL)
 add_subdirectory(child)
 if(NOT TARGET Qt6::GuiPrivate)
     message(FATAL_ERROR "Private Qt target is unavailable to sibling consumers")
@@ -137,24 +137,24 @@ endif()
         self.write_qt()
         self.write_package('Qt6GuiPrivate', '6.11.1', '')
         output = self.configure('''
-snow_find_qt(COMPONENTS Core Gui)
-snow_find_qt_private(Gui)
+clip_find_qt(COMPONENTS Core Gui)
+clip_find_qt_private(Gui)
 ''', success=False)
         self.assertIn('Qt6GuiPrivate', output)
 
     def test_private_module_requires_public_resolution(self):
-        output = self.configure('snow_find_qt_private(Gui)', success=False)
-        self.assertIn('Resolve Qt with snow_find_qt', output)
+        output = self.configure('clip_find_qt_private(Gui)', success=False)
+        self.assertIn('Resolve Qt with clip_find_qt', output)
 
     def test_qtpaths_tool_location_works_without_qmake(self):
         self.write_qt()
         self.configure('''
-snow_find_qt(COMPONENTS Core Gui)
+clip_find_qt(COMPONENTS Core Gui)
 add_executable(Qt6::qtpaths IMPORTED)
 set_target_properties(Qt6::qtpaths PROPERTIES
     IMPORTED_CONFIGURATIONS RELEASE
     IMPORTED_LOCATION_RELEASE "${CMAKE_BINARY_DIR}/custom-tools/qtpaths")
-snow_qt_bin_directory(bin)
+clip_qt_bin_directory(bin)
 if(NOT bin STREQUAL "${CMAKE_BINARY_DIR}/custom-tools")
     message(FATAL_ERROR "Qt tools were not resolved from the imported qtpaths target")
 endif()
@@ -163,10 +163,10 @@ endif()
     def test_qt_install_paths_work_when_optional_tools_are_absent(self):
         self.write_qt()
         self.configure('''
-snow_find_qt(COMPONENTS Core Gui)
+clip_find_qt(COMPONENTS Core Gui)
 set(QT6_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/kit")
 set(QT6_INSTALL_BINS "custom-tools")
-snow_qt_bin_directory(bin)
+clip_qt_bin_directory(bin)
 if(NOT bin STREQUAL "${CMAKE_BINARY_DIR}/kit/custom-tools")
     message(FATAL_ERROR "Qt's exported install paths were ignored")
 endif()
@@ -175,16 +175,16 @@ endif()
     def assert_workspace(self, *, linkage, gui_features, core_features, png, jpeg, crt):
         self.write_qt(linkage=linkage, gui_features=gui_features, core_features=core_features)
         self.configure(f'''
-snow_find_qt(COMPONENTS Core Gui)
-include("{ROOT.as_posix()}/cmake/SnowWorkspace.cmake")
+clip_find_qt(COMPONENTS Core Gui)
+include("{ROOT.as_posix()}/cmake/ClipWorkspace.cmake")
 set(MSVC TRUE)
-set(SNOW_APPS_QT_STATIC ON)
-set(SNOW_APPS_RELEASE_STATIC OFF)
-set(SNOW_APPS_API_BASE_URL "https://example.invalid")
+set(CLIP_APPS_QT_STATIC ON)
+set(CLIP_APPS_RELEASE_STATIC OFF)
+set(CLIP_APPS_API_BASE_URL "https://example.invalid")
 set(Qt6_DIR "a-misleading-static-path-that-does-not-exist")
-snow_workspace_configure_options()
-if(NOT SNOW_IMAGE_LINK_PNG_DEPENDENCIES STREQUAL "{png}" OR
-   NOT SNOW_IMAGE_LINK_JPEG_DEPENDENCIES STREQUAL "{jpeg}")
+clip_workspace_configure_options()
+if(NOT CLIP_IMAGE_LINK_PNG_DEPENDENCIES STREQUAL "{png}" OR
+   NOT CLIP_IMAGE_LINK_JPEG_DEPENDENCIES STREQUAL "{jpeg}")
     message(FATAL_ERROR "Codec linkage does not match imported target metadata")
 endif()
 if(NOT CMAKE_MSVC_RUNTIME_LIBRARY STREQUAL "{crt}")
@@ -212,11 +212,11 @@ endif()
     def test_production_static_linkage_rejects_the_dynamic_crt(self):
         self.write_qt(linkage='STATIC', core_features='')
         output = self.configure(f'''
-snow_find_qt(COMPONENTS Core Gui)
-include("{ROOT.as_posix()}/cmake/SnowWorkspace.cmake")
+clip_find_qt(COMPONENTS Core Gui)
+include("{ROOT.as_posix()}/cmake/ClipWorkspace.cmake")
 set(MSVC TRUE)
-set(SNOW_APPS_RELEASE_STATIC ON)
-snow_workspace_configure_options()
+set(CLIP_APPS_RELEASE_STATIC ON)
+clip_workspace_configure_options()
 ''', success=False)
         self.assertIn('requires a Qt kit built with the static MSVC runtime', ' '.join(output.split()))
 

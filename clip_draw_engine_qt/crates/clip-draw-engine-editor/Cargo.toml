@@ -1,0 +1,18 @@
+[package]
+name = "clip-draw-engine-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clip-draw-engine-core = { path = "../clip-draw-engine-core" }
+clip-draw-engine-document = { path = "../clip-draw-engine-document" }
+clip-draw-engine-interaction = { path = "../clip-draw-engine-interaction" }
+clip-draw-engine-model = { path = "../clip-draw-engine-model" }
+serde = { version = "1.0", features = ["derive"] }
+
+[lib]
+path = "src/lib.rs"

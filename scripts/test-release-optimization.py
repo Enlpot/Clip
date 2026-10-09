@@ -10,13 +10,13 @@ import unittest
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 WARNINGS = REPOSITORY / "cmake/ProjectWarnings.cmake"
-POLICY = REPOSITORY / "cmake/SnowShotReleaseOptimization.cmake"
+POLICY = REPOSITORY / "cmake/ClipShotReleaseOptimization.cmake"
 
 
 class ReleaseOptimizationTests(unittest.TestCase):
     def configure(self, compiler="MSVC", optimization=True, size=True, fixture="", succeeds=True,
                   apple=False, architecture="x64", initial_ipo=False):
-        with tempfile.TemporaryDirectory(prefix="snow-release-policy-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="clip-release-policy-") as temporary:
             root = Path(temporary)
             (root / "CMakeLists.txt").write_text(
                 'cmake_minimum_required(VERSION 3.30)\n'
@@ -27,11 +27,11 @@ class ReleaseOptimizationTests(unittest.TestCase):
                 f'set(MSVC {"TRUE" if compiler == "MSVC" else "FALSE"})\n'
                 f'set(CMAKE_CXX_COMPILER_ID "{compiler}")\n'
                 f'set(APPLE {"TRUE" if apple else "FALSE"})\n'
-                f'set(SNOW_WINDOWS_ARCHITECTURE "{architecture}")\n'
+                f'set(CLIP_WINDOWS_ARCHITECTURE "{architecture}")\n'
                 f'set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE {"ON" if initial_ipo else "OFF"})\n'
-                'set(SNOW_APPS_BUILD_SNOW_SHOT TRUE)\n'
-                f'set(SNOW_APPS_ENABLE_RELEASE_OPTIMIZATION {"ON" if optimization else "OFF"})\n'
-                f'set(SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION {"ON" if size else "OFF"})\n'
+                'set(CLIP_APPS_BUILD_CLIP_SHOT TRUE)\n'
+                f'set(CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION {"ON" if optimization else "OFF"})\n'
+                f'set(CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION {"ON" if size else "OFF"})\n'
                 f'include("{WARNINGS.as_posix()}")\n'
                 'file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/cold.txt" "")\n'
                 'file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/hot.txt" "")\n'
@@ -40,7 +40,7 @@ class ReleaseOptimizationTests(unittest.TestCase):
                 'set_property(SOURCE cold.txt PROPERTY COMPILE_OPTIONS "existing-source-option")\n'
                 + fixture + '\n'
                 'get_target_property(ipo probe INTERPROCEDURAL_OPTIMIZATION_RELEASE)\n'
-                'get_target_property(policy probe SNOW_RELEASE_OPTIMIZATION_POLICY)\n'
+                'get_target_property(policy probe CLIP_RELEASE_OPTIMIZATION_POLICY)\n'
                 'get_source_file_property(cold cold.txt COMPILE_OPTIONS)\n'
                 'get_source_file_property(hot hot.txt COMPILE_OPTIONS)\n'
                 'get_source_file_property(cold_pch cold.txt SKIP_PRECOMPILE_HEADERS)\n'
@@ -70,7 +70,7 @@ class ReleaseOptimizationTests(unittest.TestCase):
     def test_msvc_policies_preserve_ipo_data_stripping_and_debug(self):
         for policy, wanted, rejected in (("speed", "/O2", "/O1"), ("size", "/O1", "/O2")):
             with self.subTest(policy=policy):
-                options = self.configure(fixture=f"snow_apply_release_options(probe POLICY {policy})")
+                options = self.configure(fixture=f"clip_apply_release_options(probe POLICY {policy})")
                 compile_options, link_options, ipo, named_policy = options["Release"][:4]
                 self.assertIn(wanted, compile_options.split(";"))
                 self.assertNotIn(rejected, compile_options.split(";"))
@@ -86,7 +86,7 @@ class ReleaseOptimizationTests(unittest.TestCase):
         for compiler in ("Clang", "GNU"):
             with self.subTest(compiler=compiler):
                 options = self.configure(compiler=compiler,
-                                         fixture="snow_apply_release_options(probe POLICY size)")
+                                         fixture="clip_apply_release_options(probe POLICY size)")
                 self.assertEqual(options["Release"][0].split(";"),
                                  ["-Os", "-flto", "-ffunction-sections", "-fdata-sections"])
                 self.assertEqual(options["Release"][1], "-flto")
@@ -99,9 +99,9 @@ class ReleaseOptimizationTests(unittest.TestCase):
                     options = self.configure(
                         architecture="arm64", initial_ipo=True, optimization=optimization,
                         fixture=f'''
-snow_apply_strict_warnings(probe)
-snow_apply_release_options(probe POLICY {policy})
-snow_apply_release_size_sources(probe SOURCES cold.txt)
+clip_apply_strict_warnings(probe)
+clip_apply_release_options(probe POLICY {policy})
+clip_apply_release_size_sources(probe SOURCES cold.txt)
 ''')
                     compile_options, link_options, ipo = options["Release"][:3]
                     flags = compile_options.split(";")
@@ -126,14 +126,14 @@ snow_apply_release_size_sources(probe SOURCES cold.txt)
 
         # clang-cl/LLVM does not use the affected MSVC ARM64 backend.
         options = self.configure(compiler="Clang", architecture="arm64",
-                                 fixture="snow_apply_release_options(probe POLICY speed)")
+                                 fixture="clip_apply_release_options(probe POLICY speed)")
         self.assertEqual(options["Release"][2], "TRUE")
         self.assertIn("-flto", options["Release"][0].split(";"))
 
     def test_workspace_arm64_policy_covers_targets_without_release_helper(self):
         workspace = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
-        start = workspace.index("snow_msvc_arm64_requires_native_codegen(_snow_arm64_native_codegen)")
-        end = workspace.index("# Resolve the Snow Image codec profile", start)
+        start = workspace.index("clip_msvc_arm64_requires_native_codegen(_clip_arm64_native_codegen)")
+        end = workspace.index("# Resolve the Clip Image codec profile", start)
         global_policy = workspace[start:end]
         self.configure(architecture="arm64", initial_ipo=True, fixture=global_policy + '''
 add_library(inherited STATIC hot.txt)
@@ -146,7 +146,7 @@ get_directory_property(options COMPILE_OPTIONS)
 if(NOT "$<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/GL->" IN_LIST options)
     message(FATAL_ERROR "ARM64 sources must override inherited /GL flags")
 endif()
-snow_apply_release_options(probe)
+clip_apply_release_options(probe)
 ''')
 
     def test_standalone_arm64_policy_uses_target_compiler_metadata(self):
@@ -156,11 +156,11 @@ snow_apply_release_options(probe)
                                 ('CMAKE_GENERATOR_PLATFORM', 'ARM64')]:
             with self.subTest(variable=variable, value=value):
                 options = self.configure(architecture='', initial_ipo=True, fixture=f'''
-unset(SNOW_WINDOWS_ARCHITECTURE)
+unset(CLIP_WINDOWS_ARCHITECTURE)
 set(CMAKE_SYSTEM_PROCESSOR AMD64)
 set({variable} {value})
-snow_apply_strict_warnings(probe)
-snow_apply_release_options(probe)
+clip_apply_strict_warnings(probe)
+clip_apply_release_options(probe)
 ''')
                 self.assertEqual(options['Release'][2], 'FALSE')
                 flags = options['Release'][0].split(';')
@@ -179,7 +179,7 @@ snow_apply_release_options(probe)
                 options = self.configure(compiler=compiler, architecture=cache_arch, fixture=f'''
 set(CMAKE_SYSTEM_PROCESSOR ARM64)
 set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID "{metadata}")
-snow_apply_release_options(probe)
+clip_apply_release_options(probe)
 ''')
                 self.assertEqual(options['Release'][2], 'TRUE')
                 self.assertNotIn('/GL-', options['Release'][0].split(';'))
@@ -191,8 +191,8 @@ snow_apply_release_options(probe)
 
     def test_source_policy_preserves_existing_options_and_hot_sources(self):
         options = self.configure(fixture='''
-snow_apply_release_options(probe)
-snow_apply_release_size_sources(probe SOURCES cold.txt)
+clip_apply_release_options(probe)
+clip_apply_release_size_sources(probe SOURCES cold.txt)
 add_library(probe_mini STATIC cold.txt hot.txt)
 set_target_properties(probe_mini PROPERTIES LINKER_LANGUAGE CXX)
 get_source_file_property(mini_pch cold.txt TARGET_DIRECTORY probe_mini SKIP_PRECOMPILE_HEADERS)
@@ -211,7 +211,7 @@ endif()
     def test_shipping_macos_dead_stripping_is_release_only(self):
         # The mixed app target keeps the speed policy while its final link strips
         # unreferenced sections in a shipping size build.
-        fixture = "snow_apply_release_options(probe POLICY speed)"
+        fixture = "clip_apply_release_options(probe POLICY speed)"
         options = self.configure(compiler="AppleClang", apple=True, fixture=fixture)
         self.assertEqual(options["Release"][1].split(";"), ["-flto", "LINKER:-dead_strip"])
         self.assertEqual(options["Debug"][:2], ["", ""])
@@ -223,8 +223,8 @@ endif()
 
     def test_fast_build_disables_optimization_and_size_build_can_be_opted_out(self):
         fixture = '''
-snow_apply_release_options(probe)
-snow_apply_release_size_sources(probe SOURCES cold.txt)
+clip_apply_release_options(probe)
+clip_apply_release_size_sources(probe SOURCES cold.txt)
 '''
         options = self.configure(optimization=False, fixture=fixture)
         self.assertEqual(options["Release"][0], "/Z7")
@@ -239,9 +239,9 @@ snow_apply_release_size_sources(probe SOURCES cold.txt)
 
     def test_bad_policies_and_absent_sources_fail_configuration(self):
         for fixture, expected in (
-            ("snow_apply_release_options(probe POLICY tiny)", "Unknown release optimization policy"),
-            ("snow_apply_release_options(probe POLICY)", "requires POLICY speed or size"),
-            ("snow_apply_release_size_sources(probe SOURCES absent.txt)",
+            ("clip_apply_release_options(probe POLICY tiny)", "Unknown release optimization policy"),
+            ("clip_apply_release_options(probe POLICY)", "requires POLICY speed or size"),
+            ("clip_apply_release_size_sources(probe SOURCES absent.txt)",
              "Size-optimized source is absent"),
         ):
             with self.subTest(fixture=fixture):
@@ -250,20 +250,20 @@ snow_apply_release_size_sources(probe SOURCES cold.txt)
     def test_production_policy_preserves_hot_libraries_and_mixed_sources(self):
         self.configure(fixture=f'''
 # Read the policy's named manifests without applying it yet.
-set(SNOW_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION OFF)
-set(SNOW_SHOT_RELEASE_STATIC OFF)
+set(CLIP_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION OFF)
+set(CLIP_SHOT_RELEASE_STATIC OFF)
 include("{POLICY.as_posix()}")
-foreach(target IN LISTS SNOW_SHOT_RELEASE_SPEED_TARGETS SNOW_SHOT_RELEASE_SIZE_TARGETS)
+foreach(target IN LISTS CLIP_SHOT_RELEASE_SPEED_TARGETS CLIP_SHOT_RELEASE_SIZE_TARGETS)
     add_library(${{target}} STATIC hot.txt)
     set_target_properties(${{target}} PROPERTIES LINKER_LANGUAGE CXX)
 endforeach()
-target_sources(snow_shot_storage PRIVATE ${{SNOW_SHOT_RELEASE_SIZE_STORAGE_SOURCES}}
+target_sources(clip_shot_storage PRIVATE ${{CLIP_SHOT_RELEASE_SIZE_STORAGE_SOURCES}}
     src/storage/preparedpngimage.cpp src/storage/capturehistoryrepository.cpp)
-target_sources(snow_shot_settings PRIVATE ${{SNOW_SHOT_RELEASE_SIZE_SETTINGS_SOURCES}}
+target_sources(clip_shot_settings PRIVATE ${{CLIP_SHOT_RELEASE_SIZE_SETTINGS_SOURCES}}
     src/presentation/services/screenshotclipboarddibdecoder_avx2.cpp
     src/presentation/components/thumbnailcache.cpp
     src/presentation/services/globalshortcutmanager.cpp)
-target_sources(snow_shot PRIVATE ${{SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES}}
+target_sources(clip_shot PRIVATE ${{CLIP_SHOT_RELEASE_SIZE_SHELL_SOURCES}}
     src/presentation/capture/screenshotcaptureworker.cpp
     src/presentation/overlay/screenshotcanvasrenderer.cpp
     src/presentation/recording/recordingrenderjob.cpp)
@@ -275,22 +275,22 @@ foreach(target IN LISTS targets)
         set_source_files_properties("${{source}}" PROPERTIES HEADER_FILE_ONLY TRUE)
     endforeach()
 endforeach()
-set(SNOW_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION ON)
+set(CLIP_SHOT_ENABLE_AGGRESSIVE_RELEASE_OPTIMIZATION ON)
 include("{POLICY.as_posix()}")
-foreach(target IN LISTS SNOW_SHOT_RELEASE_SPEED_TARGETS)
-    get_target_property(named_policy ${{target}} SNOW_RELEASE_OPTIMIZATION_POLICY)
+foreach(target IN LISTS CLIP_SHOT_RELEASE_SPEED_TARGETS)
+    get_target_property(named_policy ${{target}} CLIP_RELEASE_OPTIMIZATION_POLICY)
     if(NOT named_policy STREQUAL "speed")
         message(FATAL_ERROR "Hot library unexpectedly uses ${{named_policy}}: ${{target}}")
     endif()
 endforeach()
-foreach(target IN LISTS SNOW_SHOT_RELEASE_SIZE_TARGETS)
-    get_target_property(named_policy ${{target}} SNOW_RELEASE_OPTIMIZATION_POLICY)
+foreach(target IN LISTS CLIP_SHOT_RELEASE_SIZE_TARGETS)
+    get_target_property(named_policy ${{target}} CLIP_RELEASE_OPTIMIZATION_POLICY)
     if(NOT named_policy STREQUAL "size")
         message(FATAL_ERROR "Cold library unexpectedly uses ${{named_policy}}: ${{target}}")
     endif()
 endforeach()
-foreach(source IN LISTS SNOW_SHOT_RELEASE_SIZE_STORAGE_SOURCES
-        SNOW_SHOT_RELEASE_SIZE_SETTINGS_SOURCES SNOW_SHOT_RELEASE_SIZE_SHELL_SOURCES)
+foreach(source IN LISTS CLIP_SHOT_RELEASE_SIZE_STORAGE_SOURCES
+        CLIP_SHOT_RELEASE_SIZE_SETTINGS_SOURCES CLIP_SHOT_RELEASE_SIZE_SHELL_SOURCES)
     get_source_file_property(options "${{source}}" COMPILE_OPTIONS)
     if(NOT "$<$<CONFIG:Release>:/O1>" IN_LIST options)
         message(FATAL_ERROR "Cold source is missing its size option: ${{source}}")
@@ -338,7 +338,7 @@ endforeach()
             if preset.get("hidden"):
                 continue
             with self.subTest(preset=name):
-                value = variables(name)["SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION"]
+                value = variables(name)["CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION"]
                 self.assertEqual(value, "ON" if name.endswith("-release") else "OFF")
 
 

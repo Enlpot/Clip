@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 4.2)
+project(ClipShotInstallerTests VERSION 1.0.0 LANGUAGES NONE)
+set(CLIP_SHOT_EXECUTABLE_NAME clip_shot)
+set(CPACK_PACKAGE_NAME clip-shot-installer-test)
+set(CPACK_PACKAGE_VENDOR "Clip Apps")
+set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY ClipShotInstallerTest CACHE STRING "Isolated installer test registration")
+set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+set(CPACK_NSIS_MODIFY_PATH OFF)
+set(CPACK_PACKAGE_EXECUTABLES "clip_shot" "Clip")
+set(CPACK_CREATE_DESKTOP_LINKS "clip_shot")
+set(CPACK_VERBATIM_VARIABLES ON)
+include("${CMAKE_CURRENT_LIST_DIR}/../../../cmake/ClipShotInstaller.cmake")
+install(FILES "${CMAKE_CURRENT_LIST_DIR}/../installer_process_fixture.cpp"
+    DESTINATION bin RENAME clip_shot.exe)
+install(FILES "${CMAKE_CURRENT_LIST_DIR}/../installer_updater_stub.cpp"
+    DESTINATION bin RENAME clip-shot-updater.exe)
+include(CPack)

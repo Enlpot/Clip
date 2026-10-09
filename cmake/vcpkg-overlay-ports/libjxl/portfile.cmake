@@ -1,4 +1,4 @@
-set(_snow_vcpkg_libjxl_port "${VCPKG_ROOT_DIR}/ports/libjxl")
+set(_clip_vcpkg_libjxl_port "${VCPKG_ROOT_DIR}/ports/libjxl")
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
@@ -7,10 +7,10 @@ vcpkg_from_github(
     SHA512 a7e1f7d060b358f4382e84367d66aa2850aef3b4524a0fdfe3f22dd258fb9e35dda7540f859d8bf4c32f31c61a7a03db677f4490a9f472cd25869a9d00797336
     HEAD_REF main
     PATCHES
-        "${_snow_vcpkg_libjxl_port}/fix-dependencies.patch"
-        "${_snow_vcpkg_libjxl_port}/avoid-exe-linker-flags.patch" # https://github.com/libjxl/libjxl/pull/4229
-        "${_snow_vcpkg_libjxl_port}/msvc-remove-libm.patch"
-        "${_snow_vcpkg_libjxl_port}/disambiguate-pow-calls.patch"
+        "${_clip_vcpkg_libjxl_port}/fix-dependencies.patch"
+        "${_clip_vcpkg_libjxl_port}/avoid-exe-linker-flags.patch" # https://github.com/libjxl/libjxl/pull/4229
+        "${_clip_vcpkg_libjxl_port}/msvc-remove-libm.patch"
+        "${_clip_vcpkg_libjxl_port}/disambiguate-pow-calls.patch"
         0001-static-object-libraries-do-not-export.patch
 )
 

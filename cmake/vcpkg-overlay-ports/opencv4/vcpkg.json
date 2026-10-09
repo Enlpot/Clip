@@ -133,7 +133,7 @@
       "supports": "windows & !uwp & !mingw"
     },
     "dnn": {
-      "description": "Enable dnn module (Snow Apps overlay: uses OpenCV's bundled protobuf, no flatbuffers)",
+      "description": "Enable dnn module (Clip Apps overlay: uses OpenCV's bundled protobuf, no flatbuffers)",
       "dependencies": [
         {
           "name": "opencv4",

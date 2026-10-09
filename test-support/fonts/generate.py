@@ -44,11 +44,11 @@ def generate(family, style, characters, mono=False):
     builder.setupNameTable({
         "familyName": family,
         "styleName": style,
-        "uniqueFontIdentifier": f"Snow recording test: {family} {style} 1.0",
+        "uniqueFontIdentifier": f"Clip recording test: {family} {style} 1.0",
         "fullName": f"{family} {style}",
         "psName": f"{family.replace(' ', '')}-{style}",
         "version": "Version 1.0",
-        "copyright": "Original Snow Apps test data; SPDX-License-Identifier: Apache-2.0",
+        "copyright": "Original Clip Apps test data; SPDX-License-Identifier: Apache-2.0",
     })
     builder.setupOS2(sTypoAscender=800, sTypoDescender=-200,
                      usWinAscent=800, usWinDescent=200,
@@ -65,6 +65,6 @@ if __name__ == "__main__":
     latin = "".join(chr(code) for code in range(32, 127)) + "←"
     han = "汉鼠标左键鼠標右鍵空格退中汉字按钮测试\U00020000"
     for style in ["Regular", "Bold"]:
-        generate("Snow Recording Test Sans", style, latin)
-        generate("Snow Recording Test Mono", style, latin, mono=True)
-        generate("Snow Recording Test Han", style, han)
+        generate("Clip Recording Test Sans", style, latin)
+        generate("Clip Recording Test Mono", style, latin, mono=True)
+        generate("Clip Recording Test Han", style, han)

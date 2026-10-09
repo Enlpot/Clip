@@ -132,7 +132,7 @@ foreach ($copyright in $vcpkgCopyrights) {
 
 $qtLicenseFiles = @()
 if (-not $StandaloneMedia) {
-$qtLicenseRoot = Join-Path $qtPrefixPath "share\snow-apps\qt-licenses"
+$qtLicenseRoot = Join-Path $qtPrefixPath "share\clip-apps\qt-licenses"
 if (-not (Test-Path -LiteralPath $qtLicenseRoot -PathType Container)) {
     throw "The audited static Qt kit has no installed license bundle: $qtLicenseRoot. Rebuild it with scripts/build-static-qt.ps1."
 }
@@ -263,14 +263,14 @@ if ($missingCargoNotices.Count -gt 0) {
 
 Copy-LicenseNotice -Category "project-notices" -Package "ant-design-icons" `
     -DeclaredLicense "MIT" -Source $antDesignNoticePath -RelativeName "THIRD_PARTY_NOTICES.md"
-Copy-LicenseNotice -Category "project-notices" -Package "snow-shot-attributions" `
+Copy-LicenseNotice -Category "project-notices" -Package "clip-shot-attributions" `
     -DeclaredLicense "MIT" `
-    -Source (Join-Path $PSScriptRoot "../snow_shot/THIRD_PARTY_NOTICES.md") `
+    -Source (Join-Path $PSScriptRoot "../clip_shot/THIRD_PARTY_NOTICES.md") `
     -RelativeName "THIRD_PARTY_NOTICES.md"
 
 $sortedRecords = @($records | Sort-Object Category, Package, Notice)
 $indexLines = [System.Collections.Generic.List[string]]::new()
-$indexLines.Add($(if ($StandaloneMedia) { "# Snow Media Third-Party License Index" } else { "# Snow Shot Third-Party License Index" }))
+$indexLines.Add($(if ($StandaloneMedia) { "# Clip Media Third-Party License Index" } else { "# Clip Third-Party License Index" }))
 $indexLines.Add("")
 $indexLines.Add("This bundle was generated from the release build's resolved, non-development Rust dependency graph, installed vcpkg prefix, audited static Qt kit, and repository attribution notices.")
 $indexLines.Add("")

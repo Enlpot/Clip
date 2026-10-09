@@ -1,0 +1,31 @@
+[package]
+name = "clip-capture-c"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+clip-capture = { path = "../clip-capture" }
+clip-core = { path = "../clip-core" }
+anyhow.workspace = true
+
+
+[dev-dependencies]
+clip-cursor = { path = "../clip-cursor" }
+
+[[example]]
+name = "desktop_session_benchmark"
+
+[[example]]
+name = "scroll_region_benchmark"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.3"
+clip-macos = { path = "../clip-macos" }
+clip-media = { path = "../clip-media" }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_System_ProcessStatus", "Win32_System_Threading"] }

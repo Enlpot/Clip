@@ -7,7 +7,7 @@ int main(int, char** argv) {
     if (handle == nullptr) {
         return 1;
     }
-    auto probe = reinterpret_cast<int (*)()>(dlsym(handle, "snow_test_onnx"));
+    auto probe = reinterpret_cast<int (*)()>(dlsym(handle, "clip_test_onnx"));
     const int result = probe == nullptr ? 2 : probe();
     dlclose(handle);
     return result;

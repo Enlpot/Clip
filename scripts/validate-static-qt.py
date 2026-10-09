@@ -290,7 +290,7 @@ def main():
         return
     if not args.arch:
         parser.error('--arch is required when validating the build stamp')
-    stamp = json.loads((args.prefix / 'share/snow-apps/static-qt-build.json').read_bytes())
+    stamp = json.loads((args.prefix / 'share/clip-apps/static-qt-build.json').read_bytes())
     expected = {
         'SchemaVersion': 3, 'QtVersion': toolchain['qtVersion'], 'Architecture': args.arch,
         'SourceArchiveSha256': toolchain['sourceArchiveSha256'],
@@ -305,7 +305,7 @@ def main():
     for name, value in expected.items():
         if type(stamp.get(name)) is not type(value) or stamp[name] != value:
             raise ValueError(f"Static Qt build stamp '{name}' must be {value!r}.")
-    if not (args.prefix / 'share/snow-apps/qt-licenses').is_dir():
+    if not (args.prefix / 'share/clip-apps/qt-licenses').is_dir():
         raise ValueError('The static Qt source-license bundle is missing.')
 
 

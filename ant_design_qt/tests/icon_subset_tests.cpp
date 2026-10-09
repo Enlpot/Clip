@@ -30,7 +30,7 @@ void retainedIconsMatchTheFullPack() {
   require(full != nullptr && full->entryCount == 829,
           "standalone/test builds must preserve the complete public Ant icon pack");
   require(subset != nullptr && subset->entryCount > 0 && subset->entryCount < full->entryCount,
-          "the Snow Shot source union should produce a smaller, nonempty icon pack");
+          "the Clip source union should produce a smaller, nonempty icon pack");
   adqt::icons::IconRenderer renderer;
   require(adqt::icons::subset_test::registerWith(renderer).ok(),
           "the generated application subset should register successfully");

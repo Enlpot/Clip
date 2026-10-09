@@ -8,7 +8,7 @@ multiple selection, disabled-date predicates, and both popup layer modes.
 From the repository root, configure and build with the Release performance preset:
 
 ```powershell
-./snow_shot/scripts/configure-msvc-perf.ps1
+./clip_shot/scripts/configure-msvc-perf.ps1
 cmake --build --preset build-windows-msvc-performance --target adqt-date-picker-perf
 $env:QT_QPA_PLATFORM='offscreen'
 ./build/windows-msvc-performance/ant_design_qt/Release/adqt-date-picker-perf.exe

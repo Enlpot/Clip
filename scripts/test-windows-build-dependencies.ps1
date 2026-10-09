@@ -2,7 +2,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot 'snow-build-environment.ps1')
+. (Join-Path $PSScriptRoot 'clip-build-environment.ps1')
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $presetData = Get-Content -LiteralPath (Join-Path $repoRoot "CMakePresets.json") -Raw |
     ConvertFrom-Json
@@ -43,7 +43,7 @@ $vcpkgExe = Join-Path $vcpkgRoot "vcpkg.exe"
 $VcpkgVariants = @("Dynamic", "Static")
 $SkipDependencyInstall = $false
 $Architecture = 'x64'
-$windowsTarget = Get-SnowWindowsTarget -Architecture $Architecture
+$windowsTarget = Get-ClipWindowsTarget -Architecture $Architecture
 
 # Test-Path is stubbed only for the executable check; overlay discovery uses real files.
 function Test-Path {
@@ -56,7 +56,7 @@ if ($script:InstallCalls.Count -ne 2) { throw "Bootstrap must install each reque
 
 $failures = @()
 foreach ($index in 0..1) {
-    $preset = @("windows-msvc-debug", "snow-shot-msvc-release")[$index]
+    $preset = @("windows-msvc-debug", "clip-shot-msvc-release")[$index]
     $expectedFeatures = @(Get-PresetVariable $preset "VCPKG_MANIFEST_FEATURES") -split ';' |
         Sort-Object
     $actualFeatures = @($script:InstallCalls[$index].Arguments |
@@ -73,15 +73,15 @@ foreach ($index in 0..1) {
 }
 
 foreach ($preset in @("windows-msvc-debug", "windows-msvc-performance",
-        "windows-clang-portability", "snow-shot-msvc-release", "snow-shot-msvc-fast",
-        "snow-shot-msvc-arm64-debug", "snow-shot-msvc-arm64-performance",
-        "snow-shot-msvc-arm64-release", "snow-shot-msvc-arm64-fast")) {
+        "windows-clang-portability", "clip-shot-msvc-release", "clip-shot-msvc-fast",
+        "clip-shot-msvc-arm64-debug", "clip-shot-msvc-arm64-performance",
+        "clip-shot-msvc-arm64-release", "clip-shot-msvc-arm64-fast")) {
     if ((Get-PresetVariable $preset "VCPKG_MANIFEST_INSTALL") -cne "ON") {
         $failures += "$preset must enable dependency installation when reusing a cache."
     }
-    if ((Get-PresetVariable $preset 'SNOW_IMAGE_PROFILE') -ceq 'full' -and
+    if ((Get-PresetVariable $preset 'CLIP_IMAGE_PROFILE') -ceq 'full' -and
         ((Get-PresetVariable $preset 'VCPKG_MANIFEST_FEATURES') -split ';') -cnotcontains 'full-codecs') {
-        $failures += "$preset must provision the full Snow Image codec dependency graph."
+        $failures += "$preset must provision the full Clip Image codec dependency graph."
     }
     $overlays = @(Get-PresetVariable $preset "VCPKG_OVERLAY_PORTS") -split ';'
     if (-not ($overlays | Where-Object { $_ -match '/vcpkg-overlay-ports(?:/libde265)?$' })) {
@@ -90,11 +90,11 @@ foreach ($preset in @("windows-msvc-debug", "windows-msvc-performance",
 }
 
 $Architecture = 'arm64'
-$windowsTarget = Get-SnowWindowsTarget -Architecture $Architecture
+$windowsTarget = Get-ClipWindowsTarget -Architecture $Architecture
 $script:InstallCalls = @()
 & ([scriptblock]::Create($installBlocks[0].Extent.Text))
 foreach ($index in 0..1) {
-    $preset = @('snow-shot-msvc-arm64-debug', 'snow-shot-msvc-arm64-release')[$index]
+    $preset = @('clip-shot-msvc-arm64-debug', 'clip-shot-msvc-arm64-release')[$index]
     $call = $script:InstallCalls[$index]
     $features = @($call.Arguments | Where-Object { $_ -like '--x-feature=*' } |
         ForEach-Object { $_.Substring('--x-feature='.Length) } | Sort-Object)

@@ -7,11 +7,11 @@ $ErrorActionPreference = "Stop"
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 $projects = @(
     "ant_design_qt",
-    "snow-crates",
-    "snow_draw_engine_qt",
-    "snow_image",
-    "snow_image_viewer",
-    "snow_shot"
+    "clip-crates",
+    "clip_draw_engine_qt",
+    "clip_image",
+    "clip_image_viewer",
+    "clip_shot"
 )
 $extensions = @(".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".mm")
 $files = foreach ($project in $projects) {

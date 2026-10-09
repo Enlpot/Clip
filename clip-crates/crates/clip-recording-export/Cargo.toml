@@ -1,0 +1,47 @@
+[package]
+name = "clip-recording-export"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+build = "build.rs"
+
+[features]
+bench-timing = []
+bench-experiments = []
+
+[dependencies]
+clip-memory = { path = "../clip-memory" }
+clip-core = { path = "../clip-core" }
+clip-audio-recorder = { path = "../clip-audio-recorder" }
+clip-recording-model = { path = "../clip-recording-model" }
+clip-recording-effects = { path = "../clip-recording-effects" }
+bincode.workspace = true
+crossbeam-channel.workspace = true
+ffmpeg-next.workspace = true
+rayon.workspace = true
+num_cpus.workspace = true
+serde.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+zstd.workspace = true
+uuid.workspace = true
+clip-media = { path = "../clip-media" }
+
+[target.'cfg(windows)'.dependencies]
+clip-d3d11 = { path = "../clip-d3d11" }
+windows = { workspace = true, features = ["Win32_Graphics_Direct3D11", "Win32_Media_Audio", "Win32_System_Com"] }
+
+[dev-dependencies]
+gif = "0.14.2"
+anyhow.workspace = true
+proptest = "1.11.0"
+symphonia = { version = "0.5.4", default-features = false, features = ["aac", "isomp4"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = [
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+clip-macos = { path = "../clip-macos" }

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location('remote', Path(__file__).with_name('snow-shot-remote-macos.py'))
+spec = importlib.util.spec_from_file_location('remote', Path(__file__).with_name('clip-shot-remote-macos.py'))
 remote = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(remote)
 
@@ -19,10 +19,10 @@ class RemotePackageTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.repo = Path(temp.name)
-        (self.repo / 'CMakeLists.txt').write_text('set(SNOW_SHOT_VERSION "1.2.3-beta")')
-        self.build = self.repo / 'build/snow-shot-macos-arm64-release'
+        (self.repo / 'CMakeLists.txt').write_text('set(CLIP_SHOT_VERSION "1.2.3-beta")')
+        self.build = self.repo / 'build/clip-shot-macos-arm64-release'
         self.build.mkdir(parents=True)
-        self.image = self.build / 'snow-shot-1.2.3-beta-macos-arm64.dmg'
+        self.image = self.build / 'clip-shot-1.2.3-beta-macos-arm64.dmg'
         self.request = {'projectDirectory': str(self.repo), 'version': '1.2.3-beta',
                         'id': 'a' * 32, 'parallelism': 4, 'skipBuild': False}
         self.source = {'commit': 'test-commit', 'workingTreeSha256': 'dirty-source-hash'}
@@ -42,7 +42,7 @@ class RemotePackageTests(unittest.TestCase):
         self.image.write_bytes(b'native DMG fixture')
         self.image.with_suffix('.dmg.sha256').write_text(
             (checksum or remote.digest(self.image)) + '  ' + self.image.name + '\n')
-        for name in ['snow_shot', 'snow-ocr-process', 'snow_shot_mini']:
+        for name in ['clip_shot', 'clip-ocr-process', 'clip_shot_mini']:
             path = self.build / 'symbols' / (name + '.dSYM') / 'Contents/Resources/DWARF' / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(('DWARF fixture: ' + name).encode())
@@ -71,19 +71,19 @@ class RemotePackageTests(unittest.TestCase):
 
     def select_intel(self):
         self.request['architecture'] = 'x64'
-        self.build = self.repo / 'build/snow-shot-macos-x64-release'
+        self.build = self.repo / 'build/clip-shot-macos-x64-release'
         self.build.mkdir(parents=True)
-        self.image = self.build / 'snow-shot-1.2.3-beta-macos-x86_64.dmg'
+        self.image = self.build / 'clip-shot-1.2.3-beta-macos-x86_64.dmg'
 
     def test_intel_build_on_apple_silicon_stages_only_full(self):
         self.select_intel()
         result = remote.package(self.request)
         self.assertEqual(result['architecture'], 'x64')
-        self.assertEqual([item['product'] for item in result['images']], ['snow-shot'])
+        self.assertEqual([item['product'] for item in result['images']], ['clip-shot'])
         self.assertEqual(len(result['symbols']), 2)
-        self.assertEqual(Path(result['path']).name, 'snow-shot_macos-x86_64.dmg')
+        self.assertEqual(Path(result['path']).name, 'clip-shot_macos-x86_64.dmg')
         build = self.run.call_args_list[0].args[0]
-        self.assertEqual(build[2], 'snow-shot-macos-x64-release')
+        self.assertEqual(build[2], 'clip-shot-macos-x64-release')
         self.assertEqual(json.loads((self.build / 'remote-release-source.json').read_text())
                          ['architecture'], 'x64')
         self.assertFalse(list(Path(result['path']).parent.glob('*mini*')))
@@ -149,7 +149,7 @@ class RemotePackageTests(unittest.TestCase):
         self.select_intel()
         remote.package(self.request)
         self.request.update(skipBuild=True, id='b' * 32)
-        binary = self.build / 'symbols/snow_shot.dSYM/Contents/Resources/DWARF/snow_shot'
+        binary = self.build / 'symbols/clip_shot.dSYM/Contents/Resources/DWARF/clip_shot'
         binary.write_bytes(b'changed diagnostics')
         self.run.reset_mock()
         with self.assertRaisesRegex(ValueError, 'symbols differ'):
@@ -158,24 +158,24 @@ class RemotePackageTests(unittest.TestCase):
 
     def test_cargo_worker_symbols_retain_the_hashed_executable_name(self):
         self.write_package()
-        path = self.build / 'symbols/snow-ocr-process.dSYM/Contents/Resources/DWARF/snow-ocr-process'
-        hashed = path.with_name('snow_ocr_process-2682fb017056abac')
+        path = self.build / 'symbols/clip-ocr-process.dSYM/Contents/Resources/DWARF/clip-ocr-process'
+        hashed = path.with_name('clip_ocr_process-2682fb017056abac')
         path.rename(hashed)
-        symbols = remote.symbols_inventory(self.build, ['snow-shot', 'snow-shot-mini'])
+        symbols = remote.symbols_inventory(self.build, ['clip-shot', 'clip-shot-mini'])
         self.assertEqual(symbols[1]['file'], str(hashed.relative_to(self.build)))
         self.assertEqual(symbols[1]['sha256'], remote.digest(hashed))
         self.assertEqual(symbols[1]['size'], hashed.stat().st_size)
 
     def test_worker_symbols_require_exactly_one_dwarf_file(self):
         self.write_package()
-        path = self.build / 'symbols/snow-ocr-process.dSYM/Contents/Resources/DWARF/unexpected'
+        path = self.build / 'symbols/clip-ocr-process.dSYM/Contents/Resources/DWARF/unexpected'
         path.write_bytes(b'extra DWARF')
         with self.assertRaisesRegex(ValueError, 'symbols'):
-            remote.symbols_inventory(self.build, ['snow-shot'])
+            remote.symbols_inventory(self.build, ['clip-shot'])
 
     def test_paired_images_are_audited_and_recorded_together(self):
         self.request['editions'] = ['Full', 'Mini']
-        mini = self.build / 'snow-shot-mini-1.2.3-beta-macos-arm64.dmg'
+        mini = self.build / 'clip-shot-mini-1.2.3-beta-macos-arm64.dmg'
         def paired(command, **kwargs):
             if command[0] == 'bash':
                 self.write_package()
@@ -184,7 +184,7 @@ class RemotePackageTests(unittest.TestCase):
             return SimpleNamespace(returncode=0)
         self.run.side_effect = paired
         result = remote.package(self.request)
-        self.assertEqual([item['product'] for item in result['images']], ['snow-shot', 'snow-shot-mini'])
+        self.assertEqual([item['product'] for item in result['images']], ['clip-shot', 'clip-shot-mini'])
         self.assertEqual(len(result['symbols']), 3)
         self.assertEqual(Path(result['images'][1]['path']).read_bytes(), mini.read_bytes())
         self.assertEqual([call.args[0][0] for call in self.run.call_args_list],
@@ -199,14 +199,14 @@ class RemotePackageTests(unittest.TestCase):
         def paired(command, **kwargs):
             if command[0] == 'bash':
                 self.write_package()
-                image = self.build / 'snow-shot-mini-1.2.3-beta-macos-arm64.dmg'
+                image = self.build / 'clip-shot-mini-1.2.3-beta-macos-arm64.dmg'
                 image.write_bytes(b'mini fixture')
                 image.with_suffix('.dmg.sha256').write_text(remote.digest(image) + '  ' + image.name)
             return SimpleNamespace(returncode=0)
         self.run.side_effect = paired
         remote.package(self.request)
         self.request.update(skipBuild=True, id='b' * 32)
-        path = self.build / 'symbols/snow_shot_mini.dSYM/Contents/Resources/DWARF/snow_shot_mini'
+        path = self.build / 'symbols/clip_shot_mini.dSYM/Contents/Resources/DWARF/clip_shot_mini'
         path.write_bytes(b'corrupted Mini symbols')
         self.run.reset_mock()
         with self.assertRaisesRegex(ValueError, 'symbols differ'):

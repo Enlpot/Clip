@@ -9,25 +9,25 @@ option(ADQT_STRICT_COMPILE "Treat ant_design_qt compiler warnings as errors." ON
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ProjectWarnings.cmake")
 if(ADQT_STRICT_COMPILE)
-    snow_enable_strict_warnings()
+    clip_enable_strict_warnings()
 endif()
-snow_enable_clang_tidy()
+clip_enable_clang_tidy()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/SnowQt.cmake")
-snow_find_qt(COMPONENTS Widgets Svg Network LinguistTools)
-if(NOT TARGET snow_image::snow_image)
-    find_package(snow_image CONFIG REQUIRED)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClipQt.cmake")
+clip_find_qt(COMPONENTS Widgets Svg Network LinguistTools)
+if(NOT TARGET clip_image::clip_image)
+    find_package(clip_image CONFIG REQUIRED)
 endif()
-include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/SnowTestCliGuard.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClipTestCliGuard.cmake")
 
 file(GLOB ADQT_ICON_CORE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/packages/adqt_icon_core/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/packages/adqt_icon_core/src/*.h"
 )
 add_library(adqt_icon_core STATIC ${ADQT_ICON_CORE_SOURCES})
-snow_apply_release_options(adqt_icon_core)
+clip_apply_release_options(adqt_icon_core)
 add_library(adqt::icon_core ALIAS adqt_icon_core)
 target_include_directories(adqt_icon_core SYSTEM PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/packages/adqt_icon_core/src"
@@ -59,10 +59,10 @@ set_source_files_properties(
         SKIP_UNITY_BUILD_INCLUSION ON
 )
 add_library(ant_design_icons_qt STATIC ${ADQT_ICONS_SOURCES})
-if(SNOW_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION)
-    snow_apply_release_options(ant_design_icons_qt POLICY size)
+if(CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION)
+    clip_apply_release_options(ant_design_icons_qt POLICY size)
 else()
-    snow_apply_release_options(ant_design_icons_qt)
+    clip_apply_release_options(ant_design_icons_qt)
 endif()
 add_library(adqt::icons ALIAS ant_design_icons_qt)
 target_include_directories(ant_design_icons_qt SYSTEM PUBLIC
@@ -84,7 +84,7 @@ set(ADQT_WINDOW_DPI_SOURCES
 list(REMOVE_ITEM ADQT_WIDGET_SOURCES ${ADQT_WINDOW_DPI_SOURCES})
 add_library(ant_design_qt_dpi_window STATIC ${ADQT_WINDOW_DPI_SOURCES})
 add_library(adqt::dpi_window ALIAS ant_design_qt_dpi_window)
-snow_apply_release_options(ant_design_qt_dpi_window)
+clip_apply_release_options(ant_design_qt_dpi_window)
 target_include_directories(ant_design_qt_dpi_window SYSTEM PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/packages/ant_design_qt/src")
 target_link_libraries(ant_design_qt_dpi_window PUBLIC Qt6::Widgets)
@@ -97,12 +97,12 @@ if(MSVC)
 endif()
 
 add_library(ant_design_qt STATIC ${ADQT_WIDGET_SOURCES})
-snow_apply_release_options(ant_design_qt)
+clip_apply_release_options(ant_design_qt)
 # Keep the modal-blocking query behind a private adapter so native input and
 # popup hover use Qt's complete modal stack on every platform. Consumers finalize
 # executables in sibling directories, so this static library's private link
 # dependency must remain visible there as well.
-snow_find_qt_private(Gui)
+clip_find_qt_private(Gui)
 target_link_libraries(ant_design_qt PRIVATE Qt6::GuiPrivate)
 if(APPLE)
     # Qt 6.12.0's source retains QAccessibleCache's private destruction slot and
@@ -128,7 +128,7 @@ target_include_directories(ant_design_qt SYSTEM PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/packages/ant_design_qt/src"
 )
 target_link_libraries(ant_design_qt PUBLIC adqt::dpi_window adqt::icon_core adqt::icons
-    Qt6::Widgets Qt6::Svg Qt6::Network snow_image::snow_image_static)
+    Qt6::Widgets Qt6::Svg Qt6::Network clip_image::clip_image_static)
 target_precompile_headers(ant_design_qt PRIVATE
     <algorithm>
     <memory>
@@ -187,12 +187,12 @@ endif()
 
 if(ADQT_BUILD_TESTS)
     enable_testing()
-    snow_find_qt(COMPONENTS Test)
+    clip_find_qt(COMPONENTS Test)
     # Test binaries must report failures as stderr output plus a non-zero
     # exit code instead of blocking on modal dialogs.
-    snow_link_test_cli_guard(qt)
+    clip_link_test_cli_guard(qt)
     set(_adqt_subset_test_roots "${CMAKE_CURRENT_SOURCE_DIR}/packages/ant_design_qt/src")
-    foreach(_adqt_subset_consumer IN ITEMS snow_shot snow_draw_engine_qt)
+    foreach(_adqt_subset_consumer IN ITEMS clip_shot clip_draw_engine_qt)
         foreach(_adqt_subset_tree IN ITEMS src include)
             if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../${_adqt_subset_consumer}/${_adqt_subset_tree}")
                 list(APPEND _adqt_subset_test_roots

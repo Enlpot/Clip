@@ -7,14 +7,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
 
 $qtJpegInclude = (Resolve-Path -LiteralPath $QtJpegIncludeDirectory).Path
 if (-not (Test-Path -LiteralPath (Join-Path $qtJpegInclude "jconfig.h") -PathType Leaf)) {
     throw "Qt's bundled JPEG headers were not found under $qtJpegInclude."
 }
-$fixture = Join-Path $script:SnowRepoRoot "snow_image/tests/jpeg_header_compatibility_tests.cpp"
-$outputRoot = Join-Path $script:SnowRepoRoot "build/windows-jpeg-header-tests/$([Guid]::NewGuid().ToString('N'))"
+$fixture = Join-Path $script:ClipRepoRoot "clip_image/tests/jpeg_header_compatibility_tests.cpp"
+$outputRoot = Join-Path $script:ClipRepoRoot "build/windows-jpeg-header-tests/$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 $unwrappedFixture = Join-Path $outputRoot "jpeg_header_unwrapped.cpp"
 $unwrappedSource = [IO.File]::ReadAllText($fixture).Replace(
@@ -23,17 +23,17 @@ $unwrappedSource = [IO.File]::ReadAllText($fixture).Replace(
 [IO.File]::WriteAllText($unwrappedFixture, $unwrappedSource)
 
 foreach ($targetArchitecture in $Architecture) {
-    $msvcTools = Add-SnowMsvcToolsToPath -Architecture $targetArchitecture
+    $msvcTools = Add-ClipMsvcToolsToPath -Architecture $targetArchitecture
     $compiler = Join-Path $msvcTools "cl.exe"
-    $target = Get-SnowWindowsTarget -Architecture $targetArchitecture
+    $target = Get-ClipWindowsTarget -Architecture $targetArchitecture
     $vcpkgInclude = Join-Path (Join-Path $target.InstalledRoot $target.Triplet) "include"
     $arguments = @("/nologo", "/c", "/std:c++20", "/EHsc", "/W4", "/WX",
-        "/I$(Join-Path $script:SnowRepoRoot 'snow_memory/include')")
+        "/I$(Join-Path $script:ClipRepoRoot 'clip_memory/include')")
 
     # This is the original include sequence, without the private boundary.
     # It must reject the RPC/JPEG type conflict before the corrected fixture.
     $beforeLog = Join-Path $outputRoot "unwrapped-$targetArchitecture.log"
-    $beforeOutput = & $compiler @arguments "/I$qtJpegInclude" /DSNOW_TEST_QT_BUNDLED_JPEG=1 `
+    $beforeOutput = & $compiler @arguments "/I$qtJpegInclude" /DCLIP_TEST_QT_BUNDLED_JPEG=1 `
         $unwrappedFixture "/Fo$(Join-Path $outputRoot "unwrapped-$targetArchitecture.obj")" 2>&1
     $beforeExitCode = $LASTEXITCODE
     $beforeOutput | Set-Content -LiteralPath $beforeLog -Encoding utf8
@@ -41,7 +41,7 @@ foreach ($targetArchitecture in $Architecture) {
         throw "The unwrapped JPEG include sequence did not reproduce C2371. See $beforeLog."
     }
 
-    & $compiler @arguments "/I$qtJpegInclude" /DSNOW_TEST_QT_BUNDLED_JPEG=1 `
+    & $compiler @arguments "/I$qtJpegInclude" /DCLIP_TEST_QT_BUNDLED_JPEG=1 `
         $fixture "/Fo$(Join-Path $outputRoot "qt-jpeg-$targetArchitecture.obj")"
     if ($LASTEXITCODE -ne 0) {
         throw "The bundled Qt JPEG ABI fixture failed for $targetArchitecture."

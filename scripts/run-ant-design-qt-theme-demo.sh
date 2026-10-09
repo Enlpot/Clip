@@ -116,16 +116,16 @@ if ! $no_build; then
     configure_arguments+=(
         "-DCMAKE_BUILD_TYPE=$build_type"
         "-DCMAKE_PREFIX_PATH=$qt_prefix"
-        -DSNOW_APPS_BUILD_ANT_DESIGN_QT=ON
-        -DSNOW_APPS_BUILD_SNOW_IMAGE=ON
-        -DSNOW_APPS_BUILD_DRAW_ENGINE=OFF
-        -DSNOW_APPS_BUILD_IMAGE_VIEWER=OFF
-        -DSNOW_APPS_BUILD_SNOW_SHOT=OFF
-        -DSNOW_APPS_BUILD_TESTS=OFF
-        -DSNOW_APPS_BUILD_BENCHMARKS=OFF
+        -DCLIP_APPS_BUILD_ANT_DESIGN_QT=ON
+        -DCLIP_APPS_BUILD_CLIP_IMAGE=ON
+        -DCLIP_APPS_BUILD_DRAW_ENGINE=OFF
+        -DCLIP_APPS_BUILD_IMAGE_VIEWER=OFF
+        -DCLIP_APPS_BUILD_CLIP_SHOT=OFF
+        -DCLIP_APPS_BUILD_TESTS=OFF
+        -DCLIP_APPS_BUILD_BENCHMARKS=OFF
         # Keep this local demo build usable with Clang's additional diagnostics.
-        -DSNOW_APPS_STRICT_COMPILE=OFF
-        -DSNOW_IMAGE_PROFILE=redistributable
+        -DCLIP_APPS_STRICT_COMPILE=OFF
+        -DCLIP_IMAGE_PROFILE=redistributable
     )
     "$cmake_command" "${configure_arguments[@]}"
     "$cmake_command" --build "$build_directory" --target theme-demo --parallel

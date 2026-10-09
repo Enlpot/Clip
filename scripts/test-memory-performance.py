@@ -369,7 +369,7 @@ class PlanTests(unittest.TestCase):
         for directory in self.builds:
             directory.mkdir()
             (directory / "CMakeCache.txt").write_text(
-                "CMAKE_BUILD_TYPE:STRING=Release\nSNOW_APPS_BUILD_BENCHMARKS:BOOL=ON\n")
+                "CMAKE_BUILD_TYPE:STRING=Release\nCLIP_APPS_BUILD_BENCHMARKS:BOOL=ON\n")
 
     def generate(self, extra=()):
         output = self.root / "plan.json"
@@ -384,7 +384,7 @@ class PlanTests(unittest.TestCase):
         before, after = self.root / "rust-before", self.root / "rust-after"
         plan = self.generate(("--before-rust", str(before), "--after-rust", str(after)))
         examples = {path.stem: path for path in
-                    (ROOT.parent / "snow-crates/crates").glob("*/examples/memory_*benchmark.rs")}
+                    (ROOT.parent / "clip-crates/crates").glob("*/examples/memory_*benchmark.rs")}
         rust_jobs = [job for job in plan["jobs"] if job["name"].startswith("rust-")]
         self.assertEqual(len(rust_jobs), 19)
         selected = {}
@@ -436,14 +436,14 @@ class PlanTests(unittest.TestCase):
                                        ("ReleaseWithDebInfo", "ON"), ("Release", "ON_INVALID")):
             with self.subTest(build_type=build_type, benchmarks=benchmarks):
                 (self.builds[0] / "CMakeCache.txt").write_text(
-                    f"CMAKE_BUILD_TYPE:STRING={build_type}\nSNOW_APPS_BUILD_BENCHMARKS:BOOL={benchmarks}\n")
+                    f"CMAKE_BUILD_TYPE:STRING={build_type}\nCLIP_APPS_BUILD_BENCHMARKS:BOOL={benchmarks}\n")
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                     self.generate()
 
     def test_comments_cannot_spoof_performance_cache_validation(self):
         (self.builds[0] / "CMakeCache.txt").write_text(
-            "//CMAKE_BUILD_TYPE:STRING=Release\n//SNOW_APPS_BUILD_BENCHMARKS:BOOL=ON\n"
-            "CMAKE_BUILD_TYPE:STRING=Debug\nSNOW_APPS_BUILD_BENCHMARKS:BOOL=OFF\n")
+            "//CMAKE_BUILD_TYPE:STRING=Release\n//CLIP_APPS_BUILD_BENCHMARKS:BOOL=ON\n"
+            "CMAKE_BUILD_TYPE:STRING=Debug\nCLIP_APPS_BUILD_BENCHMARKS:BOOL=OFF\n")
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.generate()
 

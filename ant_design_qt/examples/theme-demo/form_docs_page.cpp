@@ -256,7 +256,7 @@ QWidget* FormDocsPage::buildLayoutDemo() {
 
   auto* vertical = new AdForm();
   vertical->setFormLayout(AdForm::FormLayout::Vertical);
-  vertical->addField("Project", makeLineEdit("Snow Shot", 360));
+  vertical->addField("Project", makeLineEdit("Clip", 360));
   vertical->addField("Description", makeLineEdit("Short description", 360));
   layout->addWidget(vertical, 0, Qt::AlignLeft);
 

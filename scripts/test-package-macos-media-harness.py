@@ -19,7 +19,7 @@ class PackageTests(unittest.TestCase):
             root = pathlib.Path(directory)
             app = root / "Harness.app"
             profile = root / "profile"
-            executable = app / "Contents/MacOS/SnowRecordingHarness"
+            executable = app / "Contents/MacOS/ClipRecordingHarness"
             executable.parent.mkdir(parents=True)
             executable.write_bytes(b"executable")
             libraries = profile / "lib"
@@ -30,7 +30,7 @@ class PackageTests(unittest.TestCase):
             def dependencies(command, **_):
                 binary = pathlib.Path(command[-1])
                 names = {
-                    "SnowRecordingHarness": ["libavcodec.dylib"],
+                    "ClipRecordingHarness": ["libavcodec.dylib"],
                     "libavcodec.dylib": ["libavcodec.dylib", "libx265.dylib"],
                     "libx265.dylib": ["libx265.dylib"],
                 }[binary.name]

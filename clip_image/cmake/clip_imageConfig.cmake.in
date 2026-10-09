@@ -1,0 +1,58 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if(@CLIP_IMAGE_LIBYUV_AVAILABLE@)
+    find_dependency(libyuv CONFIG)
+endif()
+if(@CLIP_IMAGE_CODEC_PNG@)
+    find_dependency(PNG)
+endif()
+if(@CLIP_IMAGE_CODEC_JPEG@)
+    find_dependency(libjpeg-turbo CONFIG)
+endif()
+if(@CLIP_IMAGE_CODEC_GIF@)
+    find_dependency(GIF)
+endif()
+if(@CLIP_IMAGE_CODEC_SVG@)
+    find_dependency(lunasvg CONFIG)
+    find_dependency(ZLIB)
+endif()
+if(@CLIP_IMAGE_CODEC_HEIF@)
+    find_dependency(libheif CONFIG)
+endif()
+if(@CLIP_IMAGE_CODEC_EXR@)
+    find_dependency(OpenEXR CONFIG)
+endif()
+if(@CLIP_IMAGE_CODEC_WEBP@)
+    find_dependency(WebP CONFIG)
+endif()
+if(@CLIP_IMAGE_CODEC_JXL@)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(JXL QUIET IMPORTED_TARGET libjxl)
+        pkg_check_modules(JXL_THREADS QUIET IMPORTED_TARGET libjxl_threads)
+    endif()
+    if(NOT TARGET PkgConfig::JXL OR NOT TARGET PkgConfig::JXL_THREADS)
+        find_path(CLIP_IMAGE_JXL_INCLUDE_DIR NAMES jxl/decode.h REQUIRED)
+        find_library(CLIP_IMAGE_JXL_LIBRARY NAMES jxl REQUIRED)
+        find_library(CLIP_IMAGE_JXL_THREADS_LIBRARY NAMES jxl_threads REQUIRED)
+        if(NOT TARGET clip_image_dependencies::jxl)
+            add_library(clip_image_dependencies::jxl UNKNOWN IMPORTED)
+            set_target_properties(clip_image_dependencies::jxl PROPERTIES
+                IMPORTED_LOCATION "${CLIP_IMAGE_JXL_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${CLIP_IMAGE_JXL_INCLUDE_DIR}"
+            )
+        endif()
+        if(NOT TARGET clip_image_dependencies::jxl_threads)
+            add_library(clip_image_dependencies::jxl_threads UNKNOWN IMPORTED)
+            set_target_properties(clip_image_dependencies::jxl_threads PROPERTIES
+                IMPORTED_LOCATION "${CLIP_IMAGE_JXL_THREADS_LIBRARY}"
+                INTERFACE_INCLUDE_DIRECTORIES "${CLIP_IMAGE_JXL_INCLUDE_DIR}"
+            )
+        endif()
+    endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/clip_imageTargets.cmake")
+check_required_components(clip_image)

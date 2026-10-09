@@ -76,7 +76,7 @@ QJsonObject memorySnapshot() {
   return result;
 }
 
-// The Snow Shot pinned root has 17 entries and three initially empty submenu
+// The Clip pinned root has 17 entries and three initially empty submenu
 // shells. Use the public library API and representative icons, without creating
 // capture/OCR services or decoding a skin during this shared-menu measurement.
 void populateMenu(Menu& menu, int extraItems) {

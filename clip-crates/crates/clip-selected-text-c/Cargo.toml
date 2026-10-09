@@ -1,0 +1,14 @@
+[package]
+name = "clip-selected-text-c"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+host-application-qos = ["clip-selected-text/host-application-qos"]
+
+[dependencies]
+clip-selected-text = { path = "../clip-selected-text" }

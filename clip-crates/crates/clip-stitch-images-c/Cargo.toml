@@ -1,0 +1,18 @@
+[package]
+name = "clip-stitch-images-c"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+clip-memory = { path = "../clip-memory" }
+clip-core = { path = "../clip-core" }
+png.workspace = true
+clip-stitch-images = { path = "../clip-stitch-images", default-features = false }
+tempfile.workspace = true
+
+[features]
+perf-instrumentation = ["clip-stitch-images/perf-instrumentation"]

@@ -2,7 +2,7 @@
 param()
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "snow-build-environment.ps1")
+. (Join-Path $PSScriptRoot "clip-build-environment.ps1")
 
 function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -37,7 +37,7 @@ Import-ScriptFunction (Join-Path $PSScriptRoot "build-static-qt.ps1") "Assert-Qt
 Import-ScriptFunction (Join-Path $PSScriptRoot "build-static-qt.ps1") "Assert-QtDependencyArchitecture"
 Import-ScriptFunction (Join-Path $PSScriptRoot "build-static-qt.ps1") "Test-InstalledQtSystemCodecs"
 Import-ScriptFunction (Join-Path $PSScriptRoot "build-static-qt.ps1") "Assert-CacheEntry"
-Import-ScriptFunction (Join-Path $PSScriptRoot "package-snow-shot.ps1") "Get-ValidatedStaticQtStamp"
+Import-ScriptFunction (Join-Path $PSScriptRoot "package-clip-shot.ps1") "Get-ValidatedStaticQtStamp"
 
 function Require-Rejected([scriptblock]$Action, [string]$Message) {
     $rejected = $false
@@ -73,7 +73,7 @@ foreach ($Architecture in @('x64', 'arm64')) {
     }
 }
 
-$testRoot = Join-Path $script:SnowRepoRoot ("build/static-qt-feature-tests-" + [guid]::NewGuid().ToString("N"))
+$testRoot = Join-Path $script:ClipRepoRoot ("build/static-qt-feature-tests-" + [guid]::NewGuid().ToString("N"))
 try {
     $sourceFixture = Join-Path $testRoot 'source-isolated'
     $buildFixture = Join-Path $testRoot 'build-isolated'
@@ -88,7 +88,7 @@ try {
     $corruptArchive = Join-Path $testRoot "corrupt-source.tar.xz"
     $null = New-Item -ItemType Directory -Path $testRoot -Force
     if (-not (Get-Command dumpbin.exe -ErrorAction SilentlyContinue)) {
-        Add-SnowMsvcToolsToPath -Architecture x64 | Out-Null
+        Add-ClipMsvcToolsToPath -Architecture x64 | Out-Null
     }
     # Valid minimal COFF headers exercise the real host inspector without
     # requiring either target compiler or executing a target binary.
@@ -201,11 +201,11 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
 '@
     $corePath = Join-Path $coreDir "Qt6CoreTargets.cmake"
     Set-Content -LiteralPath $corePath -Value $coreTargets
-    Require (Test-SnowQtDevelopmentModules $qtDir) "A complete development kit must be recognized."
+    Require (Test-ClipQtDevelopmentModules $qtDir) "A complete development kit must be recognized."
     Set-Content -LiteralPath $corePath -Value ($coreTargets -replace ';concurrent', '')
-    Require (-not (Test-SnowQtDevelopmentModules $qtDir)) `
+    Require (-not (Test-ClipQtDevelopmentModules $qtDir)) `
         "Stale component files must not hide a disabled QtConcurrent feature."
-    Require-Rejected { Resolve-SnowQtDir -Qt6Dir $qtDir -Preset windows-msvc-performance } `
+    Require-Rejected { Resolve-ClipQtDir -Qt6Dir $qtDir -Preset windows-msvc-performance } `
         "The default performance workspace requires the actual QtConcurrent and Test features."
     Set-Content -LiteralPath $corePath -Value $coreTargets
     Set-Content -LiteralPath (Join-Path $guiDir "Qt6GuiTargets.cmake") -Value 'QT_ENABLED_PRIVATE_FEATURES "system_png"'
@@ -214,12 +214,12 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
     foreach ($language in @("zh_CN", "zh_TW")) {
         Set-Content -LiteralPath (Join-Path $translationDirectory "qtbase_$language.qm") -Value "fixture"
     }
-    Require (Test-SnowQtTranslationKit $qtDir) "Chinese catalogs must not require an English Qt catalog."
+    Require (Test-ClipQtTranslationKit $qtDir) "Chinese catalogs must not require an English Qt catalog."
     $traditionalCatalog = Join-Path $translationDirectory "qtbase_zh_TW.qm"
     Remove-Item -LiteralPath $traditionalCatalog
-    Require (-not (Test-SnowQtTranslationKit $qtDir)) "Both Chinese Qt stock-dialog catalogs are required."
+    Require (-not (Test-ClipQtTranslationKit $qtDir)) "Both Chinese Qt stock-dialog catalogs are required."
     Set-Content -LiteralPath $traditionalCatalog -Value "fixture"
-    $stampPath = Join-Path $testRoot "share/snow-apps/static-qt-build.json"
+    $stampPath = Join-Path $testRoot "share/clip-apps/static-qt-build.json"
     $null = New-Item -ItemType Directory -Force -Path (Join-Path $testRoot 'bin')
     foreach ($name in @('moc', 'rcc', 'uic', 'lrelease', 'lupdate')) {
         [IO.File]::WriteAllText((Join-Path $testRoot "bin/$name.exe"), 'host tool fixture')
@@ -228,39 +228,39 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
         -Fingerprint "dependencies" -SourceArchive "https://example.invalid/qt.tar.xz" -BuildParallelism 4 -HostArchitecture x64
     $originalStamp = Get-Content -LiteralPath $stampPath -Raw
     $nativeStamp = $originalStamp | ConvertFrom-Json
-    Require (Test-SnowQtHostToolHashes -Stamp $nativeStamp -Prefix $testRoot) 'Native host-tool hashes must match their stamp.'
+    Require (Test-ClipQtHostToolHashes -Stamp $nativeStamp -Prefix $testRoot) 'Native host-tool hashes must match their stamp.'
     $nativeTool = Join-Path $testRoot 'bin/moc.exe'
     [IO.File]::WriteAllText($nativeTool, 'replaced host tool')
-    Require (-not (Test-SnowQtHostToolHashes -Stamp $nativeStamp -Prefix $testRoot)) 'Replaced native host tools must invalidate Qt reuse.'
+    Require (-not (Test-ClipQtHostToolHashes -Stamp $nativeStamp -Prefix $testRoot)) 'Replaced native host tools must invalidate Qt reuse.'
     Remove-Item -LiteralPath $nativeTool
-    Require (-not (Test-SnowQtHostToolHashes -Stamp $nativeStamp -Prefix $testRoot)) 'Missing native host tools must invalidate Qt reuse.'
+    Require (-not (Test-ClipQtHostToolHashes -Stamp $nativeStamp -Prefix $testRoot)) 'Missing native host tools must invalidate Qt reuse.'
     [IO.File]::WriteAllText($nativeTool, 'host tool fixture')
     $crossStamp = $originalStamp | ConvertFrom-Json
     $crossStamp.Architecture = 'arm64'
     $crossStamp.HostArchitecture = 'x64'
-    Require (-not (Test-SnowStaticQtStamp -Stamp $crossStamp -Architecture arm64)) `
+    Require (-not (Test-ClipStaticQtStamp -Stamp $crossStamp -Architecture arm64)) `
         'ARM64 must reject stale Qt stamps compiled with LTCG.'
     $crossStamp.Ltcg = $false
-    Require (Test-SnowStaticQtStamp -Stamp $crossStamp -Architecture arm64 -HostArchitecture x64) `
+    Require (Test-ClipStaticQtStamp -Stamp $crossStamp -Architecture arm64 -HostArchitecture x64) `
         'Cross-built Qt must retain all five host-tool hashes.'
-    Require (-not (Test-SnowStaticQtStamp -Stamp $crossStamp -Architecture x64)) `
+    Require (-not (Test-ClipStaticQtStamp -Stamp $crossStamp -Architecture x64)) `
         'Qt stamps must reject the opposite target architecture.'
-    Require (-not (Test-SnowStaticQtStamp -Stamp $crossStamp -Architecture arm64 -HostArchitecture arm64)) `
+    Require (-not (Test-ClipStaticQtStamp -Stamp $crossStamp -Architecture arm64 -HostArchitecture arm64)) `
         'Qt build reuse must bind the host architecture.'
     $crossStamp.HostTools[1].Name = 'moc.exe'
-    Require (-not (Test-SnowStaticQtStamp -Stamp $crossStamp -Architecture arm64)) `
+    Require (-not (Test-ClipStaticQtStamp -Stamp $crossStamp -Architecture arm64)) `
         'Duplicate host-tool records cannot replace missing provenance.'
     $crossStamp = $originalStamp | ConvertFrom-Json
     $crossStamp.Architecture = 'arm64'
     $crossStamp.HostArchitecture = 'x64'
     $crossStamp.Ltcg = $false
     $crossStamp.HostTools[0].SHA256 = 'invalid'
-    Require (-not (Test-SnowStaticQtStamp -Stamp $crossStamp -Architecture arm64)) `
+    Require (-not (Test-ClipStaticQtStamp -Stamp $crossStamp -Architecture arm64)) `
         'Cross-built Qt must reject malformed host-tool hashes.'
-    Write-StaticQtBuildStamp -Path $stampPath -Version $script:SnowQtVersion -BuildConfiguration Debug `
+    Write-StaticQtBuildStamp -Path $stampPath -Version $script:ClipQtVersion -BuildConfiguration Debug `
         -Fingerprint "dependencies" -SourceArchive "https://example.invalid/qt.tar.xz" -BuildParallelism 4 -HostArchitecture x64
     $debugStamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
-    Require (Test-SnowStaticQtStamp -Stamp $debugStamp -Configuration Debug) `
+    Require (Test-ClipStaticQtStamp -Stamp $debugStamp -Configuration Debug) `
         "Debug provenance must reflect Qt's supported non-LTCG configuration."
     Require (-not $debugStamp.Ltcg -and -not $debugStamp.SystemPng -and -not $debugStamp.SystemZlib -and
         $debugStamp.DisabledFeatures -notcontains "testlib" -and
@@ -272,38 +272,38 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
     Set-Content -LiteralPath $corePath -Value $debugTargets
     $guiPath = Join-Path $guiDir "Qt6GuiTargets.cmake"
     Set-Content -LiteralPath $guiPath -Value 'QT_ENABLED_PRIVATE_FEATURES "" QT_DISABLED_PRIVATE_FEATURES "system_png"'
-    Require (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Configuration Debug) `
+    Require (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Configuration Debug) `
         "Development feature validation must accept Qt's disabled Debug LTCG."
     Set-Content -LiteralPath $corePath -Value ($debugTargets -replace ';ltcg;system_zlib', ';system_zlib')
-    Require (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Configuration Debug) `
+    Require (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Configuration Debug) `
         "Qt omits inapplicable LTCG from both Debug feature export lists."
-    Require (-not (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir)) `
+    Require (-not (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir)) `
         "Production feature validation must still require Release LTCG."
     Set-Content -LiteralPath $corePath -Value $coreTargets
     Set-Content -LiteralPath $guiPath -Value 'QT_ENABLED_PRIVATE_FEATURES "system_png"'
-    Require (-not (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64)) `
+    Require (-not (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64)) `
         'ARM64 must reject installed Qt targets with LTCG enabled.'
     $arm64Targets = $coreTargets -replace ';ltcg', '' `
         -replace 'QT_DISABLED_PRIVATE_FEATURES "timezone_locale"', 'QT_DISABLED_PRIVATE_FEATURES "timezone_locale;ltcg"'
     Set-Content -LiteralPath $corePath -Value $arm64Targets
-    Require (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64) `
+    Require (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64) `
         'ARM64 Release must retain system codecs while disabling LTCG.'
     Require (Test-InstalledQtSystemCodecs -Prefix $testRoot -Architecture arm64) `
         'The Qt builder must validate the selected architecture independently of codecs.'
-    Require (-not (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Architecture x64)) `
+    Require (-not (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Architecture x64)) `
         'x64 Release must continue requiring LTCG.'
     Set-Content -LiteralPath $corePath -Value ($arm64Targets -replace 'system_zlib;', '')
-    Require (-not (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64)) `
+    Require (-not (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64)) `
         'ARM64 Release must reject Qt without system zlib.'
     Set-Content -LiteralPath $corePath -Value $arm64Targets
     Set-Content -LiteralPath $guiPath -Value 'QT_ENABLED_PRIVATE_FEATURES "" QT_DISABLED_PRIVATE_FEATURES "system_png"'
-    Require (-not (Test-SnowQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64)) `
+    Require (-not (Test-ClipQtSystemCodecKit -Qt6Dir $qtDir -Architecture arm64)) `
         'ARM64 Release must reject Qt without system PNG.'
     Set-Content -LiteralPath $corePath -Value $coreTargets
     Set-Content -LiteralPath $guiPath -Value 'QT_ENABLED_PRIVATE_FEATURES "system_png"'
-    $patchDirectory = Join-Path $testRoot "share/snow-apps/qt-licenses/patches"
+    $patchDirectory = Join-Path $testRoot "share/clip-apps/qt-licenses/patches"
     $null = New-Item -ItemType Directory -Path $patchDirectory -Force
-    foreach ($patch in $script:SnowStaticQtSourcePatches) {
+    foreach ($patch in $script:ClipStaticQtSourcePatches) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $patch.File) -Destination $patchDirectory
     }
     $licenseRoot = Split-Path -Parent $patchDirectory
@@ -316,7 +316,7 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
         $metadataName = if ($component -eq "qttranslations") { "licenseRule.json" } else { "REUSE.toml" }
         Set-Content -LiteralPath (Join-Path $componentSource $metadataName) -Value "upstream $component metadata"
     }
-    Install-QtLicenseBundle -Source $licenseSource -Prefix $testRoot -Version $script:SnowQtVersion `
+    Install-QtLicenseBundle -Source $licenseSource -Prefix $testRoot -Version $script:ClipQtVersion `
         -SourceArchive "https://example.invalid/qt.tar.xz"
     Require (Test-InstalledQtLicenseBundle -Prefix $testRoot) "The source-license bundle must include Qt translations."
     $translationLicense = Join-Path $licenseRoot "qttranslations/licenseRule.json"
@@ -328,7 +328,7 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
     $sourceTranslationLicense = Join-Path $licenseSource "qttranslations/licenseRule.json"
     Remove-Item -LiteralPath $sourceTranslationLicense
     Require-Rejected {
-        Install-QtLicenseBundle -Source $licenseSource -Prefix $testRoot -Version $script:SnowQtVersion `
+        Install-QtLicenseBundle -Source $licenseSource -Prefix $testRoot -Version $script:ClipQtVersion `
             -SourceArchive "https://example.invalid/qt.tar.xz"
     } "Incomplete source metadata must be rejected before replacing an existing bundle."
     Require (Test-InstalledQtLicenseBundle -Prefix $testRoot) "A failed refresh must preserve the existing license bundle."
@@ -345,20 +345,20 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
         "The manifest must record Qt Translations as a bundled source component."
     Set-Content -LiteralPath $licenseManifestPath -Value $licenseManifest
 
-    Require (Test-SnowValidatedStaticQtKit $qtDir) "The current trimmed kit must be accepted."
-    Require ((Resolve-SnowQtDir -Qt6Dir $qtDir -Preset snow-shot-msvc-release) -eq $qtDir) `
+    Require (Test-ClipValidatedStaticQtKit $qtDir) "The current trimmed kit must be accepted."
+    Require ((Resolve-ClipQtDir -Qt6Dir $qtDir -Preset clip-shot-msvc-release) -eq $qtDir) `
         "Release bootstrap must resolve a validated kit."
     $stamp = Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion "6.12.0" -ExpectedConfiguration Release
     Require ($stamp.Timezone -and -not $stamp.TimezoneLocale) "Packaging must retain time-zone handling."
 
     $versionConfig = Join-Path $qtDir "Qt6ConfigVersion.cmake"
     Set-Content -LiteralPath $versionConfig -Value 'set(PACKAGE_VERSION "6.11.1")'
-    Require (-not (Test-SnowValidatedStaticQtKit $qtDir)) `
+    Require (-not (Test-ClipValidatedStaticQtKit $qtDir)) `
         "A current stamp must not hide a stale installed Qt version."
     Require-Rejected {
-        Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion $script:SnowQtVersion -ExpectedConfiguration Release
+        Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion $script:ClipQtVersion -ExpectedConfiguration Release
     } "Packaging must verify the installed version independently of its stamp."
-    Set-Content -LiteralPath $versionConfig -Value ('set(PACKAGE_VERSION "' + $script:SnowQtVersion + '")')
+    Set-Content -LiteralPath $versionConfig -Value ('set(PACKAGE_VERSION "' + $script:ClipQtVersion + '")')
 
     foreach ($change in @(
         @{ Name = "SchemaVersion"; Value = 3 },
@@ -371,7 +371,7 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
         $value = $originalStamp | ConvertFrom-Json
         $value.($change.Name) = $change.Value
         $value | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $stampPath
-        Require (-not (Test-SnowValidatedStaticQtKit $qtDir)) "Bootstrap accepted an invalid $($change.Name)."
+        Require (-not (Test-ClipValidatedStaticQtKit $qtDir)) "Bootstrap accepted an invalid $($change.Name)."
         Require-Rejected {
             Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion "6.12.0" -ExpectedConfiguration Release
         } "Packaging accepted an invalid $($change.Name)."
@@ -380,14 +380,14 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
     $value = $originalStamp | ConvertFrom-Json
     $value.SourcePatches[0].SHA256 = "altered-patch"
     $value | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $stampPath
-    Require (-not (Test-SnowValidatedStaticQtKit $qtDir)) "A kit with altered source-patch metadata must be rejected."
+    Require (-not (Test-ClipValidatedStaticQtKit $qtDir)) "A kit with altered source-patch metadata must be rejected."
     Set-Content -LiteralPath $stampPath -Value $originalStamp
-    $installedPatch = Join-Path $patchDirectory $script:SnowStaticQtSourcePatches[0].File
+    $installedPatch = Join-Path $patchDirectory $script:ClipStaticQtSourcePatches[0].File
     Set-Content -LiteralPath $installedPatch -Value "altered-patch"
     Require-Rejected {
         Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion "6.12.0" -ExpectedConfiguration Release
     } "Packaging must reject altered installed source-patch provenance."
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $script:SnowStaticQtSourcePatches[0].File) `
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $script:ClipStaticQtSourcePatches[0].File) `
         -Destination $installedPatch -Force
 
     foreach ($invalidTargets in @(
@@ -399,54 +399,54 @@ QT_DISABLED_PRIVATE_FEATURES "timezone_locale"
         ($coreTargets -replace 'QT_DISABLED_PRIVATE_FEATURES "timezone_locale"', 'QT_DISABLED_PRIVATE_FEATURES ""')
     )) {
         Set-Content -LiteralPath $corePath -Value $invalidTargets
-        Require (-not (Test-SnowValidatedStaticQtKit $qtDir)) "Bootstrap trusted a stamp with conflicting installed features."
+        Require (-not (Test-ClipValidatedStaticQtKit $qtDir)) "Bootstrap trusted a stamp with conflicting installed features."
         Require-Rejected {
             Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion "6.12.0" -ExpectedConfiguration Release
         } "Packaging trusted a stamp with conflicting installed features."
     }
     Set-Content -LiteralPath $corePath -Value $coreTargets
-    Write-StaticQtBuildStamp -Path $stampPath -Version $script:SnowQtVersion -BuildConfiguration Release `
+    Write-StaticQtBuildStamp -Path $stampPath -Version $script:ClipQtVersion -BuildConfiguration Release `
         -Fingerprint "dependencies" -SourceArchive "https://example.invalid/qt.tar.xz" -BuildParallelism 4 `
         -Architecture arm64 -HostArchitecture x64 -HostQtPrefix $testRoot
     $arm64Stamp = Get-Content -LiteralPath $stampPath -Raw | ConvertFrom-Json
     Require (-not $arm64Stamp.Ltcg -and $arm64Stamp.SystemPng -and $arm64Stamp.SystemZlib) `
         'ARM64 Release provenance must distinguish native code generation from system codecs.'
-    Require (Test-SnowStaticQtStamp -Stamp $arm64Stamp -Architecture arm64) `
+    Require (Test-ClipStaticQtStamp -Stamp $arm64Stamp -Architecture arm64) `
         'The ARM64 stamp writer and validator must agree on native optimized objects.'
     Set-Content -LiteralPath $corePath -Value $arm64Targets
-    Require (Test-SnowValidatedStaticQtKit -Qt6Dir $qtDir -Architecture arm64) `
+    Require (Test-ClipValidatedStaticQtKit -Qt6Dir $qtDir -Architecture arm64) `
         'Bootstrap must accept a correctly stamped ARM64 kit without LTCG.'
     $pe[68] = 0x64; $pe[69] = 0xAA
     [IO.File]::WriteAllBytes((Join-Path $qtBin 'Qt6Core.dll'), $pe)
-    $null = Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion $script:SnowQtVersion `
+    $null = Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion $script:ClipQtVersion `
         -ExpectedConfiguration Release -Architecture arm64
     $arm64Stamp.Ltcg = $true
     $arm64Stamp | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $stampPath
-    Require (-not (Test-SnowValidatedStaticQtKit -Qt6Dir $qtDir -Architecture arm64)) `
+    Require (-not (Test-ClipValidatedStaticQtKit -Qt6Dir $qtDir -Architecture arm64)) `
         'Bootstrap must reject a stale ARM64 LTCG stamp even with native feature exports.'
     Require-Rejected {
-        Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion $script:SnowQtVersion `
+        Get-ValidatedStaticQtStamp -Prefix $testRoot -ExpectedVersion $script:ClipQtVersion `
             -ExpectedConfiguration Release -Architecture arm64
     } 'Packaging must reject a stale ARM64 LTCG stamp.'
     $pe[68] = 0x64; $pe[69] = 0x86
     [IO.File]::WriteAllBytes((Join-Path $qtBin 'Qt6Core.dll'), $pe)
     Set-Content -LiteralPath $corePath -Value $coreTargets
     Remove-Item -LiteralPath $stampPath
-    Require (-not (Test-SnowValidatedStaticQtKit $qtDir)) "An unstamped release kit must be rejected."
-    Require ((Resolve-SnowQtDir -Qt6Dir $qtDir -Preset windows-msvc-performance) -eq $qtDir) `
+    Require (-not (Test-ClipValidatedStaticQtKit $qtDir)) "An unstamped release kit must be rejected."
+    Require ((Resolve-ClipQtDir -Qt6Dir $qtDir -Preset windows-msvc-performance) -eq $qtDir) `
         "Development and performance kits do not require the production stamp."
     Set-Content -LiteralPath (Join-Path $coreDir "Qt6CoreTargets-debug.cmake") -Value "# fixture"
     Set-Content -LiteralPath $corePath -Value ($coreTargets -replace 'system_zlib;ltcg',
         'system_zlib;ltcg;timezone_locale' -replace 'QT_DISABLED_PRIVATE_FEATURES "timezone_locale"',
         'QT_DISABLED_PRIVATE_FEATURES ""')
-    Require ((Resolve-SnowQtDir -Qt6Dir $qtDir -Preset windows-msvc-debug) -eq $qtDir) `
+    Require ((Resolve-ClipQtDir -Qt6Dir $qtDir -Preset windows-msvc-debug) -eq $qtDir) `
         "Existing Debug kits with CLDR name data must remain usable."
-    Require-Rejected { Resolve-SnowQtDir -Qt6Dir $qtDir -Preset snow-shot-msvc-release } `
+    Require-Rejected { Resolve-ClipQtDir -Qt6Dir $qtDir -Preset clip-shot-msvc-release } `
         "Production discovery must reject an old untrimmed kit."
 }
 finally {
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
-    $resolvedBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $script:SnowRepoRoot "build"))
+    $resolvedBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $script:ClipRepoRoot "build"))
     $separator = [System.IO.Path]::DirectorySeparatorChar
     $comparison = if ($separator -eq '\') {
         [System.StringComparison]::OrdinalIgnoreCase

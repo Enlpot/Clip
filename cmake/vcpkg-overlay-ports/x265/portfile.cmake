@@ -41,9 +41,9 @@ if("main10" IN_LIST FEATURES)
     # Build the namespace-isolated Main10 implementation first. It has no
     # public C API and is linked into the normal 8-bit API dispatcher below.
     # Separate trees keep configuration/header/assembly outputs from colliding.
-    set(SNOW_X265_BUILDTREES_DIR "${CURRENT_BUILDTREES_DIR}")
-    set(SNOW_X265_MAIN10_DIR "${CURRENT_BUILDTREES_DIR}/main10")
-    set(CURRENT_BUILDTREES_DIR "${SNOW_X265_MAIN10_DIR}")
+    set(CLIP_X265_BUILDTREES_DIR "${CURRENT_BUILDTREES_DIR}")
+    set(CLIP_X265_MAIN10_DIR "${CURRENT_BUILDTREES_DIR}/main10")
+    set(CURRENT_BUILDTREES_DIR "${CLIP_X265_MAIN10_DIR}")
     file(MAKE_DIRECTORY "${CURRENT_BUILDTREES_DIR}")
     vcpkg_cmake_configure(
         SOURCE_PATH "${SOURCE_PATH}/source"
@@ -60,19 +60,19 @@ if("main10" IN_LIST FEATURES)
         MAYBE_UNUSED_VARIABLES ENABLE_LIBNUMA
     )
     vcpkg_cmake_build(TARGET x265-static LOGFILE_BASE build-main10)
-    set(CURRENT_BUILDTREES_DIR "${SNOW_X265_BUILDTREES_DIR}")
+    set(CURRENT_BUILDTREES_DIR "${CLIP_X265_BUILDTREES_DIR}")
     if(VCPKG_TARGET_IS_WINDOWS AND NOT VCPKG_TARGET_IS_MINGW)
-        set(SNOW_X265_MAIN10_ARCHIVE x265-static.lib)
-        set(SNOW_X265_MAIN10_INSTALLED x265-main10.lib)
+        set(CLIP_X265_MAIN10_ARCHIVE x265-static.lib)
+        set(CLIP_X265_MAIN10_INSTALLED x265-main10.lib)
     else()
-        set(SNOW_X265_MAIN10_ARCHIVE libx265.a)
-        set(SNOW_X265_MAIN10_INSTALLED libx265-main10.a)
+        set(CLIP_X265_MAIN10_ARCHIVE libx265.a)
+        set(CLIP_X265_MAIN10_INSTALLED libx265-main10.a)
     endif()
     list(APPEND OPTIONS -DLINKED_10BIT=ON -DHIGH_BIT_DEPTH=OFF)
-    set(SNOW_X265_MAIN10_RELEASE
-        "-DEXTRA_LIB=${SNOW_X265_MAIN10_DIR}/${TARGET_TRIPLET}-rel/${SNOW_X265_MAIN10_ARCHIVE}")
-    set(SNOW_X265_MAIN10_DEBUG
-        "-DEXTRA_LIB=${SNOW_X265_MAIN10_DIR}/${TARGET_TRIPLET}-dbg/${SNOW_X265_MAIN10_ARCHIVE}")
+    set(CLIP_X265_MAIN10_RELEASE
+        "-DEXTRA_LIB=${CLIP_X265_MAIN10_DIR}/${TARGET_TRIPLET}-rel/${CLIP_X265_MAIN10_ARCHIVE}")
+    set(CLIP_X265_MAIN10_DEBUG
+        "-DEXTRA_LIB=${CLIP_X265_MAIN10_DIR}/${TARGET_TRIPLET}-dbg/${CLIP_X265_MAIN10_ARCHIVE}")
 endif()
 
 vcpkg_cmake_configure(
@@ -84,10 +84,10 @@ vcpkg_cmake_configure(
         -DENABLE_LIBNUMA=OFF
         "-DVERSION=${VERSION}"
     OPTIONS_RELEASE
-        ${SNOW_X265_MAIN10_RELEASE}
+        ${CLIP_X265_MAIN10_RELEASE}
     OPTIONS_DEBUG
         -DENABLE_CLI=OFF
-        ${SNOW_X265_MAIN10_DEBUG}
+        ${CLIP_X265_MAIN10_DEBUG}
     MAYBE_UNUSED_VARIABLES
         ENABLE_LIBNUMA
 )
@@ -98,27 +98,27 @@ vcpkg_copy_pdbs()
 if("main10" IN_LIST FEATURES AND VCPKG_LIBRARY_LINKAGE STREQUAL "static")
     # Static archives do not absorb target_link_libraries dependencies. Ship
     # the namespace-isolated archive and expose it to static pkg-config users.
-    foreach(SNOW_X265_CONFIG IN ITEMS release debug)
-        if(NOT VCPKG_BUILD_TYPE OR VCPKG_BUILD_TYPE STREQUAL SNOW_X265_CONFIG)
-            if(SNOW_X265_CONFIG STREQUAL "debug")
-                set(SNOW_X265_CONFIG_PREFIX debug/)
-                set(SNOW_X265_CONFIG_SUFFIX dbg)
+    foreach(CLIP_X265_CONFIG IN ITEMS release debug)
+        if(NOT VCPKG_BUILD_TYPE OR VCPKG_BUILD_TYPE STREQUAL CLIP_X265_CONFIG)
+            if(CLIP_X265_CONFIG STREQUAL "debug")
+                set(CLIP_X265_CONFIG_PREFIX debug/)
+                set(CLIP_X265_CONFIG_SUFFIX dbg)
             else()
-                set(SNOW_X265_CONFIG_PREFIX "")
-                set(SNOW_X265_CONFIG_SUFFIX rel)
+                set(CLIP_X265_CONFIG_PREFIX "")
+                set(CLIP_X265_CONFIG_SUFFIX rel)
             endif()
             file(INSTALL
-                "${SNOW_X265_MAIN10_DIR}/${TARGET_TRIPLET}-${SNOW_X265_CONFIG_SUFFIX}/${SNOW_X265_MAIN10_ARCHIVE}"
-                DESTINATION "${CURRENT_PACKAGES_DIR}/${SNOW_X265_CONFIG_PREFIX}lib"
-                RENAME "${SNOW_X265_MAIN10_INSTALLED}")
+                "${CLIP_X265_MAIN10_DIR}/${TARGET_TRIPLET}-${CLIP_X265_CONFIG_SUFFIX}/${CLIP_X265_MAIN10_ARCHIVE}"
+                DESTINATION "${CURRENT_PACKAGES_DIR}/${CLIP_X265_CONFIG_PREFIX}lib"
+                RENAME "${CLIP_X265_MAIN10_INSTALLED}")
             vcpkg_replace_string(
-                "${CURRENT_PACKAGES_DIR}/${SNOW_X265_CONFIG_PREFIX}lib/pkgconfig/x265.pc"
+                "${CURRENT_PACKAGES_DIR}/${CLIP_X265_CONFIG_PREFIX}lib/pkgconfig/x265.pc"
                 "Libs.private: " "Libs.private: -lx265-main10 ")
         endif()
     endforeach()
 endif()
 if("main10" IN_LIST FEATURES)
-    file(INSTALL "${CURRENT_PORT_DIR}/snow-main10-capability.json"
+    file(INSTALL "${CURRENT_PORT_DIR}/clip-main10-capability.json"
         DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
 endif()
 vcpkg_fixup_pkgconfig()

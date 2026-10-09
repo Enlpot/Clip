@@ -7,7 +7,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $fixtureRoot = Join-Path $repoRoot ("build/qt-shader-contract-" + [guid]::NewGuid().ToString("N"))
 $savedVariables = @{}
 $savedExitCode = $global:LASTEXITCODE
-foreach ($name in @("SNOW_TEST_QSB_LOG", "SNOW_TEST_QSB_VERSION", "SNOW_TEST_QSB_EXIT_CODE", "QTDIR")) {
+foreach ($name in @("CLIP_TEST_QSB_LOG", "CLIP_TEST_QSB_VERSION", "CLIP_TEST_QSB_EXIT_CODE", "QTDIR")) {
     $savedVariables[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
 
@@ -16,29 +16,29 @@ function Require([bool]$Condition, [string]$Message) {
 }
 
 try {
-    $viewerRoot = Join-Path $fixtureRoot "snow_image_viewer"
+    $viewerRoot = Join-Path $fixtureRoot "clip_image_viewer"
     $fixtureScripts = Join-Path $viewerRoot "scripts"
     $toolchainRoot = Join-Path $fixtureRoot "scripts"
     $shaderRoot = Join-Path $viewerRoot "resources/shaders"
     New-Item -ItemType Directory -Path $fixtureScripts, $toolchainRoot, $shaderRoot -Force | Out-Null
     $compileScript = Join-Path $fixtureScripts "compile-shaders.ps1"
-    Copy-Item -LiteralPath (Join-Path $repoRoot "snow_image_viewer/scripts/compile-shaders.ps1") `
+    Copy-Item -LiteralPath (Join-Path $repoRoot "clip_image_viewer/scripts/compile-shaders.ps1") `
         -Destination $compileScript
     $manifestPath = Join-Path $toolchainRoot "qt-toolchain.json"
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "qt-toolchain.json") -Destination $manifestPath
     $manifestText = Get-Content -LiteralPath $manifestPath -Raw
     $version = ($manifestText | ConvertFrom-Json).qtVersion
     $log = Join-Path $fixtureRoot "qsb-calls.jsonl"
-    $env:SNOW_TEST_QSB_LOG = $log
-    $env:SNOW_TEST_QSB_VERSION = "qsb $version"
-    $env:SNOW_TEST_QSB_EXIT_CODE = "0"
+    $env:CLIP_TEST_QSB_LOG = $log
+    $env:CLIP_TEST_QSB_VERSION = "qsb $version"
+    $env:CLIP_TEST_QSB_EXIT_CODE = "0"
     $fakeQsb = Join-Path $fixtureRoot "qsb fixture.ps1"
     Set-Content -LiteralPath $fakeQsb -Value @'
 $call = @($args)
-[IO.File]::AppendAllText($env:SNOW_TEST_QSB_LOG, (ConvertTo-Json -InputObject $call -Compress) + "`n")
-$global:LASTEXITCODE = [int]$env:SNOW_TEST_QSB_EXIT_CODE
+[IO.File]::AppendAllText($env:CLIP_TEST_QSB_LOG, (ConvertTo-Json -InputObject $call -Compress) + "`n")
+$global:LASTEXITCODE = [int]$env:CLIP_TEST_QSB_EXIT_CODE
 if ($call.Count -eq 1 -and $call[0] -ceq "--version") {
-    Write-Output $env:SNOW_TEST_QSB_VERSION
+    Write-Output $env:CLIP_TEST_QSB_VERSION
 }
 '@
     $shaders = @("image.vert", "image.frag", "image_array.frag", "navigation.vert",
@@ -65,13 +65,13 @@ if ($call.Count -eq 1 -and $call[0] -ceq "--version") {
     foreach ($invalid in @("mismatch", "missing", "version-failed", "manifest-invalid", "manifest-missing")) {
         Remove-Item -LiteralPath $log
         Set-Content -LiteralPath $manifestPath -Value $manifestText
-        $env:SNOW_TEST_QSB_VERSION = "qsb $version"
-        $env:SNOW_TEST_QSB_EXIT_CODE = "0"
+        $env:CLIP_TEST_QSB_VERSION = "qsb $version"
+        $env:CLIP_TEST_QSB_EXIT_CODE = "0"
         $selectedQsb = $fakeQsb
         switch ($invalid) {
-            "mismatch" { $env:SNOW_TEST_QSB_VERSION = "qsb 6.11.1" }
+            "mismatch" { $env:CLIP_TEST_QSB_VERSION = "qsb 6.11.1" }
             "missing" { $selectedQsb = Join-Path $fixtureRoot "missing-qsb.exe" }
-            "version-failed" { $env:SNOW_TEST_QSB_EXIT_CODE = "1" }
+            "version-failed" { $env:CLIP_TEST_QSB_EXIT_CODE = "1" }
             "manifest-invalid" { Set-Content -LiteralPath $manifestPath -Value '{"schemaVersion":2,"qtVersion":"6.12.0"}' }
             "manifest-missing" { Remove-Item -LiteralPath $manifestPath }
         }

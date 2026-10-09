@@ -21,28 +21,28 @@ def main() -> None:
     args = parser.parse_args()
 
     module = pathlib.Path(__file__).resolve().parents[1] / "cmake" / "ProjectWarnings.cmake"
-    with tempfile.TemporaryDirectory(prefix="snow-project-warnings-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="clip-project-warnings-") as temporary:
         source = pathlib.Path(temporary) / "source"
         build = pathlib.Path(temporary) / "build"
         directory_policy = source / "directory_policy"
         directory_policy.mkdir(parents=True)
         (source / "CMakeLists.txt").write_text(
             "cmake_minimum_required(VERSION 3.30)\n"
-            "project(snow_warning_probe LANGUAGES CXX)\n"
+            "project(clip_warning_probe LANGUAGES CXX)\n"
             f'include("{module.as_posix()}")\n'
             "add_executable(target_signed warning.cpp)\n"
             "target_compile_definitions(target_signed PRIVATE TEST_SIGNED)\n"
-            "snow_apply_strict_warnings(target_signed)\n"
+            "clip_apply_strict_warnings(target_signed)\n"
             "add_executable(target_aggregate warning.cpp)\n"
             "target_compile_definitions(target_aggregate PRIVATE TEST_AGGREGATE)\n"
-            "snow_apply_strict_warnings(target_aggregate)\n"
+            "clip_apply_strict_warnings(target_aggregate)\n"
             "add_executable(explicit_cast warning.cpp)\n"
-            "snow_apply_strict_warnings(explicit_cast)\n"
+            "clip_apply_strict_warnings(explicit_cast)\n"
             "add_subdirectory(directory_policy)\n",
             encoding="utf-8",
         )
         (directory_policy / "CMakeLists.txt").write_text(
-            "snow_enable_strict_warnings()\n"
+            "clip_enable_strict_warnings()\n"
             "add_executable(directory_signed ../warning.cpp)\n"
             "target_compile_definitions(directory_signed PRIVATE TEST_SIGNED)\n"
             "add_executable(directory_aggregate ../warning.cpp)\n"

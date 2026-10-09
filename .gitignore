@@ -1,7 +1,7 @@
 # Local agent state
 /.agents/
 /.codex/
-/scripts/publish-snow-shot-release.local.ps1
+/scripts/publish-clip-shot-release.local.ps1
 .zcode
 output
 
@@ -82,16 +82,16 @@ baseline-build-codex
 baseline-codex
 
 # Locally downloaded OCR runtime and model assets.
-/snow-crates/crates/snow-ocr-c/assets/onnxruntime/
-/snow-crates/crates/snow-ocr-c/assets/ppocrv6-small/*.onnx
-/snow-crates/crates/snow-ocr-c/assets/ppocrv6-small/*.txt
+/clip-crates/crates/clip-ocr-c/assets/onnxruntime/
+/clip-crates/crates/clip-ocr-c/assets/ppocrv6-small/*.onnx
+/clip-crates/crates/clip-ocr-c/assets/ppocrv6-small/*.txt
 
 # Build
 **/artifacts/
 **/vcpkg_installed/
 
 # Artifacts written by the export-pipeline audio noise check test
-snow-crates/crates/snow-recording-export/tests/output/
+clip-crates/crates/clip-recording-export/tests/output/
 
 # Artifacts written by the capture crackle check test
-snow-crates/crates/snow-audio-recorder/tests/output/
+clip-crates/crates/clip-audio-recorder/tests/output/

@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.25)
+project(clip_image_package_consumer LANGUAGES CXX)
+
+find_package(clip_image 3 CONFIG REQUIRED)
+
+add_executable(clip_image_consumer_static main.cpp)
+target_link_libraries(clip_image_consumer_static PRIVATE clip_image::clip_image_static)
+target_compile_features(clip_image_consumer_static PRIVATE cxx_std_20)
+
+add_executable(clip_image_consumer_shared main.cpp)
+target_link_libraries(clip_image_consumer_shared PRIVATE clip_image::clip_image_shared)
+target_compile_features(clip_image_consumer_shared PRIVATE cxx_std_20)

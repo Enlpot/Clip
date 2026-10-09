@@ -1,6 +1,6 @@
 # Recording font fixtures
 
-These fonts contain original geometric test glyphs, created for Snow Apps and
+These fonts contain original geometric test glyphs, created for Clip Apps and
 licensed under Apache-2.0. They contain no outlines or other data from external
 fonts. They are only loaded by tests and are never installed system-wide.
 

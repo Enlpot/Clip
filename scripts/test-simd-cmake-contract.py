@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SimdCMakeFixture(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='snow-simd-contract-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='clip-simd-contract-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.source = self.root / 'source'
@@ -37,16 +37,16 @@ class SimdCMakeContract(SimdCMakeFixture):
                    windows_architecture='', compiler='AppleClang'):
         self.configure(f'''
 cmake_minimum_required(VERSION 3.22)
-project(SnowSimdContract NONE)
+project(ClipSimdContract NONE)
 set(APPLE {"TRUE" if apple else "FALSE"})
 set(MSVC {"TRUE" if msvc else "FALSE"})
 set(CMAKE_SYSTEM_PROCESSOR "{processor}")
 set(CMAKE_OSX_ARCHITECTURES "{architectures}")
 set(CMAKE_CXX_COMPILER_ID "{compiler}")
-set(SNOW_WINDOWS_ARCHITECTURE "{windows_architecture}")
-include("{ROOT.as_posix()}/cmake/SnowSimd.cmake")
-set_property(SOURCE filter.cpp pen.cpp PROPERTY COMPILE_OPTIONS "-DSNOW_KEEP_OPTION")
-snow_configure_avx2_sources(filter.cpp pen.cpp)
+set(CLIP_WINDOWS_ARCHITECTURE "{windows_architecture}")
+include("{ROOT.as_posix()}/cmake/ClipSimd.cmake")
+set_property(SOURCE filter.cpp pen.cpp PROPERTY COMPILE_OPTIONS "-DCLIP_KEEP_OPTION")
+clip_configure_avx2_sources(filter.cpp pen.cpp)
 foreach(source IN ITEMS filter pen baseline)
     foreach(property IN ITEMS COMPILE_OPTIONS SKIP_UNITY_BUILD_INCLUSION SKIP_PRECOMPILE_HEADERS)
         get_source_file_property(value "${{source}}.cpp" "${{property}}")
@@ -58,7 +58,7 @@ endforeach()
                     (self.build / 'properties.txt').read_text(encoding='utf-8').splitlines())
 
     def assert_kernels(self, properties, options='', pch=False):
-        expected = '-DSNOW_KEEP_OPTION' + (';' + options if options else '')
+        expected = '-DCLIP_KEEP_OPTION' + (';' + options if options else '')
         for source in ('filter', 'pen'):
             self.assertEqual(properties[f'{source}.COMPILE_OPTIONS'], expected)
             self.assertEqual(properties[f'{source}.SKIP_UNITY_BUILD_INCLUSION'],
@@ -137,14 +137,14 @@ int {name}(const int* source) {{ return source[0]; }}
 ''', encoding='utf-8')
         self.configure(f'''
 cmake_minimum_required(VERSION 3.22)
-project(SnowSimdCompilation CXX)
+project(ClipSimdCompilation CXX)
 # Reproduce the host processor metadata from the failed x64 app configure.
 set(CMAKE_SYSTEM_PROCESSOR arm64)
-include("{ROOT.as_posix()}/cmake/SnowSimd.cmake")
+include("{ROOT.as_posix()}/cmake/ClipSimd.cmake")
 add_library(kernels STATIC baseline.cpp filter.cpp pen.cpp)
 set_target_properties(kernels PROPERTIES UNITY_BUILD ON)
 target_precompile_headers(kernels PRIVATE <vector>)
-snow_configure_avx2_sources(filter.cpp pen.cpp)
+clip_configure_avx2_sources(filter.cpp pen.cpp)
 ''', f'-DCMAKE_OSX_ARCHITECTURES={architecture}', '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON')
         commands = json.loads((self.build / 'compile_commands.json').read_text(encoding='utf-8'))
         unity = ''.join(path.read_text(encoding='utf-8') for path in

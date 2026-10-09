@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "pack": "clip-image-viewer",
+  "cppNamespace": "clip::image_viewer::icons",
+  "headerInclude": "ui/app_icons.h",
+  "source": "Clip Image Viewer project-owned static SVG assets",
+  "entries": [
+    {
+      "variant": "app",
+      "symbol": "ApplicationIcon",
+      "name": "application-icon",
+      "source": "app-icon.svg",
+      "colorModel": "fullColor",
+      "fit": "contain",
+      "allowEmbeddedDataImages": true
+    },
+    {
+      "variant": "outlined",
+      "symbol": "ResizeImage",
+      "name": "resize-image",
+      "source": "resize-image.svg",
+      "colorModel": "monochrome",
+      "fit": "contain"
+    }
+  ]
+}
