@@ -8,12 +8,12 @@ Priorities: data preservation and authenticity > recovery > testability > mainta
 | U1 | One SemVer feed, signed metadata, no automatic downgrade | update contract tests |
 | U2 | Background check/download; explicit restart; preserve active work | update service and About tests |
 | U3 | Apply only verified owned files; journal, probe, recover | update transaction tests |
-| R1 | Audited local Windows/macOS packages published directly to GitHub and Gitee | publisher tests |
+| R1 | Audited local Windows packages published directly to GitHub and Gitee | publisher tests |
 | R2 | Private local signing key; immutable verified release assets | signing and publisher tests |
 
 The first updater release is `1.0.0-beta`. Binaries without an updater require one manual
 installation/replacement. This release introduces no user-data migration, delta patches,
-macOS in-app installation, or OCR model-host deployment.
+or OCR model-host deployment.
 
 ## GitHub and Gitee release channels
 
@@ -32,16 +32,10 @@ channel and verifies the signed package size and SHA-256. Resume data is bound t
 package URL, so a source change starts a fresh transfer. A failed mirror never changes
 the published GitHub release.
 
-The macOS Qt updater races the same release APIs. It requires an exact architecture DMG
-and matching `.sha256` asset before offering the update; About opens the winning
-release page. The standalone installer races both lists and downloads the chosen DMG
-and checksum, with same-version package fallback. The app does not install macOS
-updates in-app.
-
-The local publisher signs and audits all Windows packages, optionally packages a
-macOS DMG and standalone installer, publishes GitHub assets, verifies their bytes,
-then publishes the release. With `-DeployWebsite`, it then runs the separate official
-website workflow after both release destinations are published and verified.
+The local publisher signs and audits all Windows packages, publishes GitHub assets,
+verifies their bytes, then publishes the release. With `-DeployWebsite`, it then runs
+the separate official website workflow after both release destinations are published
+and verified.
 Stable releases become GitHub's latest; preview releases remain marked as previews.
 Identical retries reuse existing assets; conflicting bytes fail without overwrite.
 
@@ -56,9 +50,8 @@ running shell predates the setting. Never paste tokens into release notes, comma
 arguments, or checked-in configuration. Optional `GITEE_USERNAME` defaults to `mg-chao`.
 
 The default publisher authenticates Gitee before building. After the compiled updater
-audits the signed packages, it saves `artifacts/publish-*/local-release.json`, prepares
-the reproducible Homebrew archive from the local DMG and tagged source, and publishes
-the same local files and detailed notes to both destinations. Gitee uploads run on
+audits the signed packages, it saves `artifacts/publish-*/local-release.json`,
+and publishes the same local files and detailed notes to both destinations. Gitee uploads run on
 the local machine; there is no GitHub release synchronization workflow. Main branch
 source mirroring remains separate. `-SkipGitee` explicitly selects GitHub-only
 publication; `-AuditOnly` and `-WhatIf` do not contact Gitee or require a token.
@@ -107,7 +100,7 @@ fallbacks for short and offset names in every requested locale. Numeric timestam
 UTC storage, local conversions, and daylight-saving transitions retain their behavior.
 
 `scripts/qt-toolchain.json` is the version and source-archive SHA256 contract for
-CMake, Windows/macOS provisioning, and release CI. Both source builders verify
+CMake, Windows provisioning, and release CI. Both source builders verify
 the archive before extraction. `scripts/build-static-qt.ps1` applies the patch
 idempotently and installs it under the kit's source-license bundle. The build
 stamp fingerprints the feature policy and patch contents. Bootstrap and packaging
@@ -123,10 +116,6 @@ For a Release development kit used by `windows-msvc-performance`, pass
 Concurrent and can add them incrementally to an already validated production
 kit. Performance discovery requires these modules. They are separate static
 libraries and are not linked into the production Clip executable.
-
-macOS continues using Cocoa time-zone names; Qt already excludes these CLDR
-tables on Apple platforms. Its static kit uses the same feature policy and
-validates both its build stamp and installed exports.
 
 The standalone `test-support/qt-timezone` fixture can be built against the exact
 production kit to verify timestamp round trips, named zones, daylight-saving
@@ -150,8 +139,7 @@ Cold configuration, settings forms, import/export, and shell code use `/O1 /Os`
 on MSVC or `-Os` on Clang. Capture, recording, drawing, image processing, history
 thumbnails, clipboard decoding, and shortcut dispatch retain their speed policy.
 Optimized Release targets keep LTO; MSVC `/Gw` and `/Gy` allow `/OPT:REF` and
-`/OPT:ICF` to discard unused data/functions and fold identical code. macOS enables
-`-dead_strip` only for Release builds with the shipping size option enabled.
+`/OPT:ICF` to discard unused data/functions and fold identical code.
 The source and target policies are centralized in
 `cmake/ClipShotReleaseOptimization.cmake` for both editions.
 
@@ -161,15 +149,12 @@ Clip and Clip Mini are built from one CMake configuration and published
 under the same `v<version>_clip-shot` tag. The `clip_shot` and `clip_shot_mini`
 targets keep separate executable, helper, install, and storage identities.
 `CLIP_APPS_BUILD_CLIP_SHOT_MINI=ON` enables Mini alongside the full edition in
-Windows and macOS Apple Silicon presets; macOS Intel presets exclude Mini.
-The `scripts/build.ps1` and `scripts/build.sh` wrappers select the enabled
-editions automatically. After configuring with Mini `OFF`, override the paired
+Windows release presets.
+The `scripts/build.ps1` wrapper selects the enabled editions automatically.
+After configuring with Mini `OFF`, override the paired
 targets for a direct build with `cmake --build --preset build-<preset> --target
 clip_shot`. Windows and ARM64 release packaging requires both editions.
-`scripts/package-clip-shot.ps1` produces both Windows editions, and
-`scripts/package-clip-shot.sh clip-shot-macos-arm64-release` produces both DMGs.
-`scripts/package-clip-shot.sh clip-shot-macos-x64-release` produces the Intel
-Full edition as `clip-shot-<version>-macos-x86_64.dmg` and its SHA-256 sidecar.
+`scripts/package-clip-shot.ps1` produces both Windows editions.
 
 | Mini Windows asset | Purpose |
 | --- | --- |
@@ -178,11 +163,9 @@ Full edition as `clip-shot-<version>-macos-x86_64.dmg` and its SHA-256 sidecar.
 | `clip-shot-mini-<version>-windows-x64-portable.zip` | Portable install and update |
 
 Windows Mini bundles only the trusted OCR asset manifest; manual text recognition
-downloads the local OCR payload on demand. It has no offline installer. macOS
-Mini supports Apple Silicon only and bundles its OCR worker and runtime in
-`clip-shot-mini-<version>-macos-arm64.dmg`. It bundles no model files; selected
-models download on demand into its verified application cache. Mini hides its
-text-recognition toolbar button by default on both platforms and disables
+downloads the local OCR payload on demand. It has no offline installer.
+Mini hides its
+text-recognition toolbar button by default and disables
 automatic Pin to Screen recognition; users can enable manual text recognition
 in Mini settings.
 
@@ -194,13 +177,11 @@ in `clip-shot-mini-installation.json`, its portable marker is
 `bin/__mini_data_directory`, and its installed helpers are
 `bin/clip-shot-mini-updater.exe` beside
 `bin/clip_shot_mini.exe`. Publish and verify both signed feeds together. Package
-manager submissions use separate Mini identities (`mg-chao.clip-shot-mini`,
-`clipshot-mini`, and `clip-shot-mini` Homebrew casks).
+manager submissions use separate Mini identities (`mg-chao.clip-shot-mini` and
+`clipshot-mini`).
 
 GitHub and Gitee publish versioned Windows installer and update assets, their checksum
-sidecars and audit manifests, plus `latest-version.json`. When macOS packaging is
-configured, the default release also includes Full DMGs for ARM64 and Intel,
-the ARM64 Mini DMG, their `.sha256` sidecars, and `install-clip-shot-macos.sh`.
+sidecars and audit manifests, plus `latest-version.json`.
 Signed metadata is uploaded last. The Windows
 updater uses the signed JSON envelope and never fetches the website's legacy update
 feed. The website homepage and unrelated application API remain configured separately.
@@ -539,30 +520,6 @@ Copy `scripts/publish-clip-shot-release.local.example.ps1` to the ignored
 The release tag must point to the local source commit. The publisher verifies the
 pinned public OCR runtime before packaging and audits each signed Windows package.
 
-### Coordinated Windows and macOS packaging
-
-Set `MacHost`, `MacUser`, and `MacProjectDirectory` to package macOS alongside
-Windows. `MacArchitectures` defaults to `@('arm64', 'x64')`: Full for both
-architectures and Mini for ARM64. The macOS architectures build sequentially
-inside the remote job while Windows packaging runs concurrently. Use
-`-MacArchitectures arm64` for the historical ARM64 pair, or
-`-MacArchitectures x64` for Intel Full only. An Apple Silicon host can build both;
-an Intel host requires the x64 selection. Apple Silicon needs Rosetta for Intel
-build-time executable checks. `MacPort` defaults to 22;
-`MacIdentityFile` and `MacKnownHostsFile` are optional. The Mac checkout must
-have the same source version. The packaging worker verifies the DMG and its code
-signature, then transfers each DMG and checksum. Public Intel assets use
-`macos-x86_64`, while preset and parameter names use `x64`. ARM64 logs and
-receipts retain `macos-build.log` and `macos-build.json`; Intel uses
-`macos-x64-build.log` and `macos-x64-build.json`. The publisher adds
-`install-clip-shot-macos.sh` as a GitHub release asset. `-SkipBuild` reuses
-audited package bytes and each architecture's Mac source receipt; it does not
-bypass audits. Receipts pin the source, selected architecture, package bytes,
-and diagnostic symbols. Both architectures must record the same source identity
-before the publisher stages them. Historical receipts without an architecture identify
-ARM64 only. The standalone remote wrapper retains `-Architecture arm64` as its
-default; `-Architecture x64` requests Full only.
-
 ```powershell
 & scripts/publish-clip-shot-release.local.ps1 -WhatIf
 & scripts/publish-clip-shot-release.local.ps1
@@ -573,7 +530,7 @@ default; `-Architecture x64` requests Full only.
 
 `-WhatIf` lists the planned assets without building or publishing.
 `-AuditOnly` signs and audits without upload. `Verify` downloads published
-GitHub assets and checks the signed Windows packages and any macOS checksum pairs.
+GitHub assets and checks the signed Windows packages.
 A corrective release uses a higher version; published assets are immutable.
 
 ## Official website deployment
@@ -606,26 +563,23 @@ workflow tests and their commands are documented in the website repository READM
 ### Clip Mini website downloads
 
 The official website deploys both editions in one operation. Publish and verify
-the paired release on GitHub and Gitee first, including Mini's online installer,
-portable archive, and Apple Silicon DMG listed above. Both editions share
+the paired release on GitHub and Gitee first, including Mini's online installer
+and portable archive. Both editions share
 `CLIP_SHOT_VERSION` and `v<version>_clip-shot`; Mini needs no separate deployment
 command or version setting.
 
 The website's Windows Mini card links to
 `clip-shot-mini-<version>-windows-x64-online.exe` and offers
 `clip-shot-mini-<version>-windows-x64-portable.zip` as a second download.
-The macOS Mini card links to `clip-shot-mini-<version>-macos-arm64.dmg`.
 English uses GitHub download URLs and Chinese uses Gitee. Mini cards use `#f759ab`
-and describe the lighter feature set; no Mini offline installer or Intel DMG is
-advertised.
+and describe the lighter feature set.
 
 Commit the website changes in `D:/clip-apps-site`, then run
 `scripts/publish-clip-shot-website.ps1` or the publisher with `-DeployWebsite`.
 The website workflow synchronizes both editions' links through its single
 `releaseVersion`, checks the generated Windows download anchors before packing
 and before replacing server files, then checks the public English and Chinese
-download anchors against the target release. The platform-specific component
-tests cover both macOS DMG links. Mini's existing `setup/` files and
+download anchors against the target release. Mini's existing `setup/` files and
 `latest-version-mini.json` are outside the website replacement set and remain
 intact. Website-only retries use the same entry point and do not republish packages.
 
@@ -652,128 +606,16 @@ Authenticode certificate, remove SmartScreen prompts, or establish installer rep
 
 ```powershell
 python scripts/test-clip-shot-gitee-release.py
-node scripts/test-macos-installer-parser.js
 & scripts/test-clip-shot-github-release.ps1
-& scripts/test-remote-macos-release.ps1
 cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --lib service::tests
 cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --lib github::tests
 cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --lib gitee::tests
 cargo clippy --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --all-targets -- -D warnings
-cmake --build --preset build-windows-msvc-debug --target clip-shot-macos-update-tests clip-shot-update-adapter-tests clip-shot-about-page-tests clip-shot-settings-catalog-tests
-ctest --preset test-windows-msvc-debug -R '^clip-shot-(macos-update|update-adapter|about-page|settings-catalog)-tests$'
+cmake --build --preset build-windows-msvc-debug --target clip-shot-update-adapter-tests clip-shot-about-page-tests clip-shot-settings-catalog-tests
+ctest --preset test-windows-msvc-debug -R '^clip-shot-(update-adapter|about-page|settings-catalog)-tests$'
 ```
 
-Run `python3 scripts/test-macos-installer.py` on macOS for the standalone
-installer's native JXA and package validation checks. The full CTest suite is
+The full CTest suite is
 not part of this release change. Public rollout requires a configured
 `GITEE_TOKEN`, a successful mirror for a published Clip release, and
 verification of both channels' asset bytes.
-
-## macOS version checks
-
-macOS offers **Manual** and **Check automatically**, defaulting to automatic
-checks. Automatic checks start 30 seconds after launch and repeat 24 hours
-after completion; About can trigger a manual check. The service starts GitHub
-and Gitee release requests together, accepts published previews, and ignores
-drafts. Each release must have a versioned DMG and checksum asset for the
-machine architecture with exact release download URLs. Within a channel it
-selects the newest valid SemVer release; the first validated channel wins.
-A newer winning version produces an About download action for that release
-host and a once-per-session automatic notification. Background failures
-remain quiet; manual failures offer retry. macOS does not install updates
-in-app.
-
-## Homebrew tap publication
-
-The separate `clip-shot-homebrew.yml` workflow updates
-`mg-chao/homebrew-tap` (`main`, `Casks/clip-shot.rb` and edition/channel casks)
-from published stable and beta GitHub releases. It does not change the Windows
-packaging workflow or Gitee mirror. The tag must be `v<version>[_clip-shot]`,
-where the version is stable or ends in `-beta` / `-beta.<number>`, matching
-`CLIP_SHOT_VERSION` in its source checkout. That source must contain the installer
-with `--prepare-app` support. Old releases lacking it cannot be backfilled using
-an installer from `main`.
-
-One-time setup:
-
-1. Create the public `mg-chao/homebrew-tap` repository with an initial `main`
-   commit. Copy `homebrew/README.md` as its README. The workflow generates the
-   first `Casks/clip-shot.rb`; do not publish a placeholder checksum or cask.
-2. Configure `HOMEBREW_TAP_TOKEN` as a secret in `mg-chao/clip-apps`. Use a
-   fine-grained token restricted to the tap repository with Contents read/write.
-   Its branch policy must allow the automation to push to `main`.
-3. Include each supported architecture's matching DMG and `.dmg.sha256`
-   assets before publishing the GitHub release: Full uses `macos-arm64` and
-   `macos-x86_64`; Mini supports `macos-arm64` only. macOS packaging/upload
-   remains a separate release operation; the existing Windows CI does not build
-   these assets. Do not mark a beta version stable to enable Homebrew.
-
-The workflow validates release metadata, source version, checksums, and the current
-tap version, then produces one archive per available macOS product/architecture:
-`clip-shot-<version>-macos-{arm64|x86_64}-homebrew.tar.gz` and, when present,
-`clip-shot-mini-<version>-macos-arm64-homebrew.tar.gz`. Each archive contains
-its DMG, a normalized checksum sidecar, and both installer scripts from that tag.
-Archive entry metadata and gzip timestamps are fixed for repeatable builds.
-The Full cask selects the host architecture's versioned archive and SHA-256;
-Mini remains restricted to Apple Silicon. ARM64-only historical releases retain
-their existing archives and cask text. Intel-only Full releases are also
-supported. A Windows Mini asset alone does not advertise a macOS Mini cask.
-
-The archive is uploaded before committing the cask. An existing identical archive
-is reused; differing bytes are an error and are never overwritten. An identical
-cask needs no commit. Same-version cask changes and version downgrades are rejected.
-Adding Intel support to a previously published ARM64-only cask therefore requires
-a newer release version; existing archives and casks are never replaced.
-All workflow versions share one concurrency group, and pushes are never forced.
-If a push fails, rerun after resolving the tap's branch policy or concurrent edits.
-An archive may remain published after a failed tap push; retry safely reuses it.
-
-Missing macOS assets fail without updating the tap. After uploading the missing
-pair, retry with Actions → Publish Clip Homebrew cask → Run workflow, supplying
-the stable tag. With GitHub CLI:
-
-```sh
-gh workflow run clip-shot-homebrew.yml --repo mg-chao/clip-apps \
-  -f tag=v1.2.3_clip-shot
-```
-
-If another workflow publishes a release using `GITHUB_TOKEN`, GitHub may suppress
-the release-triggered workflow; explicitly dispatch this workflow in that case.
-The release token uploads assets only in `clip-apps`; the separate tap token is
-used only for checking out and pushing the tap.
-
-For an offline review or initial tap scaffold, save GitHub's release JSON, download
-all advertised DMG/checksum pairs, and check out its tag into a separate source path:
-
-```sh
-python3 scripts/clip-shot-homebrew.py package \
-  --release-json release.json --assets downloaded-assets \
-  --source release-source --current-cask homebrew-tap/Casks/clip-shot.rb \
-  --output artifacts/homebrew
-```
-
-A nonexistent `--current-cask` means first publication. The output includes the
-archives and `Casks/clip-shot.rb`; it performs no network or Git writes. Run
-`python3 scripts/test-clip-shot-homebrew.py` for the release helper's focused tests.
-With Homebrew installed and the generated cask in the tap, run
-`brew style --cask --except Cask/InstallSteps mg-chao/tap/clip-shot` and
-`brew audit --cask mg-chao/tap/clip-shot`. Native installation/upgrade qualification
-is described in `docs-macos-build.md` and is required separately from these tests.
-
-The pull-request workflow `clip-shot-homebrew-checks.yml` runs the two focused
-Python suites plus Homebrew style and offline metadata auditing on macOS. Its
-generated fixture is never published or installed. The third-party cask uses the
-supported (but deprecated) third-party Ruby preflight API: Homebrew 7's declarative sandbox substitutes HOME
-and blocks account lookup, so it cannot preserve this installer's persistent
-Keychain identity as-is. The workflow excludes only `Cask/InstallSteps`, the
-rule requiring official taps to use declarative hooks. All other style checks
-and offline audits run normally; no runtime security settings are changed.
-
-Use `brew style --cask --except Cask/InstallSteps mg-chao/tap/clip-shot` for this
-third-party cask. The release's `prepare-clip-shot-homebrew.sh` wrapper handles
-rollback without requiring the unavailable signing key again.
-
-After saving or rotating the tap token, run **Check Clip Homebrew support**
-manually. In addition to the focused tests, its manual-only job checks out the
-existing tap using `HOMEBREW_TAP_TOKEN` and performs `git push --dry-run` to verify
-push authentication without changing the tap or publishing release assets.

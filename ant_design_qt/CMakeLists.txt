@@ -104,25 +104,6 @@ clip_apply_release_options(ant_design_qt)
 # dependency must remain visible there as well.
 clip_find_qt_private(Gui)
 target_link_libraries(ant_design_qt PRIVATE Qt6::GuiPrivate)
-if(APPLE)
-    # Qt 6.12.0's source retains QAccessibleCache's private destruction slot and
-    # stale-interface lookup. Keep the repair and review its ABI again on upgrades;
-    # source review does not replace the native macOS accessibility regression.
-    if(NOT Qt6Gui_VERSION VERSION_EQUAL "6.12.0")
-        message(WARNING
-            "AdQt macOS accessibility repair's source ABI was reviewed with Qt 6.12.0; "
-            "review widgets/platform_compatibility.cpp and run "
-            "adqt-widget-accessibility-repair-tests with Qt ${Qt6Gui_VERSION}.")
-    endif()
-    enable_language(OBJCXX)
-    target_sources(ant_design_qt PRIVATE
-        packages/ant_design_qt/src/widgets/context_menu_mac.mm
-        packages/ant_design_qt/src/widgets/modal_mac.mm
-        packages/ant_design_qt/src/widgets/detail/window_surface_mac.mm
-        packages/ant_design_qt/src/widgets/detail/top_level_popup_window_mac.mm)
-    # QPlatformMenu keeps Cocoa's modal ownership and mouse-release cleanup in Qt.
-    target_link_libraries(ant_design_qt PRIVATE "-framework AppKit")
-endif()
 add_library(adqt::widgets ALIAS ant_design_qt)
 target_include_directories(ant_design_qt SYSTEM PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/packages/ant_design_qt/src"
@@ -247,37 +228,6 @@ if(ADQT_BUILD_TESTS)
     add_test(NAME adqt-context-menu-lifecycle-tests COMMAND adqt-context-menu-lifecycle-tests)
     set_tests_properties(adqt-context-menu-lifecycle-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
-    if(APPLE)
-        # This lifecycle check creates native menu items without displaying a popup.
-        add_test(NAME adqt-context-menu-lifecycle-native-tests
-            COMMAND adqt-context-menu-lifecycle-tests)
-        set_tests_properties(adqt-context-menu-lifecycle-native-tests PROPERTIES
-            LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=cocoa" TIMEOUT 30)
-        add_executable(adqt-popup-stacking-native-tests tests/popup_stacking_native_tests.mm)
-        target_link_libraries(adqt-popup-stacking-native-tests PRIVATE
-            adqt::widgets Qt6::Widgets "-framework AppKit")
-        add_test(NAME adqt-popup-ownership-tests COMMAND adqt-popup-stacking-native-tests)
-        set_tests_properties(adqt-popup-ownership-tests PROPERTIES
-            LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
-        add_test(NAME adqt-popup-stacking-native-tests COMMAND adqt-popup-stacking-native-tests)
-        set_tests_properties(adqt-popup-stacking-native-tests PROPERTIES
-            LABELS "interactive" ENVIRONMENT "QT_QPA_PLATFORM=cocoa"
-            RUN_SERIAL TRUE TIMEOUT 30)
-        add_executable(adqt-context-menu-native-tests tests/context_menu_native_tests.mm)
-        target_link_libraries(adqt-context-menu-native-tests PRIVATE
-            adqt::widgets Qt6::Test "-framework AppKit")
-        add_test(NAME adqt-context-menu-native-item-tests
-            COMMAND adqt-context-menu-native-tests --items-only)
-        set_tests_properties(adqt-context-menu-native-item-tests PROPERTIES
-            LABELS "unit"
-            ENVIRONMENT "QT_QPA_PLATFORM=cocoa"
-            TIMEOUT 30)
-        add_test(NAME adqt-context-menu-native-tests COMMAND adqt-context-menu-native-tests)
-        set_tests_properties(adqt-context-menu-native-tests PROPERTIES
-            LABELS "interactive"
-            ENVIRONMENT "QT_QPA_PLATFORM=cocoa"
-            TIMEOUT 45)
-    endif()
 
     add_executable(adqt-widget-diagnostics-tests tests/widget_diagnostics_tests.cpp)
     target_link_libraries(adqt-widget-diagnostics-tests PRIVATE adqt::widgets Qt6::Widgets)
@@ -442,34 +392,18 @@ if(ADQT_BUILD_TESTS)
     set_tests_properties(adqt-tabs-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     add_executable(adqt-modal-window-tests packages/ant_design_qt/tests/tst_modal_window.cpp)
-    if(APPLE)
-        set_source_files_properties(packages/ant_design_qt/tests/tst_modal_window.cpp
-            PROPERTIES LANGUAGE OBJCXX)
-        target_link_libraries(adqt-modal-window-tests PRIVATE "-framework AppKit")
-    endif()
     set_target_properties(adqt-modal-window-tests PROPERTIES AUTOMOC ON)
     target_link_libraries(adqt-modal-window-tests PRIVATE adqt::widgets Qt6::Test)
     if(TARGET Qt6::QOffscreenIntegrationPlugin)
         qt_import_plugins(adqt-modal-window-tests INCLUDE Qt6::QOffscreenIntegrationPlugin)
     endif()
     add_test(NAME adqt-modal-window-tests COMMAND adqt-modal-window-tests)
-    if(WIN32)
-        set_tests_properties(adqt-modal-window-tests PROPERTIES
-            ENVIRONMENT
-                "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
-            ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
-        )
-    else()
-        set_tests_properties(adqt-modal-window-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-    endif()
-
-    if(APPLE)
-        add_test(NAME adqt-modal-window-native-tests
-            COMMAND adqt-modal-window-tests -platform cocoa)
-        set_tests_properties(adqt-modal-window-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
+    set_tests_properties(adqt-modal-window-tests PROPERTIES
+        ENVIRONMENT
+            "QT_QPA_PLATFORM=windows;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>"
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    )
 
     add_executable(adqt-modal-popup-interaction-tests
         packages/ant_design_qt/tests/modal_popup_interaction_tests.cpp)
@@ -506,15 +440,6 @@ if(ADQT_BUILD_TESTS)
 
     add_executable(adqt-qt-tool-popup-tests
         packages/ant_design_qt/tests/qt_tool_popup_tests.cpp)
-    if(APPLE)
-        target_sources(adqt-qt-tool-popup-tests PRIVATE
-            ../cmake/test-support/macos_native_input.mm)
-        target_link_libraries(adqt-qt-tool-popup-tests PRIVATE "-framework AppKit")
-        target_include_directories(adqt-qt-tool-popup-tests PRIVATE ../cmake/test-support)
-        add_test(NAME adqt-popup-input-native-tests
-            COMMAND adqt-qt-tool-popup-tests popupShadowDoesNotCoverUnderlyingWindow -platform cocoa)
-        set_tests_properties(adqt-popup-input-native-tests PROPERTIES LABELS "interactive" RUN_SERIAL TRUE)
-    endif()
     set_target_properties(adqt-qt-tool-popup-tests PROPERTIES AUTOMOC ON)
     target_link_libraries(adqt-qt-tool-popup-tests PRIVATE adqt::widgets Qt6::Test)
     get_target_property(adqt_qt_core_type Qt6::Core TYPE)
@@ -643,27 +568,6 @@ if(ADQT_BUILD_TESTS)
     add_test(NAME adqt-registration-lifecycle-tests COMMAND adqt-registration-lifecycle-tests)
     set_tests_properties(adqt-registration-lifecycle-tests PROPERTIES
         LABELS "unit" ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-
-    if(APPLE)
-        add_executable(adqt-widget-surface-lifecycle-tests
-            packages/ant_design_qt/tests/widget_surface_lifecycle_tests.mm)
-        target_link_libraries(adqt-widget-surface-lifecycle-tests PRIVATE adqt::widgets
-            Qt6::Widgets "-framework AppKit")
-        add_test(NAME adqt-widget-surface-lifecycle-tests
-            COMMAND adqt-widget-surface-lifecycle-tests -platform offscreen)
-        add_test(NAME adqt-widget-surface-lifecycle-native-tests
-            COMMAND adqt-widget-surface-lifecycle-tests -platform cocoa)
-        set_tests_properties(adqt-widget-surface-lifecycle-tests PROPERTIES LABELS "unit;macos")
-        set_tests_properties(adqt-widget-surface-lifecycle-native-tests PROPERTIES
-            LABELS "unit;macos" RUN_SERIAL TRUE)
-        add_executable(adqt-widget-accessibility-repair-tests
-            packages/ant_design_qt/tests/widget_accessibility_repair_tests.mm)
-        target_link_libraries(adqt-widget-accessibility-repair-tests PRIVATE adqt::widgets Qt6::Widgets)
-        add_test(NAME adqt-widget-accessibility-repair-tests
-            COMMAND adqt-widget-accessibility-repair-tests)
-        set_tests_properties(adqt-widget-accessibility-repair-tests PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-    endif()
 
     add_executable(adqt-divider-tests packages/ant_design_qt/tests/tst_divider.cpp)
     set_target_properties(adqt-divider-tests PROPERTIES AUTOMOC ON)

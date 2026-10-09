@@ -208,19 +208,6 @@ endif()
         self.assertEqual(options["Release"][3], "speed")
         self.assertEqual(options["Release"][6:], ["ON", "NOTFOUND"])
 
-    def test_shipping_macos_dead_stripping_is_release_only(self):
-        # The mixed app target keeps the speed policy while its final link strips
-        # unreferenced sections in a shipping size build.
-        fixture = "clip_apply_release_options(probe POLICY speed)"
-        options = self.configure(compiler="AppleClang", apple=True, fixture=fixture)
-        self.assertEqual(options["Release"][1].split(";"), ["-flto", "LINKER:-dead_strip"])
-        self.assertEqual(options["Debug"][:2], ["", ""])
-        for optimization, size in ((True, False), (False, True)):
-            with self.subTest(optimization=optimization, size=size):
-                options = self.configure(compiler="AppleClang", apple=True,
-                                         optimization=optimization, size=size, fixture=fixture)
-                self.assertNotIn("LINKER:-dead_strip", options["Release"][1].split(";"))
-
     def test_fast_build_disables_optimization_and_size_build_can_be_opted_out(self):
         fixture = '''
 clip_apply_release_options(probe)

@@ -149,8 +149,6 @@ jobs:
           & scripts/test-clip-shot-package-compression.ps1
           python scripts/test-clip-shot-gitee-release.py
           if ($LASTEXITCODE -ne 0) { throw "Gitee mirror tests failed." }
-          node scripts/test-macos-installer-parser.js
-          if ($LASTEXITCODE -ne 0) { throw "macOS installer parser tests failed." }
           & scripts/test-clip-shot-github-release.ps1
           & scripts/test-clip-shot-arm64-distribution.ps1
           cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --lib service::tests
@@ -176,9 +174,9 @@ jobs:
           & scripts/test-clip-shot-mini-release.ps1
           cmake --preset $env:CLIP_PRESET -DCLIP_SHOT_BUILD_UPDATE_TESTS=ON
           if ($LASTEXITCODE -ne 0) { throw "Updater test configuration failed." }
-          cmake --build --preset "build-$env:CLIP_PRESET" --target clip-shot-update-adapter-tests clip-shot-macos-update-tests clip-shot-update-about-tests clip-shot-update-settings-tests --parallel 4
+          cmake --build --preset "build-$env:CLIP_PRESET" --target clip-shot-update-adapter-tests clip-shot-update-about-tests clip-shot-update-settings-tests --parallel 4
           if ($LASTEXITCODE -ne 0) { throw "Updater test build failed." }
-          ctest --test-dir build/${{ matrix.preset }}/clip_shot -C Release -R '^clip-shot-(update-(adapter-tests|about-tests|settings-tests)|macos-update-tests)$' --output-on-failure --no-tests=error
+          ctest --test-dir build/${{ matrix.preset }}/clip_shot -C Release -R '^clip-shot-(update-(adapter-tests|about-tests|settings-tests))$' --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { throw "Updater tests failed." }
           & scripts/test-clip-shot-update-helper.ps1 -Architecture $env:CLIP_ARCHITECTURE -HelperPath build/${{ matrix.preset }}/clip_shot/Release/clip-shot-updater.exe
 

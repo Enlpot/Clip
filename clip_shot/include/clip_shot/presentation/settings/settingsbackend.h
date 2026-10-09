@@ -12,8 +12,6 @@
 #include "clip_shot/texttranslationconfiguration.h"
 #endif
 
-#include "clip_shot/platform/macos/loginitemservice.h"
-
 #include <QObject>
 #include <QPointer>
 #include <QVariant>
@@ -252,8 +250,7 @@ class BuiltInSettingsBackend final : public SettingsBackend {
     explicit BuiltInSettingsBackend(
         ::clip_shot::presentation::GlobalShortcutManager& shortcutManager,
         QObject* parent = nullptr, GlobalMouseManager* mouseManager = nullptr,
-        AppPermissionService* permissions = nullptr,
-        platform::macos::LoginItemService* loginItems = nullptr);
+        AppPermissionService* permissions = nullptr);
     AppPermissionService* appPermissions() const override {
         return m_permissions;
     }
@@ -350,7 +347,6 @@ class BuiltInSettingsBackend final : public SettingsBackend {
     ::clip_shot::presentation::GlobalShortcutManager& m_shortcutManager;
     AppPermissionService* m_permissions = nullptr;
     GlobalMouseManager* m_mouseManager = nullptr;
-    platform::macos::LoginItemService* m_loginItems = nullptr;
     QPointer<MainWindowSkinController> m_skinController;
     QMetaObject::Connection m_skinStatusConnection;
     bool m_copyLogBusy = false;

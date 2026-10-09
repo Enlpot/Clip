@@ -1,5 +1,5 @@
 set(CLIP_DIAGNOSTICS_NATIVE_DIR "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-ocr-process/native")
-if(WIN32 OR APPLE)
+if(WIN32)
     find_package(crashpad CONFIG REQUIRED)
     find_program(CLIP_CRASHPAD_HANDLER NAMES crashpad_handler
         PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/crashpad"
@@ -8,13 +8,7 @@ if(WIN32 OR APPLE)
 endif()
 
 set(_clip_bridge_source "${CLIP_DIAGNOSTICS_NATIVE_DIR}/diagnosticsbridge.cpp")
-if(APPLE)
-    set(_clip_bridge_source "${CLIP_DIAGNOSTICS_NATIVE_DIR}/diagnosticsbridge_macos.cpp")
-endif()
 add_library(clip_shot_crash_bridge STATIC "${_clip_bridge_source}")
-if(APPLE)
-    target_link_libraries(clip_shot_crash_bridge PUBLIC crashpad::crashpad)
-endif()
 target_include_directories(clip_shot_crash_bridge PUBLIC "${CLIP_DIAGNOSTICS_NATIVE_DIR}")
 if(WIN32)
     target_link_libraries(clip_shot_crash_bridge PUBLIC crashpad::crashpad dbghelp winhttp rpcrt4 version)
@@ -34,10 +28,6 @@ add_library(clip_shot_diagnostics STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/diagnostics/crashcollector.cpp")
 target_include_directories(clip_shot_diagnostics PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(clip_shot_diagnostics PUBLIC Qt6::Core PRIVATE clip_shot_crash_bridge)
-if(APPLE)
-    target_sources(clip_shot_diagnostics PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/applicationqos.cpp")
-    target_link_libraries(clip_shot_diagnostics PRIVATE clip_shot_rust_ffi_selector)
-endif()
 target_compile_definitions(clip_shot_diagnostics PUBLIC QT_MESSAGELOGCONTEXT)
 target_compile_definitions(clip_shot_diagnostics PRIVATE
     CLIP_DIAGNOSTICS_VERSION="${CLIP_SHOT_VERSION}"
@@ -72,26 +62,6 @@ if(WIN32)
     endforeach()
     list(APPEND _clip_crash_links "${ZLIB_LIBRARY_RELEASE}" advapi32.lib dbghelp.lib
         winhttp.lib rpcrt4.lib version.lib)
-    list(JOIN _clip_crash_links "\n" _clip_crash_link_manifest)
-    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/clip-ocr-crash-$<CONFIG>.rsp"
-        CONTENT "${_clip_crash_link_manifest}\n")
-endif()
-
-if(APPLE)
-    # The independently versioned worker must not embed the application's revision.
-    add_library(clip_ocr_diagnostics_bridge STATIC "${_clip_bridge_source}")
-    set_target_properties(clip_ocr_diagnostics_bridge PROPERTIES AUTOMOC OFF)
-    target_link_libraries(clip_ocr_diagnostics_bridge PUBLIC crashpad::crashpad)
-    target_compile_definitions(clip_ocr_diagnostics_bridge PRIVATE CLIP_DIAGNOSTICS_BUILD="Release")
-    set(_clip_crash_links "$<TARGET_FILE:clip_ocr_diagnostics_bridge>")
-    foreach(_lib vcpkg_crashpad_client vcpkg_crashpad_client_common vcpkg_crashpad_util vcpkg_crashpad_base mig_output)
-        list(APPEND _clip_crash_links "${CRASHPAD_${_lib}_LIBRARY_RELEASE}")
-    endforeach()
-    list(APPEND _clip_crash_links "${ZLIB_LIBRARY_RELEASE}" -lc++ -lbsm
-        "-Wl,-rpath,@loader_path" "-Wl,-headerpad_max_install_names")
-    foreach(_framework ApplicationServices CoreFoundation Foundation IOKit Security)
-        list(APPEND _clip_crash_links -framework "${_framework}")
-    endforeach()
     list(JOIN _clip_crash_links "\n" _clip_crash_link_manifest)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/clip-ocr-crash-$<CONFIG>.rsp"
         CONTENT "${_clip_crash_link_manifest}\n")

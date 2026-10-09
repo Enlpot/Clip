@@ -9,13 +9,6 @@ param(
     [string]$NativeValidationDirectory = '',
     [string]$SigningKeyPath,
     [switch]$SkipBuild,
-    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.-]*$')][string]$MacHost,
-    [ValidatePattern('^[A-Za-z0-9_-]+$')][string]$MacUser,
-    [ValidateRange(1, 65535)][int]$MacPort = 22,
-    [string]$MacIdentityFile,
-    [string]$MacKnownHostsFile,
-    [string]$MacProjectDirectory,
-    [ValidateNotNullOrEmpty()][ValidateSet('arm64', 'x64')][string[]]$MacArchitectures = @('arm64', 'x64'),
     [switch]$AuditOnly,
     [string]$ReleaseNotesPath,
     [switch]$SkipGitee,
@@ -42,26 +35,6 @@ $publicKeys = Join-Path $repo 'clip_shot/resources/update-trusted-keys.json'
 $sourceVersion = [regex]::Match((Get-Content -Raw (Join-Path $repo 'CMakeLists.txt')), 'set\(CLIP_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
 if (-not $Version) { $Version = $sourceVersion }
 if ($Version -cne $sourceVersion) { throw 'The requested version must match CLIP_SHOT_VERSION in CMakeLists.txt.' }
-if ($MacHost) {
-    if (-not $MacProjectDirectory) { throw 'MacProjectDirectory is required with MacHost.' }
-    if (-not $MacUser) { throw 'MacUser is required with MacHost.' }
-    if ($MacProjectDirectory -notmatch '^/[A-Za-z0-9_./-]+$' -or $MacProjectDirectory.Contains('..')) {
-        throw 'MacProjectDirectory must be an absolute POSIX path without spaces or traversal.'
-    }
-} elseif ($MacProjectDirectory) { throw 'MacHost is required with MacProjectDirectory.' }
-$MacArchitectures = @($MacArchitectures | ForEach-Object { $_.ToLowerInvariant() })
-if (@($MacArchitectures | Select-Object -Unique).Count -ne $MacArchitectures.Count) {
-    throw 'MacArchitectures must not contain duplicate architectures.'
-}
-$macPackages = @(if ($MacHost) {
-    foreach ($macArchitecture in $MacArchitectures) {
-        $assetArchitecture = if ($macArchitecture -eq 'arm64') { 'arm64' } else { 'x86_64' }
-        $products = if ($macArchitecture -eq 'arm64') { @('clip-shot', 'clip-shot-mini') } else { @('clip-shot') }
-        foreach ($product in $products) {
-            [pscustomobject]@{ Product = $product; Architecture = $macArchitecture; AssetArchitecture = $assetArchitecture }
-        }
-    }
-})
 $destinations = if ($SkipGitee -or $Operation -eq 'Verify') { 'GitHub' } else { 'GitHub and Gitee' }
 if (-not $PSCmdlet.ShouldProcess("Clip $Version on $destinations", $Operation)) {
         foreach ($architecture in @('x64', 'arm64')) {
@@ -76,12 +49,6 @@ if (-not $PSCmdlet.ShouldProcess("Clip $Version on $destinations", $Operation)) 
             Write-Output $product.Feed
         }
         }
-        foreach ($package in $macPackages) {
-            $name = "$($package.Product)-$Version-macos-$($package.AssetArchitecture).dmg"
-            Write-Output $name
-            Write-Output "$name.sha256"
-        }
-        if ($MacHost) { Write-Output 'install-clip-shot-macos.sh' }
         if ($DeployWebsite -and $Operation -eq 'Publish' -and -not $AuditOnly) {
             Write-Output "Then commit/push, build and deploy website $Version from $WebsiteDirectory."
         }
@@ -100,7 +67,6 @@ if ($Operation -eq 'Verify') {
         $release = Get-ClipGitHubRelease $GitHubRepository $Version
         if (-not $release -or $release.draft) { throw 'Expected a published GitHub release.' }
         $verifyDirectory = Join-Path $repo "artifacts/github-verify-$([guid]::NewGuid().ToString('N'))"
-        $verifiedMacPackages = @{}
         foreach ($architecture in @(Get-ClipShotReleaseArchitectures $release $Version)) {
         foreach ($edition in @(Get-ClipShotReleaseEditions $release $Version)) {
             $product = Get-ClipShotEdition $edition $architecture
@@ -119,19 +85,6 @@ if ($Operation -eq 'Verify') {
                     (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant() -cne $package.sha256) {
                     throw "GitHub package failed signed verification: $name"
                 }
-            }
-            foreach ($arch in @('arm64', 'x86_64')) {
-                $name = "$($product.Product)-$Version-macos-$arch.dmg"
-                if (@($release.assets | Where-Object { $_.name -ceq $name }).Count -eq 0) { continue }
-                if ($verifiedMacPackages.ContainsKey($name)) { continue }
-                $image = Get-ClipGitHubAsset $GitHubRepository $Version $name $verifyDirectory
-                $checksum = Get-ClipGitHubAsset $GitHubRepository $Version "$name.sha256" $verifyDirectory
-                $expected = ((Get-Content -Raw $checksum).Trim() -split '\s+')[0]
-                if ($expected -notmatch '^[a-fA-F0-9]{64}$' -or
-                    (Get-FileHash $image -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected.ToLowerInvariant()) {
-                    throw "GitHub macOS checksum failed: $name"
-                }
-                $verifiedMacPackages[$name] = $true
             }
         }
         }
@@ -173,53 +126,12 @@ $BuildDirectory = [IO.Path]::GetFullPath($BuildDirectory)
 $transaction = [guid]::NewGuid().ToString('N')
 $releaseDirectory = Join-Path $repo "artifacts/publish-$transaction"
 $null = New-Item -ItemType Directory -Path (Join-Path $releaseDirectory 'setup')
-$macJob = $null
-try {
-    if ($MacHost) {
-        $macParameters = @{ MacHost = $MacHost; MacUser = $MacUser; MacPort = $MacPort;
-            MacIdentityFile = $MacIdentityFile; MacKnownHostsFile = $MacKnownHostsFile;
-            MacProjectDirectory = $MacProjectDirectory; Version = $Version; Parallelism = $Parallelism;
-            OutputDirectory = (Join-Path $releaseDirectory 'setup'); SkipBuild = [bool]$SkipBuild }
-        $macJob = Start-Job -ScriptBlock {
-            param($script, $parameters, $architectures)
-            $ErrorActionPreference = 'Stop'
-            # The remote checkout serializes release builds. Keep both macOS
-            # architectures inside one job while Windows packages concurrently.
-            $source = $null
-            foreach ($architecture in $architectures) {
-                $parameters.Architecture = $architecture
-                & $script @parameters
-                $metadataBase = if ($architecture -eq 'arm64') { 'macos-build' } else { 'macos-x64-build' }
-                $packaged = Get-Content -Raw (Join-Path $parameters.OutputDirectory "$metadataBase.json") | ConvertFrom-Json
-                if ($source -and ($source.commit -cne $packaged.source.commit -or
-                    $source.workingTreeSha256 -cne $packaged.source.workingTreeSha256)) {
-                    throw 'macOS architectures were packaged from different source checkouts.'
-                }
-                $source = $packaged.source
-            }
-        } -ArgumentList (Join-Path $PSScriptRoot 'package-clip-shot-remote-macos.ps1'), $macParameters, $MacArchitectures
-        Write-Output "macOS packaging ($($MacArchitectures -join ', ')) runs alongside Windows. Logs: $releaseDirectory/setup/macos*-build.log"
+if (-not $SkipBuild) {
+    foreach ($architecture in @('x64', 'arm64')) {
+        $ocrArguments = if ($architecture -eq 'arm64' -and $Arm64OcrRuntimeArchive) { @{ OcrRuntimeArchive = $Arm64OcrRuntimeArchive } } else { @{} }
+        & (Join-Path $PSScriptRoot 'package-clip-shot.ps1') -Architecture $architecture -BuildDirectory $buildDirectories[$architecture] -Parallelism $Parallelism @ocrArguments
+        if ($LASTEXITCODE -ne 0) { throw "Packaging failed for $architecture." }
     }
-    if (-not $SkipBuild) {
-        foreach ($architecture in @('x64', 'arm64')) {
-            $ocrArguments = if ($architecture -eq 'arm64' -and $Arm64OcrRuntimeArchive) { @{ OcrRuntimeArchive = $Arm64OcrRuntimeArchive } } else { @{} }
-            & (Join-Path $PSScriptRoot 'package-clip-shot.ps1') -Architecture $architecture -BuildDirectory $buildDirectories[$architecture] -Parallelism $Parallelism @ocrArguments
-            if ($LASTEXITCODE -ne 0) { throw "Packaging failed for $architecture." }
-        }
-    }
-} finally {
-    # Join even if Windows fails: do not leave an unattended SSH packaging process.
-    if ($macJob) {
-        try {
-            $macJob | Wait-Job | Receive-Job -ErrorAction Stop
-            if ($macJob.State -ne 'Completed') { throw "macOS packaging failed; see $releaseDirectory/setup/macos*-build.log" }
-        } finally { Remove-Job $macJob }
-    }
-}
-if ($MacHost) {
-    # Normalize Git's Windows line endings: this file is executed by Apple's Bash.
-    $installer = (Get-Content -Raw (Join-Path $PSScriptRoot 'install-clip-shot-macos.sh')).Replace("`r`n", "`n")
-    [IO.File]::WriteAllText((Join-Path $releaseDirectory 'setup/install-clip-shot-macos.sh'), $installer, [Text.UTF8Encoding]::new($false))
 }
 $githubAssets = @{}
 $nativeValidation = @()
@@ -326,20 +238,6 @@ if ($AuditOnly) {
     Write-Output "Audited Clip $Version without staging or publishing. Signed release: $releaseDirectory"
     return
 }
-    if ($MacHost) {
-        foreach ($package in $macPackages) {
-            $prefix = $package.Product
-            $assetArchitecture = $package.AssetArchitecture
-            $name = "$prefix-$Version-macos-$assetArchitecture.dmg"
-            $path = Join-Path $releaseDirectory $name
-            Copy-Item -LiteralPath (Join-Path $releaseDirectory "setup/${prefix}_macos-$assetArchitecture.dmg") -Destination $path
-            $hash = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
-            [IO.File]::WriteAllText("$path.sha256", "$hash  $name`n", [Text.UTF8Encoding]::new($false))
-            $githubAssets[$name] = $path
-            $githubAssets["$name.sha256"] = "$path.sha256"
-        }
-        $githubAssets['install-clip-shot-macos.sh'] = Join-Path $releaseDirectory 'setup/install-clip-shot-macos.sh'
-    }
     # The remote tag must refer to this checkout, including when reusing a CI draft.
     $head = (& git -C $repo rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source commit.' }
@@ -349,7 +247,7 @@ if ($AuditOnly) {
     $localManifestPath = Join-Path $releaseDirectory 'local-release.json'
     if (-not $SkipGitee) {
         # Both destinations receive the same local audit inputs. Gitee never downloads
-        # packages from GitHub, including the reproducible Homebrew distribution archive.
+        # packages from GitHub.
         $sharedDirectory = Join-Path $releaseDirectory 'github-assets'
         $null = New-Item -ItemType Directory -Force -Path $sharedDirectory
         $descriptors = foreach ($name in $githubAssets.Keys) {
@@ -363,7 +261,7 @@ if ($AuditOnly) {
         @{ schema = 1; tag = $tag; sourceCommit = $head; title = "Clip $Version"; nativeValidation = $nativeValidation;
             body = [IO.File]::ReadAllText($ReleaseNotesPath); assets = @($descriptors) } |
             ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $localManifestPath -Encoding utf8NoBOM
-        & python (Join-Path $PSScriptRoot 'publish-clip-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor --prepare-homebrew
+        & python (Join-Path $PSScriptRoot 'publish-clip-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor
         if ($LASTEXITCODE -ne 0) { throw 'Local distribution preparation failed before publication.' }
         $localRelease = Get-Content -Raw -LiteralPath $localManifestPath | ConvertFrom-Json
         $githubAssets = @{}

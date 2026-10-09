@@ -11,10 +11,6 @@
 #include "clip_shot/platform/applicationqos.h"
 #include "clip_shot/presentation/settings/textrecognitionacceleration.h"
 #include "clip_shot/platform/windows/autostartregistration.h"
-#ifdef Q_OS_MACOS
-#include "clip_shot/platform/macos/loginitemservice.h"
-#include <QGuiApplication>
-#endif
 #include "clip_shot/platform/windows/administratorlaunch.h"
 
 #include "clip_shot/presentation/languagemanager.h"
@@ -201,16 +197,8 @@ storage::CaptureHistoryPolicy defaultHistoryPolicy() {
 }
 
 platform::windows::AdministratorResult
-applyStartupSettings(bool enabled, bool elevated, platform::macos::LoginItemService* loginItems) {
-#ifdef Q_OS_MACOS
+applyStartupSettings(bool enabled, bool elevated) {
     Q_UNUSED(elevated);
-    const auto result = loginItems->setEnabled(enabled);
-    platform::windows::AdministratorResult converted;
-    converted.success = result.success;
-    converted.error = result.error;
-    return converted;
-#else
-    Q_UNUSED(loginItems);
     using namespace platform::windows;
     auto& configuration = storage::ApplicationStorage::instance().configuration();
     const bool oldEnabled = storage::SystemSettings().autoStartAtBoot();
@@ -235,28 +223,15 @@ applyStartupSettings(bool enabled, bool elevated, platform::macos::LoginItemServ
         return failed;
     }
     return result;
-#endif
 }
 
 } // namespace
 
 BuiltInSettingsBackend::BuiltInSettingsBackend(
     ::clip_shot::presentation::GlobalShortcutManager& shortcutManager, QObject* parent,
-    GlobalMouseManager* mouseManager, AppPermissionService* permissions,
-    platform::macos::LoginItemService* loginItems)
+    GlobalMouseManager* mouseManager, AppPermissionService* permissions)
     : SettingsBackend(parent), m_shortcutManager(shortcutManager), m_permissions(permissions),
-      m_mouseManager(mouseManager), m_loginItems(loginItems) {
-#ifdef Q_OS_MACOS
-    if (!m_loginItems)
-        m_loginItems = &platform::macos::loginItemService();
-    connect(m_loginItems, &platform::macos::LoginItemService::changed, this,
-            &SettingsBackend::synchronized);
-    connect(qApp, &QGuiApplication::applicationStateChanged, this,
-            [this](Qt::ApplicationState state) {
-                if (state == Qt::ApplicationActive)
-                    refreshPlatformSettings();
-            });
-#endif
+      m_mouseManager(mouseManager) {
     if (m_mouseManager)
         connect(m_mouseManager, &GlobalMouseManager::permissionStateChanged, this,
                 &SettingsBackend::globalMousePermissionChanged);
@@ -1135,8 +1110,7 @@ bool BuiltInSettingsBackend::applySwitchValue(SettingsSwitchBinding binding, boo
                                      : storage::SystemSettings().autoStartAtBoot(),
                                  binding == SettingsSwitchBinding::LaunchAsAdministrator
                                      ? value
-                                     : storage::SystemSettings().launchAsAdministrator(),
-                                 m_loginItems);
+                                     : storage::SystemSettings().launchAsAdministrator());
         if (!result.success)
             emit operationMessage(result.error, false);
         emit synchronized();
@@ -2023,7 +1997,7 @@ bool BuiltInSettingsBackend::importConfigurationSnapshot(
     if (previous.value(enabledKey) != requestedEnabled ||
         previous.value(elevatedKey) != requestedElevated) {
         const auto result = applyStartupSettings(requestedEnabled.toBool(),
-                                                 requestedElevated.toBool(), m_loginItems);
+                                                 requestedElevated.toBool());
         accepted = accepted && result.success;
     }
     bool historyChanged = false;
@@ -2609,7 +2583,7 @@ bool BuiltInSettingsBackend::resetSection(SettingsSectionReset reset) {
         const auto result = applyStartupSettings(
             storage::ConfigurationSchema::defaultValue(QStringLiteral("system/auto_start_at_boot"))
                 .toBool(),
-            false, m_loginItems);
+            false);
         if (!result.success)
             emit operationMessage(result.error, false);
         emit synchronized();

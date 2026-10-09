@@ -544,50 +544,10 @@ mod platform {
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(windows))]
 mod platform {
     use super::*;
     pub fn create(_: &KeyboardOverlayConfig) -> Result<Box<dyn KeycapRasterizer>, String> {
         Err("keyboard rendering is supported only on Windows".into())
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod platform {
-    use super::*;
-    struct Rasterizer(KeyboardOverlayConfig);
-    impl KeycapRasterizer for Rasterizer {
-        fn rasterize(
-            &mut self,
-            label: &str,
-            scale: f32,
-        ) -> Result<crate::keyboard_overlay::Keycap, String> {
-            let image = clip_macos::text::keycap_with_font(
-                label,
-                scale,
-                self.0.background_rgba,
-                self.0.text_rgba,
-                self.0.border_rgba,
-                self.0
-                    .font
-                    .as_ref()
-                    .map(|font| clip_macos::text::KeycapFont {
-                        family: &font.family,
-                        cjk_family: &font.cjk_family,
-                        weight: font.weight,
-                    }),
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(crate::keyboard_overlay::Keycap {
-                width: image.width,
-                height: image.height,
-                pixels: image.rgba,
-            })
-        }
-    }
-    pub fn create(config: &KeyboardOverlayConfig) -> Result<Box<dyn KeycapRasterizer>, String> {
-        let mut rasterizer = Rasterizer(config.clone());
-        rasterizer.rasterize("M", config.keycap_size as f32 / 64.0)?;
-        Ok(Box::new(rasterizer))
     }
 }

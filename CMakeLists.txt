@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 4.2)
 
-# Set the deployment target before CMake initializes Apple's compiler flags.
-if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum supported macOS version.")
-endif()
-
 if(CMAKE_HOST_WIN32 AND CMAKE_CXX_COMPILER MATCHES "clang-cl")
     find_program(CLIP_MSVC_LIB_EXECUTABLE NAMES lib.exe REQUIRED)
     set(CMAKE_AR "${CLIP_MSVC_LIB_EXECUTABLE}" CACHE FILEPATH "MSVC archiver for clang-cl." FORCE)
@@ -33,10 +28,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_compile_options(/MP)
-elseif(APPLE)
-    # Preserve source/line information in optimized objects for release dSYMs.
-    # Debug already supplies -g through CMake's configuration flags.
-    add_compile_options("$<$<NOT:$<CONFIG:Debug>>:-g>")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -52,15 +43,9 @@ option(CLIP_APPS_BUILD_DRAW_ENGINE_DEMO "Build the Clip Draw Engine Qt demo." OF
 option(CLIP_APPS_BUILD_IMAGE_VIEWER "Build Clip Image Viewer." ON)
 option(CLIP_APPS_BUILD_CLIP_SHOT "Build Clip." ON)
 set(_clip_mini_default ${CLIP_APPS_BUILD_CLIP_SHOT})
-if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    set(_clip_mini_default OFF)
-endif()
 option(CLIP_APPS_BUILD_CLIP_SHOT_MINI "Build Clip Mini alongside Clip." ${_clip_mini_default})
 if(CLIP_APPS_BUILD_CLIP_SHOT_MINI AND NOT CLIP_APPS_BUILD_CLIP_SHOT)
     message(FATAL_ERROR "Clip Mini requires CLIP_APPS_BUILD_CLIP_SHOT=ON")
-endif()
-if(CLIP_APPS_BUILD_CLIP_SHOT_MINI AND APPLE AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    message(FATAL_ERROR "Clip Mini supports Apple Silicon (arm64) only on macOS")
 endif()
 option(CLIP_APPS_BUILD_TESTS "Build tests for all enabled projects." ON)
 option(CLIP_SHOT_BUILD_RUNTIME_TESTS
@@ -77,15 +62,6 @@ option(
     "Enable IPO/LTO and size/dead-code linker optimizations for Release targets."
     ON
 )
-
-if(APPLE AND CLIP_APPS_BUILD_CLIP_SHOT)
-    if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "15.0")
-        message(FATAL_ERROR "Clip requires CMAKE_OSX_DEPLOYMENT_TARGET >= 15.0")
-    endif()
-    if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES MATCHES "^(arm64|x86_64)$")
-        message(FATAL_ERROR "Build one Clip architecture at a time: arm64 or x86_64")
-    endif()
-endif()
 
 set(CLIP_QT_STATIC_DIR "" CACHE PATH
     "Qt 6 CMake package directory for the static release kit.")
@@ -403,16 +379,10 @@ if(NOT TARGET clip-benchmarks)
     endforeach()
 endif()
 
-if(WIN32)
-    set(_clip_format_command powershell -NoProfile -ExecutionPolicy Bypass
-        -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-cpp-format.ps1")
-    set(_clip_lint_command powershell -NoProfile -ExecutionPolicy Bypass
-        -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-rust.ps1")
-else()
-    set(_clip_format_command bash "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-cpp-format.sh")
-    set(_clip_lint_command bash "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-rust.sh"
-        clip-ocr-process -- --no-default-features --features dynamic-onnx-runtime)
-endif()
+set(_clip_format_command powershell -NoProfile -ExecutionPolicy Bypass
+    -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-cpp-format.ps1")
+set(_clip_lint_command powershell -NoProfile -ExecutionPolicy Bypass
+    -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-rust.ps1")
 if(NOT TARGET clip-format)
     add_custom_target(clip-format COMMAND ${_clip_format_command} USES_TERMINAL)
 endif()
@@ -420,11 +390,7 @@ if(NOT TARGET clip-lint)
     add_custom_target(clip-lint COMMAND ${_clip_lint_command} USES_TERMINAL)
 endif()
 
-if(CLIP_APPS_PACKAGE_CLIP_SHOT AND APPLE)
-    include(cmake/ClipShotMacOSPackage.cmake)
-endif()
-
-if(CLIP_APPS_PACKAGE_CLIP_SHOT AND NOT APPLE)
+if(CLIP_APPS_PACKAGE_CLIP_SHOT)
     if(NOT TARGET clip_shot)
         message(FATAL_ERROR "CLIP_APPS_PACKAGE_CLIP_SHOT requires CLIP_APPS_BUILD_CLIP_SHOT=ON")
     endif()

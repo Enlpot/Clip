@@ -158,11 +158,6 @@ function(clip_apply_release_options target)
             $<$<CONFIG:Release>:-fdata-sections>
         )
         target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:-flto>)
-        if(APPLE AND CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION)
-            # Function/data sections alone do not enable the Mach-O linker's
-            # dead stripping. Keep it limited to shipping size-optimized builds.
-            target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:LINKER:-dead_strip>)
-        endif()
     endif()
 endfunction()
 

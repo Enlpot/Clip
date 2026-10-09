@@ -1,6 +1,5 @@
 //! Owned cursor state for screenshots whose capture runs after UI preparation.
 
-#[cfg(not(target_os = "macos"))]
 use clip_cursor::CursorSampler;
 use clip_cursor::{
     AttachedCursorSample, CursorCaptureError, CursorShapeCapture, CursorShapeState, CursorSnapshot,
@@ -12,11 +11,11 @@ use crate::frame::Frame;
 #[derive(Clone)]
 pub struct ScreenshotCursorSnapshot {
     snapshot: CursorSnapshot,
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(test)]
     desktop_points: Option<PointSnapshot>,
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(test)]
 #[derive(Clone)]
 struct PointSnapshot {
     x: f64,
@@ -39,40 +38,7 @@ pub struct ScreenshotCursorPatch {
 
 impl ScreenshotCursorSnapshot {
     pub fn capture() -> Result<Self, CursorCaptureError> {
-        #[cfg(not(target_os = "macos"))]
-        {
-            Self::from_snapshot(CursorSampler::new()?.sample()?)
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let visible = clip_macos::cursor::cursor_visible();
-            let mut result = Self::from_snapshot(CursorSnapshot {
-                absolute_x: 0,
-                absolute_y: 0,
-                visible: false,
-                shape: CursorShapeCapture::Unavailable,
-            })?;
-            if visible {
-                let sample = clip_macos::cursor::CursorSampler::default()
-                    .sample()
-                    .map_err(|e| CursorCaptureError::platform(e.to_string()))?;
-                let shape = sample.shape.ok_or_else(|| {
-                    CursorCaptureError::platform("global cursor shape is unavailable")
-                })?;
-                result.desktop_points = Some(PointSnapshot {
-                    x: sample.x,
-                    y: sample.y,
-                    point_width: shape.point_width,
-                    point_height: shape.point_height,
-                    hotspot_x: shape.hotspot_x,
-                    hotspot_y: shape.hotspot_y,
-                    width: shape.width,
-                    height: shape.height,
-                    premultiplied_rgba: shape.rgba,
-                });
-            }
-            Ok(result)
-        }
+        Self::from_snapshot(CursorSampler::new()?.sample()?)
     }
 
     pub fn from_snapshot(snapshot: CursorSnapshot) -> Result<Self, CursorCaptureError> {
@@ -83,13 +49,13 @@ impl ScreenshotCursorSnapshot {
         }
         Ok(Self {
             snapshot,
-            #[cfg(any(target_os = "macos", test))]
+            #[cfg(test)]
             desktop_points: None,
         })
     }
 
     fn observation(&self, frame: &Frame, origin_x: i32, origin_y: i32) -> CursorSnapshot {
-        #[cfg(any(target_os = "macos", test))]
+        #[cfg(test)]
         if let Some(sample) = &self.desktop_points {
             use clip_cursor::{CursorCompositionMode, CursorShape};
             let Some(transform) = frame.metadata().capture_transform() else {

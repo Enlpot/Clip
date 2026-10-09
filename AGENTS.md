@@ -16,8 +16,6 @@
 - `scripts/check-cpp-format.ps1 [-Fix]`, `scripts/check-rust.ps1 [-Fix]` – format and lint (also CMake targets `clip-format`, `clip-lint`).
 - `scripts/package-clip-shot.ps1` – NSIS installer (`clip-shot-msvc-release`).
 - Windows ARM64: use `clip-shot-msvc-arm64-{debug|performance|release|fast}` and `-Architecture arm64` for bootstrap/Qt/package scripts. ARM64 benchmarks require `clip-shot-msvc-arm64-performance`. Cross builds require native ARM64 validation before production publication.
-- macOS: see `docs-macos-build.md`. Use `scripts/bootstrap-macos.sh`, `scripts/build.sh`, `scripts/run-clip-shot.sh`, and `scripts/package-clip-shot.sh`; presets are `clip-shot-macos-{arm64|x64}-{debug|performance|release|fast}`. macOS requires 15+, Xcode tools and shared Qt 6.12.0. Use only the `performance` preset for benchmarks.
-- macOS script regression checks: `python3 scripts/test-macos-build-support.py`. Native deployment fixture: `CLIP_TEST_MACOS_BUNDLE=1 python3 scripts/test-macos-build-support.py MacOSBundle` after provisioning Qt/FFmpeg and putting the build tools on PATH.
 
 ## Coding Style & Naming Conventions
 - C++: `.clang-format` (LLVM base, 4 spaces, 100 columns, attached braces, `T* ptr`, includes unsorted). Strict warnings are on; `.clang-tidy` is enforced when `CLIP_APPS_ENABLE_CLANG_TIDY=ON`.

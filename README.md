@@ -37,21 +37,6 @@ app's built-in updater. Settings and history persist across upgrades and ordinar
 uninstall. See [Scoop release support](docs/clip-shot-releases.md#scoop) for removal,
 data locations, and maintainer setup.
 
-## Install Clip on macOS
-
-Apple Silicon Macs running macOS 15 or later can install the stable release with:
-
-```sh
-brew update
-brew install --cask mg-chao/tap/clip-shot
-brew upgrade --cask clip-shot
-brew uninstall --cask clip-shot
-```
-
-Installation reuses Clip's local signing identity and may request Keychain
-access and macOS privacy permissions. See [Homebrew installation and migration](docs-macos-build.md#homebrew-installation)
-for existing installations, custom app directories, and recovery.
-
 ## Open Source Licenses
 
 This is a multi-license repository. See [LICENSE.md](LICENSE.md) for the

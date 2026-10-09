@@ -10,15 +10,6 @@ description = "Bounded cross-platform selected-text acquisition with guarded cli
 # rather than initialize a second copy of clip-core's process state.
 host-application-qos = []
 
-[target.'cfg(target_os = "macos")'.dependencies]
-accessibility-sys = "0.2.0"
-core-foundation = "0.10.1"
-objc2 = "0.6.3"
-objc2-app-kit = "0.3.2"
-objc2-core-foundation = "0.3.2"
-objc2-core-graphics = "0.3.2"
-objc2-foundation = "0.3.2"
-
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [
   "Win32_Foundation",

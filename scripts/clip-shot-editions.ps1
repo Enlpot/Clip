@@ -48,9 +48,6 @@ function Get-ClipShotReleaseEditions($Release, [string]$Version) {
             if ($variant -eq 'portable') { $names += "$($product.Product)-$Version-windows-x64-portable.zip" }
             else { $names += @("$($product.Product)-$Version-windows-x64-$variant.exe", "$($product.Product)-$Version-windows-x64-$variant-update.zip") }
         }
-        if (@($Release.assets | Where-Object { $_.name -like '*-macos-arm64.dmg' }).Count) {
-            $names += "$($product.Product)-$Version-macos-arm64.dmg"
-        }
         foreach ($name in $names) {
             if (@($Release.assets | Where-Object { $_.name -ceq $name }).Count -ne 1) {
                 throw "Paired release is missing or duplicates $name."

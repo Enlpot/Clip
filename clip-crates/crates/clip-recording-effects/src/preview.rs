@@ -243,10 +243,6 @@ impl PreviewSession {
         // Initialize on the caller before spawning the preview worker: stop()
         // may join that worker from the main thread, so key translation cannot
         // synchronously dispatch back to the host.
-        #[cfg(target_os = "macos")]
-        if config.show_keyboard {
-            clip_macos::text::prepare_keyboard_layout();
-        }
         let (sender, receiver) = bounded(1);
         let pending = receiver.clone();
         let latest = Arc::new(Mutex::new(None));
@@ -269,10 +265,6 @@ impl PreviewSession {
         config.validate()?;
         // Enabling keyboard display on an existing preview has the same
         // initialization contract as starting one with keyboard display enabled.
-        #[cfg(target_os = "macos")]
-        if config.show_keyboard {
-            clip_macos::text::prepare_keyboard_layout();
-        }
         // Keep only the newest configuration; rapid color/geometry updates never block Qt.
         let command = Command::Configure(config);
         match self.sender.try_send(command) {

@@ -32,16 +32,4 @@ if(NOT TARGET clip_selected_text_c)
     endif()
     target_include_directories(clip_selected_text_c INTERFACE
         "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-selected-text-c/include")
-    if(APPLE)
-        find_library(CLIP_SELECTED_TEXT_APPKIT_FRAMEWORK NAMES AppKit REQUIRED)
-        find_library(CLIP_SELECTED_TEXT_APPLICATION_SERVICES_FRAMEWORK
-            NAMES ApplicationServices REQUIRED)
-        find_library(CLIP_SELECTED_TEXT_CORE_FOUNDATION_FRAMEWORK NAMES CoreFoundation REQUIRED)
-        find_library(CLIP_SELECTED_TEXT_CORE_GRAPHICS_FRAMEWORK NAMES CoreGraphics REQUIRED)
-        target_link_libraries(clip_selected_text_c INTERFACE
-            "${CLIP_SELECTED_TEXT_APPKIT_FRAMEWORK}"
-            "${CLIP_SELECTED_TEXT_APPLICATION_SERVICES_FRAMEWORK}"
-            "${CLIP_SELECTED_TEXT_CORE_FOUNDATION_FRAMEWORK}"
-            "${CLIP_SELECTED_TEXT_CORE_GRAPHICS_FRAMEWORK}")
-    endif()
 endif()

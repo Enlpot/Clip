@@ -44,11 +44,7 @@ impl MouseClickObservation {
         include_modifiers: bool,
     ) -> crate::keyboard_overlay::KeyEvent {
         let key = self.button.key();
-        let names = if cfg!(target_os = "macos") {
-            ["Control", "Option", "Shift", "Command"]
-        } else {
-            ["Ctrl", "Alt", "Shift", "Win"]
-        };
+        let names = ["Ctrl", "Alt", "Shift", "Win"];
         let modifiers = [0x11u16, 0x12, 0x10, 0x5b]
             .into_iter()
             .zip(self.modifiers)
@@ -398,99 +394,7 @@ mod platform {
     }
 }
 
-#[cfg(target_os = "macos")]
-mod platform {
-    use super::*;
-    use crossbeam_channel::{Receiver, Sender};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    };
-    use std::time::Duration;
-    pub struct MouseHookObserver {
-        stop: Sender<()>,
-        worker: Option<std::thread::JoinHandle<()>>,
-        generation: Arc<AtomicU64>,
-    }
-    impl MouseHookObserver {
-        pub fn generation(&self) -> u64 {
-            self.generation.load(Ordering::Acquire)
-        }
-        pub fn start(
-            region: (i32, i32, u32, u32),
-            sender: Sender<MouseClickObservation>,
-        ) -> Result<Self, String> {
-            Self::start_with_movement(region, sender, None)
-        }
-        pub fn start_with_movement(
-            region: (i32, i32, u32, u32),
-            sender: Sender<MouseClickObservation>,
-            movement: Option<(Sender<MouseMovement>, Receiver<MouseMovement>)>,
-        ) -> Result<Self, String> {
-            let input =
-                clip_macos::input::InputObserver::start(false, true).map_err(|e| e.to_string())?;
-            let (stop, stopped) = crossbeam_channel::bounded(1);
-            let generation = Arc::new(AtomicU64::new(0));
-            let shared = generation.clone();
-            let worker = std::thread::Builder::new().name("clip-mouse-adapter".into()).spawn(move || {
-                clip_core::qos::apply_current_thread();
-                let mut held = [false;5];
-                let mut input_generation = input.generation();
-                let mut continuity = 0;
-                let mut was_inside = false;
-                loop {
-                    let current = input.generation();
-                    if current != input_generation {
-                        input_generation = current; held = [false;5];
-                        shared.fetch_add(1, Ordering::AcqRel);
-                    }
-                    crossbeam_channel::select_biased! {
-                        recv(stopped) -> _ => break,
-                        recv(input.events) -> event => {
-                            let Ok(event) = event else { break; };
-                            if event.generation != input_generation { continue; }
-                            let Some(at) = event.instant() else { continue; };
-                            // The compatibility recording region is in desktop points on macOS.
-                            let x = event.x.round() as i32 - region.0;
-                            let y = event.y.round() as i32 - region.1;
-                            let inside = x >= 0 && y >= 0 && x < region.2 as i32 && y < region.3 as i32;
-                            let button = match event.kind { 1|2 => Some(ObservedMouseButton::Left), 3|4 => Some(ObservedMouseButton::Right), 25|26 => match event.mouse_button { 2 => Some(ObservedMouseButton::Middle), 3 => Some(ObservedMouseButton::Button4), 4 => Some(ObservedMouseButton::Button5), _ => None }, _ => None };
-                            let down = matches!(event.kind,1|3|25);
-                            if let Some(button) = button.filter(|button| if down { inside } else { held[*button as usize] }) {
-                                held[button as usize] = down;
-                                if sender.try_send(MouseClickObservation { at,x,y,button,down,modifiers:[18,19,17,20].map(|bit| event.modifiers & (1 << bit) != 0) }).is_err() {
-                                    shared.fetch_add(1,Ordering::AcqRel); held = [false;5];
-                                }
-                            }
-                            if matches!(event.kind,5..=7|27) && let Some((sender,drain)) = &movement {
-                                if was_inside && !inside { continuity += 1; }
-                                was_inside = inside;
-                                let event = MouseMovement { at, position: inside.then_some((x,y)), continuity };
-                                if let Err(crossbeam_channel::TrySendError::Full(event)) = sender.try_send(event) { let _ = drain.try_recv(); let _ = sender.try_send(event); }
-                            }
-                        },
-                        default(Duration::from_millis(50)) => {},
-                    }
-                }
-            }).map_err(|e| e.to_string())?;
-            Ok(Self {
-                stop,
-                worker: Some(worker),
-                generation,
-            })
-        }
-    }
-    impl Drop for MouseHookObserver {
-        fn drop(&mut self) {
-            let _ = self.stop.try_send(());
-            if let Some(worker) = self.worker.take() {
-                let _ = worker.join();
-            }
-        }
-    }
-}
-
-#[cfg(not(any(windows, target_os = "macos")))]
+#[cfg(not(windows))]
 mod platform {
     use crossbeam_channel::Sender;
 

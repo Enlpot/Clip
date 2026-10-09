@@ -76,17 +76,6 @@ message(STATUS "ENVIRONMENT=${environment}")
         self.assertIn('CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER=C:/VS/bin/Hostx64/arm64/link.exe', output)
         self.assertIn('CC_aarch64_pc_windows_msvc=C:/VS/bin/Hostx64/arm64/cl.exe', output)
 
-    def test_macos_rust_selection_stays_independent(self):
-        output = self.run_cmake(f'''
-set(WIN32 FALSE)
-set(APPLE TRUE)
-set(CMAKE_OSX_ARCHITECTURES arm64)
-include("{ROOT.as_posix()}/cmake/RustStaticLibrary.cmake")
-clip_detect_rust_target(target)
-message(STATUS "RUST=${{target}}")
-''')
-        self.assertIn('RUST=aarch64-apple-darwin', output)
-
     def test_arm64_static_dependencies_use_native_optimized_objects(self):
         output = self.run_cmake(f'''
 include("{ROOT.as_posix()}/cmake/vcpkg-overlay-triplets/arm64-windows-static.cmake")
@@ -462,8 +451,7 @@ message(STATUS "CXX_FLAGS=${{CMAKE_CXX_FLAGS}}")
     def test_other_architectures_compilers_and_platforms_are_unchanged(self):
         for windows, compiler, architecture in [
                 (True, 'MSVC', 'x64'), (True, 'MSVC', 'ARM64EC'),
-                (True, 'Clang', 'ARM64'), (True, 'GNU', 'ARM64'),
-                (False, 'MSVC', 'ARM64'), (False, 'AppleClang', 'ARM64')]:
+                (True, 'Clang', 'ARM64'), (True, 'GNU', 'ARM64')]:
             with self.subTest(windows=windows, compiler=compiler, architecture=architecture):
                 self.check_policy(windows, compiler, architecture, False)
 

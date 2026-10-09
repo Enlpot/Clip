@@ -1,5 +1,4 @@
 //! Clean recording followed by a retryable, deterministic rendering task.
-#[cfg(not(target_os = "macos"))]
 use clip_memory::RasterBuffer;
 use std::collections::VecDeque;
 use std::io::{BufWriter, Write};
@@ -9,7 +8,6 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU8, Ordering},
 };
 use std::thread::JoinHandle;
-#[cfg(not(target_os = "macos"))]
 use std::time::Duration;
 use std::time::Instant;
 
@@ -27,12 +25,9 @@ use clip_core::recording_clock::RecordingClock;
 use clip_media::geometry::{
     DesktopRect, DesktopSpace, DesktopTransform, PixelRect, PixelSize, aspect_fit,
 };
-#[cfg(not(target_os = "macos"))]
 use clip_recording_export::StreamingEncoder;
-#[cfg(any(not(target_os = "macos"), test))]
 use clip_recording_export::{ExportExecutionMode, ExportFormat, SoftwareH264Priority};
 use clip_recording_export::{StreamingEncoderConfig, write_deferred_output_settings};
-#[cfg(not(target_os = "macos"))]
 use clip_recording_model::CursorShapeCompositionMode;
 use clip_recording_model::{
     BundleAssetKind, CursorFrameRecord, CursorShapeRecord, FinalizedTimeline, InputMouseButton,
@@ -126,8 +121,6 @@ pub(crate) enum Command {
 #[derive(Clone)]
 pub(crate) struct DeferredCaptureControls {
     pub audio: AudioControlHandle,
-    #[cfg(target_os = "macos")]
-    pub exclusions: clip_macos::desktop::ExclusionControl,
 }
 pub struct DeferredRecordingSession {
     config: DirectRecordingConfig,
@@ -139,7 +132,6 @@ pub struct DeferredRecordingSession {
     control_clock: Arc<Mutex<Option<RecordingClock>>>,
     worker: Option<JoinHandle<Result<DeferredRecordingSource>>>,
     capture_controls: DeferredCaptureControls,
-    #[cfg(not(target_os = "macos"))]
     exclusion_generation: std::sync::atomic::AtomicU64,
 }
 impl DeferredRecordingSession {
@@ -180,10 +172,7 @@ impl DeferredRecordingSession {
             control_clock: Arc::new(Mutex::new(None)),
             capture_controls: DeferredCaptureControls {
                 audio,
-                #[cfg(target_os = "macos")]
-                exclusions: Default::default(),
             },
-            #[cfg(not(target_os = "macos"))]
             exclusion_generation: std::sync::atomic::AtomicU64::new(0),
         })
     }
@@ -258,14 +247,6 @@ impl DeferredRecordingSession {
         processes: Vec<i32>,
         required: Vec<u32>,
     ) -> Result<u64> {
-        #[cfg(target_os = "macos")]
-        {
-            self.capture_controls
-                .exclusions
-                .request(windows, processes, required)
-                .map_err(crate::macos::native_error)
-        }
-        #[cfg(not(target_os = "macos"))]
         {
             // Windows uses native display affinity for application-owned surfaces.
             if windows.len() > 4096
@@ -279,11 +260,6 @@ impl DeferredRecordingSession {
         }
     }
     pub fn exclusion_status(&self) -> (u64, u64, u32) {
-        #[cfg(target_os = "macos")]
-        {
-            self.capture_controls.exclusions.status()
-        }
-        #[cfg(not(target_os = "macos"))]
         {
             let generation = self.exclusion_generation.load(Ordering::Acquire);
             (generation, generation, 0)
@@ -418,19 +394,7 @@ fn run_recording(
     let directory = tempfile::Builder::new()
         .prefix(".clip-deferred-")
         .tempdir_in(&parent)?;
-    #[cfg(not(target_os = "macos"))]
     let product = run_capture(
-        &config,
-        directory.path(),
-        commands,
-        state,
-        ready,
-        stop_boundary,
-        control_clock,
-        capture_controls,
-    )?;
-    #[cfg(target_os = "macos")]
-    let product = crate::macos::deferred::run_capture(
         &config,
         directory.path(),
         commands,
@@ -579,13 +543,11 @@ pub(crate) fn start_audio(
     }
     let mut tracks = Vec::new();
     if config.enable_system_audio {
-        let mut track = AudioTrackConfig::system_default("system");
-        track.required = cfg!(target_os = "macos");
+        let track = AudioTrackConfig::system_default("system");
         tracks.push(track);
     }
     if config.enable_microphone {
-        let mut track = AudioTrackConfig::microphone_default("microphone");
-        track.required = cfg!(target_os = "macos");
+        let track = AudioTrackConfig::microphone_default("microphone");
         tracks.push(track);
     }
     if tracks.is_empty() {
@@ -602,7 +564,6 @@ pub(crate) fn start_audio(
     )?))
 }
 
-#[cfg(not(target_os = "macos"))]
 #[allow(clippy::too_many_arguments)]
 fn run_capture(
     config: &DirectRecordingConfig,
@@ -915,7 +876,7 @@ fn run_capture(
     })
 }
 
-#[cfg(all(not(target_os = "macos"), feature = "bench-pipeline-timing"))]
+#[cfg(feature = "bench-pipeline-timing")]
 fn source_pixel_probe(pixels: &[u8], size: (u32, u32), bgra: bool) -> (Option<u32>, [u8; 3]) {
     let rgb_at = |x: u32, y: u32| -> [u8; 3] {
         let offset = (u64::from(y) * u64::from(size.0) + u64::from(x)) as usize * 4;
@@ -1008,7 +969,6 @@ impl FrameIndexWriter {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 struct CleanCanvas {
     logical: (u32, u32),
     coded: (u32, u32),
@@ -1017,7 +977,6 @@ struct CleanCanvas {
     scaled: RasterBuffer,
     resize: Option<clip_recording_export::resize::NearestResizePlan>,
 }
-#[cfg(not(target_os = "macos"))]
 impl CleanCanvas {
     fn new(logical: (u32, u32), coded: (u32, u32)) -> Self {
         Self {
@@ -1140,8 +1099,7 @@ pub(crate) struct InputRecorder {
     key_generation: u64,
     shapes: VecDeque<CursorShapeRecord>,
     last_shape: Option<u64>,
-    #[cfg(not(target_os = "macos"))]
-    raw_shapes: VecDeque<clip_cursor::CursorShape>,
+        raw_shapes: VecDeque<clip_cursor::CursorShape>,
     admission_ms: Option<u64>,
     latest_movement: Option<MouseMovement>,
     pointer_break: bool,
@@ -1174,11 +1132,7 @@ impl InputRecorder {
             geometry: InputGeometry {
                 source: (config.region.width, config.region.height),
                 desktop: DesktopRect {
-                    space: if cfg!(target_os = "macos") {
-                        DesktopSpace::Points
-                    } else {
-                        DesktopSpace::PhysicalPixels
-                    },
+                    space: DesktopSpace::PhysicalPixels,
                     x: f64::from(config.region.x),
                     y: f64::from(config.region.y),
                     width: f64::from(config.region.width),
@@ -1196,7 +1150,6 @@ impl InputRecorder {
             key_generation: 0,
             shapes: VecDeque::new(),
             last_shape: None,
-            #[cfg(not(target_os = "macos"))]
             raw_shapes: VecDeque::new(),
             admission_ms: None,
             latest_movement: None,
@@ -1404,7 +1357,6 @@ impl InputRecorder {
         }
         Ok(false)
     }
-    #[cfg(not(target_os = "macos"))]
     pub fn cursor(
         &mut self,
         clock: &RecordingClock,
@@ -1509,33 +1461,6 @@ impl InputRecorder {
         }
         self.shapes.push_back(shape);
     }
-    #[cfg(target_os = "macos")]
-    pub fn native_cursor(
-        &mut self,
-        clock: &RecordingClock,
-        at: Instant,
-        shape: Option<CursorShapeRecord>,
-        frame: CursorFrameRecord,
-    ) -> Result<()> {
-        if let Some(shape) = shape {
-            self.cache_shape(shape);
-        }
-        if frame.shape_id != self.last_shape
-            && let Some(id) = frame.shape_id
-        {
-            let shape = self
-                .shapes
-                .iter()
-                .find(|s| s.shape_id == id)
-                .cloned()
-                .ok_or_else(|| {
-                    ScreenRecorderError::Encode("native cursor shape is unavailable".into())
-                })?;
-            self.push(clock, at, RecordedInput::CursorShape(shape))?;
-        }
-        self.last_shape = frame.shape_id;
-        self.push(clock, at, RecordedInput::Cursor(frame))
-    }
     pub fn finish(self) -> Result<()> {
         self.writer.finish()?;
         Ok(())
@@ -1555,7 +1480,7 @@ fn key_record(event: clip_recording_effects::keyboard_overlay::KeyEvent) -> KeyE
 mod tests {
     use super::*;
 
-    #[cfg(all(not(target_os = "macos"), feature = "bench-pipeline-timing"))]
+    #[cfg(feature = "bench-pipeline-timing")]
     #[test]
     fn source_trace_reads_marker_and_rgb_before_compression() {
         let size = (528, 96);
@@ -1821,8 +1746,7 @@ mod tests {
         assert!(!path.exists());
         clone.discard().unwrap();
     }
-    #[cfg(not(target_os = "macos"))]
-    #[test]
+        #[test]
     fn odd_source_canvas_pads_edges_without_stretching_logical_pixels() {
         let frame = clip_capture::frame::Frame::from_rgba8(
             3,

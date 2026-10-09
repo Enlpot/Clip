@@ -4,14 +4,13 @@
 # thumbnails, PNG preparation, clipboard decoding and global shortcuts live there.
 set(CLIP_SHOT_RELEASE_SIZE_TARGETS
     clip_shot_settings_catalog clip_shot_settings_search
-    clip_shot_translation clip_shot_login_item clip_shot_administrator
+    clip_shot_translation clip_shot_administrator
     clip_shot_permissions clip_shot_updates clip_shot_crash_bridge)
 set(CLIP_SHOT_RELEASE_SPEED_TARGETS
     clip_shot clip_shot_storage clip_shot_settings clip_shot_shortcuts
     clip_shot_window_shortcuts clip_shot_global_mouse clip_shot_diagnostics
     clip_shot_image_codec clip_shot_image_codec_backend
-    clip_shot_history_pin clip_shot_clipboard_placement
-    clip_shot_macos_clipboard clip_shot_macos_cursor clip_shot_macos_window_platform)
+    clip_shot_history_pin clip_shot_clipboard_placement)
 
 # Serialization/import/export do not participate in image processing loops.
 set(CLIP_SHOT_RELEASE_SIZE_STORAGE_SOURCES

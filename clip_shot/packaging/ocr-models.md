@@ -150,28 +150,3 @@ Initialization-only checks (`--validate-model-set`) are also required but do not
 replace recognition tests. DirectML requests retain the existing CPU fallback
 when acceleration is unavailable. Model payloads are not committed or downloaded
 by deterministic unit tests.
-
-## macOS ARM64 bundled runtime
-
-macOS 15+ Apple Silicon uses the same seven model IDs and protocol 5 with CPU
-inference. The app supplies a generated schema-3 `macos-arm64` manifest with
-`delivery: bundled`; Windows schema-2 runtime archives and their pinned hashes
-remain separate. Full bundles Small V6 for offline recognition on first launch.
-Mini bundles only the runtime and trusted model descriptors; it downloads the
-selected model on first use. Both editions reuse verified model caches and
-never download executable code.
-The macOS runtime is updated only with the application.
-
-`scripts/clip-shot-macos-ocr.py` stages pinned models for Full and uses
-`--runtime-only` for Mini staging, bundle preparation, finalization and verification.
-Mini's model payload must be absent, including stale model directories in reused
-staging trees. The script generates/verifies the manifest from finalized native
-binaries. Runtime hashes are generated after
-Mach-O deployment and nested signing, before signing the outer app bundle.
-See `docs-macos-build.md` for the native seven-model, lifecycle, relocated-bundle,
-and performance checks required before delivery.
-
-Signed macOS bundles preserve `Contents/MacOS/assets/ocr` through a relative
-`assets` link into `Contents/Resources/assets`. This lets code signing seal the
-manifest and models as data. Runtime lookup normalizes `../..` before following
-that link, so executable code remains in `Contents/MacOS`.

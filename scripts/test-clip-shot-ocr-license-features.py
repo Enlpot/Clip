@@ -39,14 +39,6 @@ class OcrLicenseFeatures(unittest.TestCase):
         self.assertIn('ort', selected)
         self.assertIn('ort-sys', selected)
 
-    def test_local_macos_worker_omits_unused_convenience_notices(self):
-        selected = packages('aarch64-apple-darwin', 'static-onnx-runtime,crash-diagnostics')
-        self.assertTrue(LEGACY_DEPENDENCIES.isdisjoint(selected),
-                        f'Unused local worker notices were retained: {LEGACY_DEPENDENCIES & selected}')
-        self.assertTrue({'png', 'zune-jpeg', 'turbojpeg', 'ravif'}.isdisjoint(selected))
-        self.assertIn('ort', selected)
-        self.assertIn('ort-sys', selected)
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -285,65 +285,6 @@ def check_local_asset(descriptor: dict, path: Path) -> None:
         raise ValueError(f"Local release asset differs from its audit: {descriptor['name']}")
 
 
-def prepare_homebrew(release: dict, assets: dict[str, Path], output: Path) -> None:
-    """Reproduce the distribution archive from local audited bytes and tagged source."""
-    if not any(re.search(r"-macos-(?:arm64|x86_64|x64)\.dmg(?:\.sha256)?$", name)
-               for name in assets):
-        return
-    spec = importlib.util.spec_from_file_location(
-        "clip_homebrew", Path(__file__).with_name("clip-shot-homebrew.py"))
-    homebrew = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(homebrew)
-    with tempfile.TemporaryDirectory(prefix="clip-homebrew-local-") as temporary:
-        source = Path(temporary) / "source"
-        staging = Path(temporary) / "assets"
-        packaged_output = Path(temporary) / "prepared"
-        staging.mkdir()
-        for name in ("CMakeLists.txt", "scripts/install-clip-shot-macos.sh",
-                     "scripts/prepare-clip-shot-homebrew.sh"):
-            path = source / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(subprocess.check_output(("git", "show", f"{release['tag']}:{name}")))
-        for descriptor in release["assets"]:
-            check_local_asset(descriptor, assets[descriptor["name"]])
-        metadata = {"tag_name": release["tag"], "draft": False,
-                    "prerelease": "-" in release["tag"][1:-len("_clip-shot")],
-                    "assets": [{"name": name, "digest": "sha256:" + sha256(path)}
-                               for name, path in assets.items()]}
-        editions = homebrew.products_for_release(metadata)
-        for edition in editions:
-            for architecture in homebrew.architectures_for_release(
-                    metadata, homebrew.release_version(metadata), edition):
-                name = homebrew.required_assets(metadata, homebrew.release_version(metadata),
-                                               edition, architecture)
-                for candidate in (name, name + ".sha256"):
-                    if candidate in assets:
-                        shutil.copyfile(assets[candidate], staging / candidate)
-        prepared = []
-        packaged = []
-        for edition in editions:
-            archives, _ = homebrew.package_all(metadata, source, staging, packaged_output,
-                                               source / ('absent-' + edition + '-cask.rb'), edition)
-            for archive in archives:
-                descriptor = {"name": archive.name, "path": str((output / archive.name).resolve()),
-                              "size": archive.stat().st_size, "sha256": sha256(archive)}
-                old = next((item for item in release["assets"] if item["name"] == archive.name), None)
-                if old is not None:
-                    if old["size"] != descriptor["size"] or old["sha256"] != descriptor["sha256"]:
-                        raise ValueError("Existing local Homebrew archive differs from tagged source")
-                else:
-                    prepared.append(descriptor)
-                packaged.append(archive)
-        # A later product or architecture failure must leave release metadata unchanged.
-        output.mkdir(parents=True, exist_ok=True)
-        for archive in packaged:
-            shutil.copyfile(archive, output / archive.name)
-        (output / "Casks").mkdir(exist_ok=True)
-        for generated in (packaged_output / "Casks").iterdir():
-            shutil.copyfile(generated, output / "Casks" / generated.name)
-        release["assets"].extend(prepared)
-
-
 def verify_local_release(release: dict, assets: dict[str, Path], auditor: Path,
                          mini_auditor: Path | None = None, *, require_complete: bool = False) -> None:
     tag = release["tag"]
@@ -409,11 +350,6 @@ def verify_local_release(release: dict, assets: dict[str, Path], auditor: Path,
                            and item.get('Bytes') == package['size'] and item.get('Sha256') == package['sha256']]
                 if not matches:
                     raise ValueError(f'Native validation does not match published bytes: {name}')
-    for name, path in assets.items():
-        if name.endswith(".dmg"):
-            checksum = assets.get(name + ".sha256")
-            if checksum is None or checksum.read_text().split()[0].lower() != sha256(path):
-                raise ValueError(f"Local macOS package checksum differs: {name}")
     commit = run("git", "rev-list", "-n", "1", tag)
     if commit != release["sourceCommit"]:
         raise ValueError("Local release tag differs from audited source commit")
@@ -501,8 +437,6 @@ if __name__ == "__main__":
     parser.add_argument("--mini-auditor", type=Path)
     parser.add_argument("--check-auth", action="store_true")
     parser.add_argument("--verify-only", action="store_true")
-    parser.add_argument("--prepare-homebrew", action="store_true",
-                        help="Prepare local distribution archive and manifest without publishing")
     arguments = parser.parse_args()
     try:
         if arguments.check_auth:
@@ -514,22 +448,17 @@ if __name__ == "__main__":
             assets = local_assets(release)
             verify_local_release(release, assets, arguments.auditor, arguments.mini_auditor,
                                  require_complete=not arguments.verify_only)
-            if arguments.prepare_homebrew:
-                prepare_homebrew(release, assets, arguments.manifest.parent / "homebrew-local")
-                arguments.manifest.write_text(json.dumps(release, ensure_ascii=False, indent=2) + "\n",
-                                               encoding="utf-8")
-            else:
-                token = ""
-                if arguments.verify_only:
-                    try:
-                        token = load_token()
-                    except ValueError:
-                        pass  # Public verification remains available without credentials.
-                else:
+            token = ""
+            if arguments.verify_only:
+                try:
                     token = load_token()
-                if token:
-                    check_auth(token)
-                publish(release, assets, token, os.environ.get("GITEE_USERNAME", "mg-chao"),
-                        arguments.verify_only)
+                except ValueError:
+                    pass  # Public verification remains available without credentials.
+            else:
+                token = load_token()
+            if token:
+                check_auth(token)
+            publish(release, assets, token, os.environ.get("GITEE_USERNAME", "mg-chao"),
+                    arguments.verify_only)
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Gitee publication failed: {error}\n")

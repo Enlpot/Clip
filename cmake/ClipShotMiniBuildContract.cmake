@@ -22,14 +22,13 @@ set(CLIP_SHOT_MINI_EXCLUDED_TARGETS
     ${CLIP_SHOT_MINI_EXCLUDED_LINK_TARGETS}
     clip_shot clip_shot_edition_full
     clip_shot_storage clip_shot_main_window_skin clip_shot_settings_catalog clip_shot_settings_search
-    clip_shot_settings clip_shot_global_mouse clip_shot_login_item
+    clip_shot_settings clip_shot_global_mouse
     clip_shot_administrator clip_shot_permissions clip_shot_updates
     clip_shot_diagnostics clip_shot_crash_bridge
     clip-shot-updater-binary clip-shot-updater-binary_build
     clip_shot_release_translations)
 if(WIN32)
-    # Windows Mini acquires its trusted text OCR worker on demand. macOS Mini
-    # bundles the local worker but acquires every selected model on demand.
+    # Windows Mini acquires its trusted text OCR worker on demand.
     list(APPEND CLIP_SHOT_MINI_EXCLUDED_TARGETS
         clip_ocr_process clip_ocr_process_build clip_ocr_diagnostics_bridge
         onnxruntime::onnxruntime)
