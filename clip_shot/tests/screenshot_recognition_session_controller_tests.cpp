@@ -1,4 +1,4 @@
-#include "clip_shot/presentation/screenshotocrpresentation.h"
+﻿#include "clip_shot/presentation/screenshotocrpresentation.h"
 #include "clip_shot/presentation/screenshotocrtexttransform.h"
 #include "clip_shot/presentation/screenshotrecognitionwindow.h"
 #include <QTextEdit>
@@ -70,9 +70,9 @@ void headlessWorkflowResultsAndEdits() {
     ScreenshotRecognitionSessionController session(nullptr, nullptr, nullptr, actions);
     QImage image(80, 60, QImage::Format_ARGB32);
     image.fill(Qt::white);
-    session.setTarget({QStringLiteral("mcp-headless"), image, QRectF(0, 0, 80, 60)});
+    session.setTarget({QStringLiteral("headless"), image, QRectF(0, 0, 80, 60)});
     ScreenshotRecognitionResults results;
-    results.key = QStringLiteral("mcp-headless");
+    results.key = QStringLiteral("headless");
     auto presentation = std::make_shared<ScreenshotOcrPresentation>();
     presentation->selection = QRect(0, 0, 80, 60);
     ScreenshotOcrLine line;

@@ -893,50 +893,7 @@
             <translation>Trim recording</translation>
         </message>
     </context>
-    <context>
-        <name>ScreenshotMcpSettings</name>
-        <message>
-            <source>Add this configuration to your MCP client, then restart the client to connect. Keep %1 running while using MCP.</source>
-            <translation>Add this configuration to your MCP client, then restart the client to connect. Keep %1 running while using MCP.</translation>
-        </message>
-        <message>
-            <source>Add this configuration to your MCP client, then restart the client to connect. Keep Clip running while using MCP.</source>
-            <translation>Add this configuration to your MCP client, then restart the client to connect. Keep Clip running while using MCP.</translation>
-        </message>
-        <message>
-            <source>Connected clients: %1</source>
-            <translation>Connected clients: %1</translation>
-        </message>
-        <message>
-            <source>Copied</source>
-            <translation>Copied</translation>
-        </message>
-        <message>
-            <source>Copy configuration</source>
-            <translation>Copy configuration</translation>
-        </message>
-        <message>
-            <source>Local endpoint descriptor: %1</source>
-            <translation>Local endpoint descriptor: %1</translation>
-        </message>
-        <message>
-            <source>MCP client configuration</source>
-            <translation>MCP client configuration</translation>
-        </message>
-        <message>
-            <source>MCP is disabled or unavailable.</source>
-            <translation>MCP is disabled or unavailable.</translation>
-        </message>
-        <message>
-            <source>Running</source>
-            <translation>Running</translation>
-        </message>
-        <message>
-            <source>Unavailable</source>
-            <translation>Unavailable</translation>
-        </message>
-    </context>
-    <context>
+        <context>
         <name>ScreenshotToolbarEditorSettingsWidget</name>
         <message>
             <source>Barcode recognition</source>
@@ -1188,11 +1145,7 @@
             <source>All screenshot history will be removed</source>
             <translation>All screenshot history will be removed</translation>
         </message>
-        <message>
-            <source>Allow MCP clients running as your OS user to control Clip. Clip must be running.</source>
-            <translation>Allow MCP clients running as your OS user to control Clip. Clip must be running.</translation>
-        </message>
-        <message>
+                <message>
             <source>Allow resizing the selection from its borders while non-move tools are active</source>
             <translation>Allow resizing the selection from its borders while non-move tools are active</translation>
         </message>
@@ -2120,11 +2073,7 @@
             <source>Edit selection</source>
             <translation>Edit selection</translation>
         </message>
-        <message>
-            <source>Enable MCP integration</source>
-            <translation>Enable MCP integration</translation>
-        </message>
-        <message>
+                <message>
             <source>Enable edit mode</source>
             <translation>Enable edit mode</translation>
         </message>
@@ -2604,15 +2553,7 @@
             <source>Low</source>
             <translation>Low</translation>
         </message>
-        <message>
-            <source>MCP</source>
-            <translation>MCP</translation>
-        </message>
-        <message>
-            <source>MCP connection and client setup</source>
-            <translation>MCP connection and client setup</translation>
-        </message>
-        <message>
+                        <message>
             <source>MSAA</source>
             <translation>MSAA</translation>
         </message>
@@ -4208,11 +4149,7 @@
             <source>Video, audio and animated-image recording preferences</source>
             <translation>Video, audio and animated-image recording preferences</translation>
         </message>
-        <message>
-            <source>View connection status and configure your MCP client.</source>
-            <translation>View connection status and configure your MCP client.</translation>
-        </message>
-        <message>
+                <message>
             <source>Vision Support</source>
             <translation>Vision Support</translation>
         </message>

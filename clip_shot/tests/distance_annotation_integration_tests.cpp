@@ -1,4 +1,4 @@
-#include "clip_shot/app/mcp/mcpstylepatch.h"
+#include "clip_shot/presentation/canvasstylepatch.h"
 #include "clip_shot/presentation/screenshotcanvastoolstyles.h"
 #include "clip_shot/presentation/screenshotdefaultstyles.h"
 #include "clip_shot/presentation/screenshottoolbarlayoutmodel.h"
@@ -112,54 +112,54 @@ void distanceToolsParticipateInConfiguration() {
 }
 
 void sourcePixelCalibrationBelongsToAnnotations() {
-    using namespace clip_shot::app::mcp;
+    using namespace clip_shot::presentation;
     QImage raster(240, 120, QImage::Format_ARGB32_Premultiplied);
     raster.fill(Qt::white);
     const QRectF rect(10, 20, 120, 60);
-    require(mcpDistancePixelScale({{raster, rect}}, rect) == QSizeF(2, 2),
+    require(distancePixelScale({{raster, rect}}, rect) == QSizeF(2, 2),
             "pixel measurement uses the source raster mapping including any baked margins");
     QImage second(30, 20, QImage::Format_ARGB32_Premultiplied);
-    require(mcpDistancePixelScale({{raster, rect}, {second, QRectF(200, 20, 10, 10)}},
-                                  QRectF(10, 20, 200, 60)) == QSizeF(3, 2),
+    require(distancePixelScale({{raster, rect}, {second, QRectF(200, 20, 10, 10)}},
+                               QRectF(10, 20, 200, 60)) == QSizeF(3, 2),
             "mixed-source calibration retains independent horizontal and vertical density");
     const QJsonObject distance{
         {QStringLiteral("type"), QStringLiteral("distance")},
         {QStringLiteral("points"), QJsonArray{QJsonArray{0, 0}, QJsonArray{3, 4}}}};
     const QJsonObject rectangle{{QStringLiteral("type"), QStringLiteral("rectangle")}};
-    const auto batch = mcpDistanceAnnotationsWithPixelScale(
+    const auto batch = distanceAnnotationsWithPixelScale(
         {{QStringLiteral("operations"), QJsonArray{distance, rectangle}}}, QSizeF(2, 3));
     const auto operations = batch.value(QStringLiteral("operations")).toArray();
     require(operations[0].toObject().value(QStringLiteral("pixel_scale")) == QJsonArray{2, 3} &&
                 !operations[1].toObject().contains(QStringLiteral("pixel_scale")),
             "only distance annotations receive the host's stable image calibration");
-    require(mcpDistancePixelScale({}, rect) == QSizeF(1, 1),
+    require(distancePixelScale({}, rect) == QSizeF(1, 1),
             "an empty global canvas measures virtual canvas pixels");
 }
 
-void distanceMcpStyleValidationMatchesControls() {
-    using namespace clip_shot::app::mcp;
+void distanceStyleValidationMatchesControls() {
+    using namespace clip_shot::presentation;
     ClipCanvasRuntime runtime;
     ClipCanvasRuntimeEditor editor(runtime, ClipCanvasTool::Distance);
     require(editor.isValid(), "create a headless distance editor");
     const auto apply = [&](const QJsonObject& style) {
-        return mcpStylePatch(editor, editor,
-                             {{QStringLiteral("target"), QStringLiteral("distance")},
-                              {QStringLiteral("style"), style}});
+        return applyCanvasStylePatch(editor, editor,
+                                     {{QStringLiteral("target"), QStringLiteral("distance")},
+                                      {QStringLiteral("style"), style}});
     };
     require(apply({{QStringLiteral("factor"), 1000},
                    {QStringLiteral("unit"), QStringLiteral("km")},
                    {QStringLiteral("decimal_places"), 3},
                    {QStringLiteral("endpoint_scale"), 3},
                    {QStringLiteral("endpoint_style"), QStringLiteral("crowfoot_one_or_many")}}),
-            "MCP accepts the supported distance settings and existing endpoint styles");
+            "the style patch accepts the supported distance settings and existing endpoint styles");
     const auto accepted = editor.canvasStyleToolbarState().distanceStyle;
     require(accepted.factor == 1000 && accepted.unit == ClipCanvasDistanceUnit::Km &&
                 accepted.decimalPlaces == 3 && accepted.endpointScale == 3 &&
                 accepted.endpointStyle == ClipCanvasArrowhead::CrowfootOneOrMany,
-            "MCP style patches reach distance creation defaults");
+            "style patches reach distance creation defaults");
     require(apply({{QStringLiteral("unit"), QStringLiteral("mm")}}) &&
                 editor.canvasStyleToolbarState().distanceStyle.unit == ClipCanvasDistanceUnit::Mm,
-            "MCP accepts millimeter distance labels");
+            "the style patch accepts millimeter distance labels");
     const auto millimeters = editor.canvasStyleToolbarState().distanceStyle;
     for (const auto& invalid :
          {QJsonObject{{QStringLiteral("factor"), 0}},
@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
     persistedDefaultsMergeDistanceProperties();
     distanceToolsParticipateInConfiguration();
     sourcePixelCalibrationBelongsToAnnotations();
-    distanceMcpStyleValidationMatchesControls();
+    distanceStyleValidationMatchesControls();
     clip_shot::storage::ApplicationStorage::instance().shutdown();
     return 0;
 }

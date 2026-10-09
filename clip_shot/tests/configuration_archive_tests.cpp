@@ -394,7 +394,7 @@ void selectionAspectRatioArchivesPreservePreferences(const QTemporaryDir& tempor
 }
 } // namespace
 
-void mcpCredentialRedactionAndRevision(const QTemporaryDir& temporary) {
+void credentialRedactionAndRevision(const QTemporaryDir& temporary) {
     const QString key = QStringLiteral("api_configuration/custom_models");
     const clip_shot::CustomAiModelConfiguration model{
         QStringLiteral("11111111-1111-4111-8111-111111111111"),
@@ -404,16 +404,16 @@ void mcpCredentialRedactionAndRevision(const QTemporaryDir& temporary) {
         QStringLiteral("model"),
         false};
     const QMap<QString, QJsonValue> original{{key, clip_shot::customAiModelsToJson({model})}};
-    const auto path = temporary.filePath(QStringLiteral("mcp-redacted.zip"));
+    const auto path = temporary.filePath(QStringLiteral("credential-redacted.zip"));
     require(storage::ConfigurationArchive::write(
                 path, original, storage::ConfigurationStore::currentSchemaVersion(), true)
                 .isEmpty(),
-            "MCP archive export must succeed with redacted credentials");
+            "credential archive export must succeed with redacted credentials");
     auto imported = storage::ConfigurationArchive::read(path);
     require(imported.isValid() && imported.redactedCredentialIds.contains(model.id),
             "redacted archives identify omitted credentials");
     require(clip_shot::customAiModelsFromJson(imported.values.value(key)).first().apiKey.isEmpty(),
-            "an MCP archive must not contain the stored credential");
+            "the archive must not contain the stored credential");
     imported.preserveOmittedCredentials(original);
     require(clip_shot::customAiModelsFromJson(imported.values.value(key)).first().apiKey ==
                 model.apiKey,
@@ -425,12 +425,12 @@ void mcpCredentialRedactionAndRevision(const QTemporaryDir& temporary) {
     require(clip_shot::customAiModelsFromJson(imported.values.value(key)).first().apiKey.isEmpty(),
             "redacted imports must not copy credentials to a different provider URL");
 
-    storage::ConfigurationStore store(temporary.filePath(QStringLiteral("mcp-cas.json")), true,
-                                      true);
+    storage::ConfigurationStore store(temporary.filePath(QStringLiteral("credential-cas.json")),
+                                      true, true);
     const auto revision = store.revision();
     bool conflict = true;
     require(store.mutateIfRevision(
-                revision, [&] { return store.setValue(QStringLiteral("mcp/enabled"), true); },
+                revision, [&] { return store.setValue(QStringLiteral("tray/enabled"), true); },
                 &conflict) &&
                 !conflict,
             "revision transaction permits nested runtime backend writes");
@@ -447,7 +447,7 @@ void mcpCredentialRedactionAndRevision(const QTemporaryDir& temporary) {
             "stale revisions must reject before any runtime side effect");
     const auto current = store.revision();
     require(store.mutateIfRevision(
-                current, [&] { return store.setValue(QStringLiteral("mcp/enabled"), true); }) &&
+                current, [&] { return store.setValue(QStringLiteral("tray/enabled"), true); }) &&
                 store.revision() == current,
             "no-op writes preserve revision");
 }
@@ -472,6 +472,6 @@ int main(int argc, char** argv) {
     unicodePathsRoundTrip();
     applySnapshotReplacesConfiguration(temporary);
     selectionAspectRatioArchivesPreservePreferences(temporary);
-    mcpCredentialRedactionAndRevision(temporary);
+    credentialRedactionAndRevision(temporary);
     return 0;
 }

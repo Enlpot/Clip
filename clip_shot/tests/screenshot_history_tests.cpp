@@ -1415,7 +1415,7 @@ void multipleValidEntriesCanBeTraversed(const QString& root) {
             "direct return did not restore the live endpoint");
 }
 
-void transientMcpDocumentPreservesUndoAndSources(const QString& root) {
+void transientDocumentPreservesUndoAndSources(const QString& root) {
     ScreenshotDisplaySession displays;
     displays.appendDisplay(display(QStringLiteral("A"), QStringLiteral("Primary"),
                                    QRect(0, 0, 200, 100),
@@ -6243,8 +6243,8 @@ int main(int argc, char** argv) {
         storage::ApplicationStorage::instance().shutdown();
         return 0;
     }
-    if (QCoreApplication::arguments().contains(QStringLiteral("--mcp-transient-only"))) {
-        transientMcpDocumentPreservesUndoAndSources(temporary.path());
+    if (QCoreApplication::arguments().contains(QStringLiteral("--transient-document-only"))) {
+        transientDocumentPreservesUndoAndSources(temporary.path());
         storage::ApplicationStorage::instance().shutdown();
         return 0;
     }

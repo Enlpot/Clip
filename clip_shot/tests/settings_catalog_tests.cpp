@@ -1249,17 +1249,6 @@ void builtInCatalogIsCompleteAndValid() {
                     ->allowedStringValues ==
                 QStringList{QStringLiteral("accuracy_first"), QStringLiteral("speed_first")},
         "OCR processing must offer accuracy first by default followed by speed first");
-    const auto* mcp =
-        catalog.section(QStringLiteral("connections-services"), QStringLiteral("mcp"));
-    require(mcp != nullptr && mcp->items.size() == 2 &&
-                mcp->items.at(0).id == QStringLiteral("system.mcp-enabled") &&
-                mcp->items.at(1).id == QStringLiteral("system.mcp-status") &&
-                mcp->items.at(0).configurationKey == QStringLiteral("mcp/enabled") &&
-                catalog.item({QStringLiteral("general"), QStringLiteral("system-general"),
-                              QStringLiteral("system.mcp-enabled")}) == nullptr &&
-                catalog.item({QStringLiteral("general"), QStringLiteral("system-general"),
-                              QStringLiteral("system.mcp-status")}) == nullptr,
-            "MCP controls must live together below Core, outside General");
     const QStringList modelLabels{QStringLiteral("Ultra Small V6"), QStringLiteral("Small V6"),
                                   QStringLiteral("Medium V6"),      QStringLiteral("Small V5"),
                                   QStringLiteral("Medium V5"),      QStringLiteral("Small V4"),

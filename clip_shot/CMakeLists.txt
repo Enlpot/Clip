@@ -4985,10 +4985,10 @@ if(CLIP_SHOT_BUILD_TESTS)
     set_tests_properties(clip-shot-pinned-export-lifetime-tests PROPERTIES
         LABELS "unit" TIMEOUT 30
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    get_target_property(_clip_mcp_test_sources clip-shot-export-artifact-tests SOURCES)
-    list(REMOVE_ITEM _clip_mcp_test_sources tests/screenshot_export_artifact_tests.cpp
+    get_target_property(_clip_cloud_upload_test_sources clip-shot-export-artifact-tests SOURCES)
+    list(REMOVE_ITEM _clip_cloud_upload_test_sources tests/screenshot_export_artifact_tests.cpp
         tests/screenshot_export_row_performance_benchmark.cpp)
-    add_executable(clip-shot-cloud-upload-tests ${_clip_mcp_test_sources} tests/cloud_upload_tests.cpp)
+    add_executable(clip-shot-cloud-upload-tests ${_clip_cloud_upload_test_sources} tests/cloud_upload_tests.cpp)
     target_include_directories(clip-shot-cloud-upload-tests PRIVATE include src/image)
     target_link_libraries(clip-shot-cloud-upload-tests PRIVATE clip_shot_cloud_upload clip_shot_settings
         clip_shot_diagnostics clip_shot_image_codec clip_shot_storage clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets)

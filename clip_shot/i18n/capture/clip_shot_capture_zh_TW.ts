@@ -186,14 +186,7 @@
             <translation>目前的截圖將被捨棄。</translation>
         </message>
     </context>
-    <context>
-        <name>ScreenshotMcpServer</name>
-        <message>
-            <source>MCP request failed (%1).</source>
-            <translation>MCP 請求失敗（%1）。</translation>
-        </message>
-    </context>
-    <context>
+        <context>
         <name>ScreenshotOverlayWindow</name>
         <message>
             <source>Loading screenshot history</source>
@@ -518,33 +511,7 @@
             <translation>滑鼠滾輪</translation>
         </message>
     </context>
-    <context>
-        <name>clip_shot::app::mcp::ScreenshotMcpServer</name>
-        <message>
-            <source>Another Clip instance owns the MCP endpoint.</source>
-            <translation>另一個 Clip 執行個體正在使用 MCP 端點。</translation>
-        </message>
-        <message>
-            <source>Could not open the local MCP endpoint.</source>
-            <translation>無法開啟本機 MCP 端點。</translation>
-        </message>
-        <message>
-            <source>Could not secure the MCP runtime directory.</source>
-            <translation>無法設定 MCP 執行目錄的安全權限。</translation>
-        </message>
-        <message>
-            <source>Could not write the private MCP descriptor.</source>
-            <translation>無法寫入私有 MCP 描述檔。</translation>
-        </message>
-    </context>
-    <context>
-        <name>clip_shot::app::mcp::ScreenshotMcpSession</name>
-        <message>
-            <source>MCP request failed (%1).</source>
-            <translation>MCP 請求失敗（%1）。</translation>
-        </message>
-    </context>
-    <context>
+            <context>
         <name>clip_shot::presentation::DirectCaptureController</name>
         <message>
             <source>Capture failed: %1</source>

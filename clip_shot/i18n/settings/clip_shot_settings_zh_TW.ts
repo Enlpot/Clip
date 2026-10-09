@@ -893,50 +893,7 @@
             <translation>裁剪錄製內容</translation>
         </message>
     </context>
-    <context>
-        <name>ScreenshotMcpSettings</name>
-        <message>
-            <source>Add this configuration to your MCP client, then restart the client to connect. Keep %1 running while using MCP.</source>
-            <translation>將此設定加入您的 MCP 用戶端，然後重新啟動用戶端以連線。使用 MCP 時請保持 %1 執行。</translation>
-        </message>
-        <message>
-            <source>Add this configuration to your MCP client, then restart the client to connect. Keep Clip running while using MCP.</source>
-            <translation>將此設定加入 MCP 用戶端，然後重新啟動用戶端以連線。使用 MCP 時請保持 Clip 執行。</translation>
-        </message>
-        <message>
-            <source>Connected clients: %1</source>
-            <translation>已連線的用戶端：%1</translation>
-        </message>
-        <message>
-            <source>Copied</source>
-            <translation>已複製</translation>
-        </message>
-        <message>
-            <source>Copy configuration</source>
-            <translation>複製設定</translation>
-        </message>
-        <message>
-            <source>Local endpoint descriptor: %1</source>
-            <translation>本機端點描述檔：%1</translation>
-        </message>
-        <message>
-            <source>MCP client configuration</source>
-            <translation>MCP 用戶端設定</translation>
-        </message>
-        <message>
-            <source>MCP is disabled or unavailable.</source>
-            <translation>MCP 已停用或無法使用。</translation>
-        </message>
-        <message>
-            <source>Running</source>
-            <translation>執行中</translation>
-        </message>
-        <message>
-            <source>Unavailable</source>
-            <translation>無法使用</translation>
-        </message>
-    </context>
-    <context>
+        <context>
         <name>ScreenshotToolbarEditorSettingsWidget</name>
         <message>
             <source>Barcode recognition</source>
@@ -1188,11 +1145,7 @@
             <source>All screenshot history will be removed</source>
             <translation>所有截圖歷史都將被移除</translation>
         </message>
-        <message>
-            <source>Allow MCP clients running as your OS user to control Clip. Clip must be running.</source>
-            <translation>允許以目前系統使用者身分執行的 MCP 用戶端控制 Clip。Clip 必須保持執行。</translation>
-        </message>
-        <message>
+                <message>
             <source>Allow resizing the selection from its borders while non-move tools are active</source>
             <translation>啟用非移動工具時，允許從選取區域邊緣調整大小</translation>
         </message>
@@ -2120,11 +2073,7 @@
             <source>Edit selection</source>
             <translation>編輯選取範圍</translation>
         </message>
-        <message>
-            <source>Enable MCP integration</source>
-            <translation>啟用 MCP 整合</translation>
-        </message>
-        <message>
+                <message>
             <source>Enable edit mode</source>
             <translation>啟用編輯模式</translation>
         </message>
@@ -2604,15 +2553,7 @@
             <source>Low</source>
             <translation>低</translation>
         </message>
-        <message>
-            <source>MCP</source>
-            <translation>MCP</translation>
-        </message>
-        <message>
-            <source>MCP connection and client setup</source>
-            <translation>MCP 連線與用戶端設定</translation>
-        </message>
-        <message>
+                        <message>
             <source>MSAA</source>
             <translation>MSAA</translation>
         </message>
@@ -4208,11 +4149,7 @@
             <source>Video, audio and animated-image recording preferences</source>
             <translation>影片、音訊與動畫圖片錄製偏好</translation>
         </message>
-        <message>
-            <source>View connection status and configure your MCP client.</source>
-            <translation>檢視連線狀態並設定 MCP 用戶端。</translation>
-        </message>
-        <message>
+                <message>
             <source>Vision Support</source>
             <translation>視覺支援</translation>
         </message>

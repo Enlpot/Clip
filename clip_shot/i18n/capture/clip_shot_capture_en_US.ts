@@ -186,14 +186,7 @@
             <translation>Your current screenshot will be discarded.</translation>
         </message>
     </context>
-    <context>
-        <name>ScreenshotMcpServer</name>
-        <message>
-            <source>MCP request failed (%1).</source>
-            <translation>MCP request failed (%1).</translation>
-        </message>
-    </context>
-    <context>
+        <context>
         <name>ScreenshotOverlayWindow</name>
         <message>
             <source>Loading screenshot history</source>
@@ -518,33 +511,7 @@
             <translation>mouse wheel</translation>
         </message>
     </context>
-    <context>
-        <name>clip_shot::app::mcp::ScreenshotMcpServer</name>
-        <message>
-            <source>Another Clip instance owns the MCP endpoint.</source>
-            <translation>Another Clip instance owns the MCP endpoint.</translation>
-        </message>
-        <message>
-            <source>Could not open the local MCP endpoint.</source>
-            <translation>Could not open the local MCP endpoint.</translation>
-        </message>
-        <message>
-            <source>Could not secure the MCP runtime directory.</source>
-            <translation>Could not secure the MCP runtime directory.</translation>
-        </message>
-        <message>
-            <source>Could not write the private MCP descriptor.</source>
-            <translation>Could not write the private MCP descriptor.</translation>
-        </message>
-    </context>
-    <context>
-        <name>clip_shot::app::mcp::ScreenshotMcpSession</name>
-        <message>
-            <source>MCP request failed (%1).</source>
-            <translation>MCP request failed (%1).</translation>
-        </message>
-    </context>
-    <context>
+            <context>
         <name>clip_shot::presentation::DirectCaptureController</name>
         <message>
             <source>Capture failed: %1</source>

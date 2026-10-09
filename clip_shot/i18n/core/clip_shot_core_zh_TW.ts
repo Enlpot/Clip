@@ -447,14 +447,7 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>請授予所需權限以繼續</translation>
         </message>
     </context>
-    <context>
-        <name>McpDocumentService</name>
-        <message>
-            <source>Document request failed (%1).</source>
-            <translation>文件請求失敗（%1）。</translation>
-        </message>
-    </context>
-    <context>
+        <context>
         <name>QObject</name>
         <message>
             <source>%1 cannot be registered as a global shortcut, try another key</source>

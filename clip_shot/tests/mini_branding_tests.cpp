@@ -120,45 +120,16 @@ void brandingRetranslatesWithoutChangingIdentifiers() {
     clip_shot::presentation::GlobalShortcutManager shortcuts;
     settings::BuiltInSettingsBackend backend(shortcuts);
     settings::SettingsRuntimeSession session(registry, backend);
-    const auto renderer = settings::SettingsCustomRenderer::McpStatus;
-    const auto* mcpField = registry.fieldForCustom(renderer);
-    require(mcpField != nullptr, "both editions retain MCP client configuration");
-    std::unique_ptr<SettingsCustomWidget> mcp(
-        createSettingsCustomWidget(renderer, registry, *mcpField->definition, session));
-    auto* mcpConfig = child<adqt::widgets::AdTextEdit>(*mcp, "settings-mcp-config");
-    namespace fields = clip_shot::presentation::components::form_fields;
-    auto* configurationField = mcp->findChild<fields::FormField*>();
-    require(configurationField != nullptr && configurationField->controlWidget() == mcpConfig &&
-                configurationField->metadata().id == QStringLiteral("settings-mcp-config") &&
-                mcpConfig->isReadOnly(),
-            "both editions use a shared read-only field for MCP configuration");
     if (edition::isMini) {
         for (const auto unavailable :
              {settings::SettingsCustomRenderer::CustomAiModels,
               settings::SettingsCustomRenderer::TextTranslationConfigurations}) {
+            const auto* field = registry.fieldForCustom(unavailable);
             std::unique_ptr<SettingsCustomWidget> widget(
-                createSettingsCustomWidget(unavailable, registry, *mcpField->definition, session));
+                createSettingsCustomWidget(unavailable, registry, *field->definition, session));
             require(widget == nullptr, "Mini does not construct Full-only API settings widgets");
         }
     }
-    auto* mcpHelp = child<QLabel>(*mcp, "settings-mcp-help");
-    auto* mcpEndpoint = child<QLabel>(*mcp, "settings-mcp-endpoint");
-    const QString mcpJson = mcpConfig->toPlainText();
-    const auto mcpServers = QJsonDocument::fromJson(mcpJson.toUtf8())
-                                .object()
-                                .value(QStringLiteral("mcpServers"))
-                                .toObject();
-    require(mcpServers.size() == 1 && mcpServers.contains(edition::productId()),
-            "MCP client configuration identifies only the compiled edition");
-    const auto mcpServer = mcpServers.value(edition::productId()).toObject();
-    require(mcpServer.value(QStringLiteral("command")).toString() ==
-                    QDir(QCoreApplication::applicationDirPath()).filePath(edition::mcpName()) &&
-                mcpServer.value(QStringLiteral("args")).isArray(),
-            "MCP client configuration launches the edition's adjacent bridge");
-    const QString descriptor =
-        QDir(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
-            .filePath(edition::registryName() + QStringLiteral("/mcp/") + edition::productId() +
-                      QStringLiteral("-mcp.json"));
     MainWindow window(registry, session);
     window.show();
     auto* card = window.findChild<ContentCardWidget*>();
@@ -196,27 +167,6 @@ void brandingRetranslatesWithoutChangingIdentifiers() {
 
         require(edition::productName() == product,
                 "product branding must remain exact in every locale");
-        require(mcpConfig->toPlainText() == mcpJson,
-                "MCP bridge identity remains stable across language changes");
-        const char* mcpHelpSource =
-            edition::isMini
-                ? "Add this configuration to your MCP client, then restart the client to connect. "
-                  "Keep %1 running while using MCP."
-                : "Add this configuration to your MCP client, then restart the client to connect. "
-                  "Keep Clip running while using MCP.";
-        const QString translatedMcpHelp =
-            translator.translate("ScreenshotMcpSettings", mcpHelpSource);
-        require(!translatedMcpHelp.isEmpty(), "all catalogs include edition-specific MCP help");
-        require(mcpHelp->text() ==
-                        (edition::isMini ? translatedMcpHelp.arg(product) : translatedMcpHelp) &&
-                    mcpHelp->text().contains(product),
-                "MCP help names the edition to keep running in every language");
-        const QString translatedEndpoint =
-            translator.translate("ScreenshotMcpSettings", "Local endpoint descriptor: %1");
-        require(!translatedEndpoint.isEmpty() &&
-                    mcpEndpoint->text() ==
-                        translatedEndpoint.arg(QDir::toNativeSeparators(descriptor)),
-                "MCP settings advertises the edition's isolated endpoint descriptor");
         require(window.windowTitle() == windowName && window.accessibleName() == windowName,
                 "Mini main window uses its product; Full retains historical ClipShot identifiers");
         require(window.objectName() == QStringLiteral("clipShotMainWindow"),
