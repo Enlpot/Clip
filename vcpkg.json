@@ -5,10 +5,9 @@
   "dependencies": [],
   "overrides": [
     { "name": "flatbuffers", "version": "23.5.26" },
-    { "name": "abseil", "version": "20250512.1" },
+    { "name": "abseil", "version": "20250814.1" },
     { "name": "ffmpeg", "version": "9.0" },
-    { "name": "ffmpeg-bin2c", "version": "9.0" },
-    { "name": "protobuf", "version": "5.29.3" }
+    { "name": "ffmpeg-bin2c", "version": "9.0" }
   ],
   "features": {
     "macos-media": {
