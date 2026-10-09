@@ -12,7 +12,7 @@
 #include "clip_shot/presentation/screenshotprintservice.h"
 #include "../services/screenshotprintinteractionguard.h"
 #include "clip_shot/presentation/automationrevision.h"
-#include "clip_shot/app/mcp/mcpstylepatch.h"
+#include "clip_shot/presentation/canvasstylepatch.h"
 #include "screenshotpinnedhidetotopcontroller.h"
 #include "screenshotpinneddragexport.h"
 #include "screenshotpinnedclickthroughgeometry.h"
@@ -2160,7 +2160,7 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
         return false;
     }
     if (!config.initialCanvasTool.isEmpty()) {
-        const auto& tools = clip_shot::app::mcp::mcpCanvasTools();
+        const auto& tools = clip_shot::presentation::canvasToolRegistry();
         const auto tool = tools.constFind(config.initialCanvasTool);
         if (tool == tools.cend() || !m_canvas->setCanvasTool(*tool)) {
             finishPresentation(false);
@@ -8118,7 +8118,7 @@ QJsonObject ScreenshotPinnedWindow::automationState() const {
         {QStringLiteral("visible"), isVisible()},
         {QStringLiteral("editing"), m_editController && m_editController->editMode()},
         {QStringLiteral("active_tool"),
-         m_canvas ? clip_shot::app::mcp::mcpCanvasTools().key(m_canvas->canvasTool()) : QString()},
+         m_canvas ? clip_shot::presentation::canvasToolRegistry().key(m_canvas->canvasTool()) : QString()},
         {QStringLiteral("ready"), m_firstContentFramePublished && !m_closing},
         {QStringLiteral("source_size"),
          QJsonArray{m_originalPixelSize.width(), m_originalPixelSize.height()}},
@@ -8287,7 +8287,7 @@ QJsonObject ScreenshotPinnedWindow::automationEdit(const QString& action,
     if (m_closing || !m_firstContentFramePublished || !m_canvas)
         return fail("not_ready");
     if (action == QStringLiteral("tool") || action == QStringLiteral("tool_style")) {
-        const auto& tools = clip_shot::app::mcp::mcpCanvasTools();
+        const auto& tools = clip_shot::presentation::canvasToolRegistry();
         const auto tool =
             tools.constFind(payload
                                 .value(action == QStringLiteral("tool") ? QStringLiteral("tool")
@@ -8305,7 +8305,7 @@ QJsonObject ScreenshotPinnedWindow::automationEdit(const QString& action,
             {
                 ClipCanvasRuntimeEditor editor(m_runtime, *tool);
                 ok = editor.isValid() &&
-                     clip_shot::app::mcp::mcpStylePatch(editor, editor, payload) &&
+                     clip_shot::presentation::applyCanvasStylePatch(editor, editor, payload) &&
                      editor.succeeded();
             }
             if (!ok) {
@@ -8357,8 +8357,8 @@ QJsonObject ScreenshotPinnedWindow::automationEdit(const QString& action,
         if (!m_recognitionSession || !m_recognitionSession->editWorkflow(payload))
             return fail("action_unavailable");
     } else if (action == QStringLiteral("annotations")) {
-        const auto annotated = clip_shot::app::mcp::mcpDistanceAnnotationsWithPixelScale(
-            payload, clip_shot::app::mcp::mcpDistancePixelScale(
+        const auto annotated = clip_shot::presentation::distanceAnnotationsWithPixelScale(
+            payload, clip_shot::presentation::distancePixelScale(
                          {{m_transformedImage, m_backgroundCanvasRect}}, m_backgroundCanvasRect));
         const auto result =
             QJsonDocument::fromJson(m_runtime.applyAnnotationTransaction(

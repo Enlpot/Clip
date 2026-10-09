@@ -46,10 +46,6 @@
 #include <utility>
 #include "clip_capture.h"
 #include "clip_recording.h"
-#ifdef CLIP_SHOT_MCP_TEST_FIXTURE
-#include "clip_shot/storage/capturehistoryrepository.h"
-#include "clip_draw_engine_qt/clip_canvas_runtime.h"
-#endif
 #ifdef Q_OS_MACOS
 #include "clip_shot/platform/macos/loginitemservice.h"
 #include "clip_shot/platform/macos/rastercolorspace.h"
@@ -112,62 +108,6 @@ int main(int argc, char* argv[]) {
     }
     QCoreApplication::setApplicationName(applicationName);
     QCoreApplication::setApplicationVersion(QStringLiteral(CLIP_DIAGNOSTICS_VERSION));
-#ifdef CLIP_SHOT_MCP_TEST_FIXTURE
-    // Only test builds expose this isolated production-router fixture. It bypasses
-    // singleton acquisition, startup registration, and the user's configuration.
-    if (argc >= 3 && QString::fromLocal8Bit(argv[1]) == u"--mcp-fixture") {
-        const QFileInfo rootInfo(QString::fromLocal8Bit(argv[2]));
-        if (!rootInfo.isAbsolute() || !rootInfo.isDir() || rootInfo.isSymLink())
-            return 2;
-        const QString root = rootInfo.canonicalFilePath();
-        qputenv("CLIP_SHOT_MCP_DESCRIPTOR",
-                QDir(root).filePath(QStringLiteral("descriptor.json")).toUtf8());
-        QCoreApplication::setApplicationName(QStringLiteral("clip-shot-mcp-fixture-") +
-                                             QUuid::createUuid().toString(QUuid::Id128));
-        QStandardPaths::setTestModeEnabled(true);
-        QApplication fixture(argc, argv);
-        fixture.setQuitOnLastWindowClosed(false);
-        adqt::widgets::initializePlatformCompatibility(fixture);
-        const QString executable = QDir(root).filePath(QStringLiteral("bin"));
-        if (!QDir().mkpath(executable))
-            return 3;
-        auto& storage = clip_shot::storage::ApplicationStorage::instance();
-        if (!storage.initialize({executable, root, 60000}).success)
-            return 4;
-        storage.configuration().setValues(
-            {{QStringLiteral("mcp/enabled"), true},
-             {QStringLiteral("tray/enabled"), false},
-             {QStringLiteral("pin_to_screen/automatic_text_recognition"), false}});
-        {
-            // Publish through the real repository so router tests can exercise
-            // history payloads and artifacts without capturing the user's desktop.
-            ClipCanvasRuntime canvas;
-            clip_shot::storage::CaptureHistoryDraft draft;
-            draft.id = QStringLiteral("fd97d4e3-311c-48de-bbfb-3b4f43b0fef6");
-            draft.createdUtc = QDateTime::currentDateTimeUtc();
-            draft.canvasBounds = QRect(0, 0, 80, 60);
-            draft.selection.rectangle = draft.canvasBounds;
-            draft.selection.shadowColor = QColor(Qt::black);
-            draft.canvasHistory = canvas.serializeDocumentHistory();
-            QImage image(draft.canvasBounds.size(), QImage::Format_RGBA8888);
-            image.fill(QColor(40, 150, 210));
-            draft.displays.append({QStringLiteral("fixture"), QStringLiteral("Fixture"), image});
-            draft.resultImage = image;
-            if (!storage.captureHistory().publish(std::move(draft)).get().storage.success)
-                return 5;
-        }
-        clip_shot::presentation::LanguageManager::instance().initialize();
-        clip_shot::presentation::styles::ThemeManager::instance().initialize(fixture);
-        int result = 0;
-        {
-            clip_shot::app::ApplicationController controller(fixture);
-            QTimer::singleShot(180000, &fixture, &QCoreApplication::quit);
-            result = fixture.exec();
-        }
-        storage.shutdown();
-        return result;
-    }
-#endif
     bool applicationRestart = false;
     if (argc > 1 && QString::fromLocal8Bit(argv[1]) == u"--restart-helper") {
         QCoreApplication helper(argc, argv);

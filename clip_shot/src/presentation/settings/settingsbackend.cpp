@@ -884,11 +884,6 @@ bool BuiltInSettingsBackend::switchValue(SettingsSwitchBinding binding) const {
         return storage::RecordingSettings().notifyAfterExportCompletes();
     case SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen:
         return storage::GlobalShortcutSettings().disableOnFocusedFullscreenWindow();
-    case SettingsSwitchBinding::McpEnabled:
-        return storage::ApplicationStorage::instance()
-            .configuration()
-            .value(QStringLiteral("mcp/enabled"))
-            .toBool();
     case SettingsSwitchBinding::AutoStartAtBoot:
 #ifdef Q_OS_MACOS
         return m_loginItems->snapshot().requested();
@@ -1129,13 +1124,6 @@ bool BuiltInSettingsBackend::applySwitchValue(SettingsSwitchBinding binding, boo
     if (binding == SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen) {
         return storage::GlobalShortcutSettings().setDisableOnFocusedFullscreenWindow(value);
     }
-    if (binding == SettingsSwitchBinding::McpEnabled) {
-        const bool accepted = storage::ApplicationStorage::instance().configuration().setValue(
-            QStringLiteral("mcp/enabled"), value);
-        if (accepted)
-            emit synchronized();
-        return accepted;
-    }
     if (binding == SettingsSwitchBinding::AutoStartAtBoot ||
         binding == SettingsSwitchBinding::LaunchAsAdministrator) {
         if (!switchEnabled(binding))
@@ -1212,7 +1200,6 @@ bool BuiltInSettingsBackend::applySwitchValue(SettingsSwitchBinding binding, boo
     case SettingsSwitchBinding::ScreenRecordingAutoExitAfterRecordingEnds:
     case SettingsSwitchBinding::ScreenRecordingNotifyAfterExportCompletes:
     case SettingsSwitchBinding::DisableHotkeysOnFocusedFullscreen:
-    case SettingsSwitchBinding::McpEnabled:
     case SettingsSwitchBinding::AutoStartAtBoot:
     case SettingsSwitchBinding::LaunchAsAdministrator:
     case SettingsSwitchBinding::DrawingRememberLastUsedTool:

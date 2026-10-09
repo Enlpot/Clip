@@ -314,7 +314,7 @@ QImage decodeImage(const QString& path, const QString& suffix = QStringLiteral("
         const qint64 pixels = static_cast<qint64>(size.width()) * size.height();
         if (size.isEmpty() || pixels > 64000000 || !allocationCheck(2 * encodedBytes + 8 * pixels))
             return {};
-        return image_codec::decode(bytes, format, "mcp-pinned-source");
+        return image_codec::decode(bytes, format, "pinned-record-source");
     }
 #if defined(Q_OS_WIN) || defined(_WIN32)
     return clip_shot::image_codec::decodeFileBgra(path, format);

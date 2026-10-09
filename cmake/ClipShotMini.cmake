@@ -153,12 +153,6 @@ function(_clip_add_mini_helpers)
                 "CLIP_SHOT_VERSION=${CLIP_SHOT_VERSION}"
                 "CLIP_SHOT_ICON_PATH=${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.ico")
     endif()
-    if(CLIP_SHOT_ENABLE_MCP)
-        clip_add_rust_executable(clip_shot_mini_mcp
-            PACKAGE clip-shot-mcp MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rust/clip-shot-mcp"
-            OUTPUT_NAME clip-shot-mcp PRODUCTION_PROFILE release-size
-            FEATURES mini REPRODUCIBLE SIZE_OPTIMIZED)
-    endif()
 endfunction()
 _clip_add_mini_helpers()
 if(WIN32)
@@ -172,13 +166,9 @@ else()
 endif()
 install(TARGETS clip_shot_mini BUNDLE DESTINATION . COMPONENT ClipShotMini
     RUNTIME DESTINATION "${_mini_bindir}" COMPONENT ClipShotMini)
-foreach(_helper IN ITEMS clip-shot-mini-updater-binary clip_shot_mini_mcp)
+foreach(_helper IN ITEMS clip-shot-mini-updater-binary)
     if(TARGET ${_helper})
-        if(_helper STREQUAL clip_shot_mini_mcp)
-            set(_name clip-shot-mini-mcp)
-        else()
-            set(_name clip-shot-mini-updater)
-        endif()
+        set(_name clip-shot-mini-updater)
         if(WIN32)
             string(APPEND _name .exe)
         endif()
@@ -296,13 +286,6 @@ if(CLIP_SHOT_BUILD_TESTS)
             COMMAND "${_clip_launch_test_powershell}" -NoProfile -File
                 "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/test-run-clip-shot.ps1")
         set_tests_properties(clip-shot-launcher-tests PROPERTIES LABELS "unit;windows" TIMEOUT 15)
-        if(CLIP_SHOT_ENABLE_MCP)
-            add_test(NAME clip-shot-mini-startup-tests
-                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mini_startup_tests.py"
-                    --application "$<TARGET_FILE:clip_shot_mini>")
-            set_tests_properties(clip-shot-mini-startup-tests PROPERTIES LABELS "unit;windows"
-                TIMEOUT 45)
-        endif()
     endif()
     add_test(NAME clip-shot-mini-build-contract-tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mini_build_contract_tests.py")
@@ -361,12 +344,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     clip_shot_add_translations(clip-shot-mini-recognition-tests MINI)
     clip_shot_import_offscreen_platform(clip-shot-mini-recognition-tests)
 
-    foreach(_edition IN ITEMS full mini)
-        add_executable(clip-shot-${_edition}-mcp-edition-tests tests/mcp_edition_tests.cpp)
-        target_include_directories(clip-shot-${_edition}-mcp-edition-tests PRIVATE include)
-        target_link_libraries(clip-shot-${_edition}-mcp-edition-tests PRIVATE
-            clip_shot_edition_${_edition} Qt6::Core)
-    endforeach()
     get_target_property(_branding_sources clip-shot-about-page-tests SOURCES)
     list(REMOVE_ITEM _branding_sources tests/about_page_tests.cpp)
     foreach(_edition IN ITEMS full mini)
@@ -395,13 +372,11 @@ if(CLIP_SHOT_BUILD_TESTS)
     endforeach()
     foreach(_test IN ITEMS clip-shot-mini-edition-tests clip-shot-mini-recognition-tests
             clip-shot-mini-cloud-upload-tests clip-shot-mini-settings-reset-tests clip-shot-mini-local-shortcut-reset-tests
-            clip-shot-mini-mcp-edition-tests
             clip-shot-mini-branding-tests)
         clip_shot_assert_mini_build_contract(${_test})
     endforeach()
     foreach(_test IN ITEMS clip-shot-mini-edition-tests clip-shot-mini-recognition-tests
             clip-shot-mini-settings-reset-tests
-            clip-shot-full-mcp-edition-tests clip-shot-mini-mcp-edition-tests
             clip-shot-full-branding-tests clip-shot-mini-branding-tests)
         add_test(NAME ${_test} COMMAND ${_test})
         set_tests_properties(${_test} PROPERTIES LABELS unit TIMEOUT 60
@@ -412,11 +387,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip-shot-mini-settings-reset-tests
         clip-shot-full-branding-tests clip-shot-mini-branding-tests PROPERTIES
         ENVIRONMENT "${_mini_qpa_environment}")
-    if(Python3_Interpreter_FOUND AND CLIP_SHOT_ENABLE_MCP)
-        add_test(NAME clip-shot-mini-mcp-capabilities-tests
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mcp_capabilities.py" --mini)
-        set_tests_properties(clip-shot-mini-mcp-capabilities-tests PROPERTIES LABELS unit TIMEOUT 30)
-    endif()
 endif()
 
 # Keep this after helpers, resources and finalization so transitive link and

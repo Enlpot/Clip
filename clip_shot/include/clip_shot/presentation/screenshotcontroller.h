@@ -77,29 +77,7 @@ class ScreenshotController : public QObject {
 
     void setPrintService(ScreenshotPrintService* service);
     void setRecordingPermissionCheck(std::function<bool(bool, bool, bool)> check);
-
-    [[nodiscard]] QJsonObject mcpState() const;
-    using McpCompletion = std::function<void(QJsonObject, QString)>;
-    void mcpCommand(const QString& method, const QJsonObject& params, McpCompletion completion);
-    void mcpCancelCommand();
-    void mcpDetached();
-    [[nodiscard]] bool mcpBegin(const QJsonObject& options, QString* error);
-    [[nodiscard]] bool mcpSetSelection(const QJsonObject& params, QString* error);
-    [[nodiscard]] bool mcpSetTool(const QString& tool, QString* error);
-    [[nodiscard]] bool mcpApplyAnnotations(const QByteArray& payload, QJsonObject* result,
-                                           QString* error);
-    [[nodiscard]] std::shared_ptr<ScreenshotExportArtifact> mcpExportArtifact(qreal scale);
-    [[nodiscard]] bool mcpPinArtifact(std::shared_ptr<ScreenshotExportArtifact> artifact,
-                                      std::function<void(bool)> completion);
-    [[nodiscard]] ScreenRecordingController* automationRecordingController();
-    [[nodiscard]] ScreenshotQrRecognitionPort* mcpQrRecognition();
-    void mcpPinnedImage(const QString& id, std::function<void(QImage, QString)> completion);
-    [[nodiscard]] bool mcpPinContent(ScreenshotClipboardContent content,
-                                     std::function<void(bool)> completion);
-    [[nodiscard]] bool mcpPinDocument(ScreenshotHistoryEntry entry, QImage background,
-                                      std::function<void(bool)> completion);
-    [[nodiscard]] bool mcpPresentDocument(ScreenshotHistoryEntry entry,
-                                          std::function<void(bool)> completion);
+    [[nodiscard]] std::shared_ptr<ScreenshotExportArtifact> exportArtifact(qreal scale);
 
   public slots:
     void prewarmResources();
@@ -121,13 +99,6 @@ class ScreenshotController : public QObject {
     void pinHistoryRecord(const QString& recordId);
     void pinClipboardContentToScreen();
     void pinSelectedFilesToScreen();
-    // MCP uses the same controller actions as the toolbar. These narrow
-    // adapters preserve the controller's GUI-thread affinity.
-    void mcpCancelCapture();
-    void mcpCopySelectionToClipboard();
-    void mcpPinSelectionToScreen();
-    void mcpUndoCanvasEdit();
-    void mcpRedoCanvasEdit();
 
   signals:
     void recordingExportNotificationRequested(const QString& path);
@@ -138,9 +109,6 @@ class ScreenshotController : public QObject {
     void translationPageRequested(const QString& text);
     void captureAvailabilityChanged(bool available);
     void globalMouseCaptureEnded(quint64 gestureId);
-    void mcpCapturePresented();
-    void mcpCaptureTerminated();
-    void mcpCanvasChanged();
 
   private:
     struct Impl;

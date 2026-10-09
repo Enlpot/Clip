@@ -25,7 +25,6 @@ set(CLIP_SHOT_MINI_EXCLUDED_TARGETS
     clip_shot_settings clip_shot_global_mouse clip_shot_login_item
     clip_shot_administrator clip_shot_permissions clip_shot_updates
     clip_shot_diagnostics clip_shot_crash_bridge
-    clip_shot_mcp clip_shot_mcp_build
     clip-shot-updater-binary clip-shot-updater-binary_build
     clip_shot_release_translations)
 if(WIN32)

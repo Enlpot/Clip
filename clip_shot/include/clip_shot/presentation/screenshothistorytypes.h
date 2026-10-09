@@ -51,7 +51,7 @@ struct ScreenshotHistoryEntry {
     bool intelligentSelectionMode = false;
     bool persistent = true;
     std::optional<ScreenshotIntelligentSelectionModel> liveIntelligentSelection;
-    // Transient MCP handoff state; historical on-disk records remain unchanged.
+    // Transient session handoff state; historical on-disk records remain unchanged.
     QByteArray documentSession;
     ScreenshotClipboardOriginalContent originalContent;
     ScreenshotRecognitionResults recognitionResults;

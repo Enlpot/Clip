@@ -69,13 +69,6 @@ inline constexpr bool extendedFeatures = CLIP_SHOT_ENABLE_EXTENDED_FEATURES != 0
     return productId() + QStringLiteral("-updater");
 #endif
 }
-[[nodiscard]] inline QString mcpName() {
-#ifdef Q_OS_WIN
-    return productId() + QStringLiteral("-mcp.exe");
-#else
-    return productId() + QStringLiteral("-mcp");
-#endif
-}
 [[nodiscard]] inline QString bundleId() {
     return QStringLiteral("com.clipshot.") + applicationName();
 }

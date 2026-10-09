@@ -164,7 +164,6 @@ enum class SettingsSwitchBinding {
     ScreenRecordingAutoExitAfterRecordingEnds,
     ScreenRecordingNotifyAfterExportCompletes,
     DisableHotkeysOnFocusedFullscreen,
-    McpEnabled,
     AutoStartAtBoot,
     LaunchAsAdministrator,
     DrawingRememberLastUsedTool,
@@ -365,7 +364,6 @@ struct SettingsActionDefinition {
 
 enum class SettingsCustomRenderer {
     CloudUploadConfigurations,
-    McpStatus,
     PermissionScreenRecording,
     PermissionAccessibility,
     PermissionInputMonitoring,

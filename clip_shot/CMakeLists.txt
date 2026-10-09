@@ -86,7 +86,6 @@ option(CLIP_SHOT_BUILD_RUNTIME_TESTS
 option(CLIP_SHOT_BUILD_IMAGE_CODEC_SMOKE_TEST
     "Build the Clip image-codec smoke test without the full QtTest suite." OFF)
 option(CLIP_SHOT_BUILD_BENCHMARKS "Build opt-in native Clip benchmarks." OFF)
-option(CLIP_SHOT_ENABLE_MCP "Build and package the local Clip MCP bridge." ON)
 option(CLIP_SHOT_SCROLLING_PERF_DETAIL "Compile detailed scrolling C++ and Rust timings." OFF)
 option(CLIP_SHOT_RELEASE_STATIC "Prefer static Clip release linkage." OFF)
 option(CLIP_SHOT_QT_STATIC "Link Clip against a static Qt build." OFF)
@@ -444,20 +443,6 @@ clip_add_rust_executable(clip_ocr_process
     FEATURES ${CLIP_SHOT_OCR_PROCESS_FEATURES}
     ENVIRONMENT ${CLIP_SHOT_OCR_PROCESS_ENVIRONMENT}
 )
-
-# The MCP bridge is deliberately a small standalone process.  It only speaks
-# MCP over stdio and connects to an already running Clip instance through
-# the per-user local endpoint published by the application.
-if(CLIP_SHOT_ENABLE_MCP)
-    clip_add_rust_executable(clip_shot_mcp
-        PACKAGE clip-shot-mcp
-        MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rust/clip-shot-mcp"
-        OUTPUT_NAME clip-shot-mcp
-        PRODUCTION_PROFILE release-size
-        REPRODUCIBLE
-        SIZE_OPTIMIZED
-    )
-endif()
 
 if(WIN32 OR APPLE)
     add_dependencies(clip_ocr_process_build clip_ocr_diagnostics_bridge)
@@ -1175,12 +1160,6 @@ if(WIN32)
 endif()
 
 set(PROJECT_HEADERS
-    include/clip_shot/app/mcp/screenshotmcpsession.h
-    include/clip_shot/app/mcp/screenshotmcpserver.h
-    include/clip_shot/app/mcp/mcpapplicationservice.h
-    include/clip_shot/app/mcp/mcpdocumentservice.h
-    include/clip_shot/app/mcp/mcpjobregistry.h
-    include/clip_shot/app/mcp/mcpmediaservice.h
     include/clip_shot/app/featureavailability.h
     include/clip_shot/app/applicationinputguard.h
     include/clip_shot/presentation/screenshotencodingsettings.h
@@ -1351,12 +1330,6 @@ set(PROJECT_CXX_SOURCES
     src/presentation/capture/camerashuttersound.cpp
     src/app/applicationcontroller.cpp
     src/app/updateconfirmationdialog.cpp
-    src/app/mcp/screenshotmcpsession.cpp
-    src/app/mcp/screenshotmcpserver.cpp
-    src/app/mcp/mcpapplicationservice.cpp
-    src/app/mcp/mcpdocumentservice.cpp
-    src/app/mcp/mcpjobregistry.cpp
-    src/app/mcp/mcpmediaservice.cpp
     src/app/applicationrestart.cpp
     src/app/featureavailability.cpp
     src/app/main.cpp
@@ -1548,7 +1521,6 @@ qt_add_executable(clip_shot
 )
 clip_shot_link_macos_window_platform(clip_shot)
 if(CLIP_SHOT_BUILD_TESTS)
-    target_compile_definitions(clip_shot PRIVATE CLIP_SHOT_MCP_TEST_FIXTURE=1)
     clip_shot_import_offscreen_platform(clip_shot)
 endif()
 
@@ -1997,19 +1969,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     clip_shot_import_offscreen_platform(clip-shot-custom-ai-models-tests)
     add_test(NAME clip-shot-custom-ai-models-tests COMMAND clip-shot-custom-ai-models-tests -platform offscreen)
     set_tests_properties(clip-shot-custom-ai-models-tests PROPERTIES TIMEOUT 60)
-
-    add_executable(clip-shot-mcp-settings-widget-tests
-        tests/mcp_settings_widget_tests.cpp
-        src/presentation/services/screenshotclipboardservice.cpp
-    )
-    target_link_libraries(clip-shot-mcp-settings-widget-tests PRIVATE clip_shot_settings)
-    add_test(NAME clip-shot-mcp-settings-widget-tests COMMAND clip-shot-mcp-settings-widget-tests)
-    set_tests_properties(clip-shot-mcp-settings-widget-tests PROPERTIES
-        LABELS "unit"
-        ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
-    )
-    clip_shot_import_offscreen_platform(clip-shot-mcp-settings-widget-tests)
 
     add_executable(clip-shot-storage-status-widget-tests
         tests/storage_status_widget_tests.cpp
@@ -5045,37 +5004,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         PROPERTIES LABELS "unit" TIMEOUT 90
         ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    add_executable(clip-shot-mcp-tests ${_clip_mcp_test_sources}
-        tests/screenshot_mcp_tests.cpp
-        include/clip_shot/app/mcp/screenshotmcpserver.h
-        include/clip_shot/app/mcp/screenshotmcpsession.h
-        src/app/mcp/screenshotmcpserver.cpp
-        src/app/mcp/screenshotmcpsession.cpp
-        src/presentation/selection/screenshotselectionmodel.cpp
-        src/presentation/selection/screenshotselectiongeometry.cpp
-        src/presentation/selection/screenshotselectionparams.cpp
-        src/presentation/core/screenshotgeometry.cpp
-        src/platform/windows/monitorgeometry.cpp)
-    target_include_directories(clip-shot-mcp-tests PRIVATE include src/image)
-    target_link_libraries(clip-shot-mcp-tests PRIVATE clip_shot_diagnostics
-        clip_shot_image_codec clip_shot_storage clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets Qt6::Network)
-    if(WIN32)
-        target_link_libraries(clip-shot-mcp-tests PRIVATE user32 advapi32)
-    endif()
-    clip_shot_import_offscreen_platform(clip-shot-mcp-tests)
-    add_test(NAME clip-shot-mcp-tests COMMAND clip-shot-mcp-tests -platform offscreen)
-    if(CLIP_SHOT_ENABLE_MCP)
-        add_test(NAME clip-shot-mcp-stdio-tests
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_stdio_tests.py"
-                "$<TARGET_FILE_DIR:clip_shot>/$<TARGET_FILE_NAME:clip_shot_mcp>")
-        set_tests_properties(clip-shot-mcp-stdio-tests PROPERTIES TIMEOUT 45 LABELS unit)
-        add_test(NAME clip-shot-mcp-capabilities-tests
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_mcp_capabilities.py")
-        set_tests_properties(clip-shot-mcp-capabilities-tests PROPERTIES TIMEOUT 30 LABELS unit)
-    endif()
-
-    set_tests_properties(clip-shot-mcp-tests PROPERTIES TIMEOUT 90 LABELS unit
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
 
     add_test(NAME clip-shot-quick-save-command-tests
         COMMAND clip-shot-floating-toolbar-drag-tests --quick-save-only -platform offscreen)
@@ -7051,86 +6979,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     unset(_translation_tool_sources)
     unset(_translation_session_sources)
-    get_target_property(_clip_mcp_document_sources clip-shot-recognition-session-controller-tests SOURCES)
-    list(REMOVE_ITEM _clip_mcp_document_sources
-        tests/screenshot_recognition_session_controller_tests.cpp
-        tests/original_image_translation_tests.cpp tests/image_conversion_tests.cpp
-        src/presentation/styles/buttonborder.cpp)
-    get_target_property(_clip_mcp_transport_sources clip-shot-mcp-tests SOURCES)
-    list(REMOVE_ITEM _clip_mcp_transport_sources tests/screenshot_mcp_tests.cpp)
-    add_executable(clip-shot-mcp-screenshot-fixture
-        ${_clip_mcp_transport_sources} tests/mcp_screenshot_fixture.cpp)
-    target_include_directories(clip-shot-mcp-screenshot-fixture PRIVATE include src/image)
-    target_link_libraries(clip-shot-mcp-screenshot-fixture PRIVATE clip_shot_diagnostics
-        clip_shot_image_codec clip_shot_storage clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets Qt6::Network)
-    if(WIN32)
-        target_link_libraries(clip-shot-mcp-screenshot-fixture PRIVATE user32 advapi32)
-    endif()
-    clip_shot_import_offscreen_platform(clip-shot-mcp-screenshot-fixture)
-    list(APPEND _clip_mcp_document_sources ${_clip_mcp_transport_sources})
-    list(REMOVE_DUPLICATES _clip_mcp_document_sources)
-    add_executable(clip-shot-mcp-document-tests ${_clip_mcp_document_sources}
-        tests/mcp_document_tests.cpp
-        tests/mcp_application_tests.cpp
-        include/clip_shot/app/mcp/mcpapplicationservice.h
-        src/app/mcp/mcpapplicationservice.cpp
-        include/clip_shot/app/mcp/mcpdocumentservice.h
-        include/clip_shot/app/mcp/mcpjobregistry.h
-        src/app/mcp/mcpdocumentservice.cpp src/app/mcp/mcpjobregistry.cpp)
-    clip_shot_link_macos_window_platform(clip-shot-mcp-document-tests)
-    target_include_directories(clip-shot-mcp-document-tests PRIVATE include src/image)
-    target_link_libraries(clip-shot-mcp-document-tests PRIVATE clip_shot_translation
-        clip_shot_settings clip_shot_updates
-        clip_shot_diagnostics clip_shot_storage clip_shot_image_codec clip_shot_window_shortcuts
-        clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets Qt6::Network)
-    if(WIN32)
-        target_link_libraries(clip-shot-mcp-document-tests PRIVATE user32 advapi32)
-    endif()
-    clip_shot_import_offscreen_platform(clip-shot-mcp-document-tests)
-    add_test(NAME clip-shot-mcp-storage-guard-tests COMMAND clip-shot-mcp-document-tests --jobs-only -platform offscreen)
-    set_tests_properties(clip-shot-mcp-storage-guard-tests PROPERTIES LABELS "unit" TIMEOUT 30
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    add_test(NAME clip-shot-mcp-document-tests COMMAND clip-shot-mcp-document-tests -platform offscreen)
-    add_test(NAME clip-shot-mcp-eraser-tests COMMAND clip-shot-mcp-document-tests --eraser-only -platform offscreen)
-    set_tests_properties(clip-shot-mcp-eraser-tests PROPERTIES LABELS "unit" TIMEOUT 60)
-    add_test(NAME clip-shot-mcp-application-tests
-        COMMAND clip-shot-mcp-document-tests --application-only -platform offscreen)
-    if(Python3_Interpreter_FOUND AND CLIP_SHOT_ENABLE_MCP)
-        add_test(NAME clip-shot-mcp-fixture-tests
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_fixture_tests.py"
-                "$<TARGET_FILE:clip_shot_mcp>" "$<TARGET_FILE:clip-shot-mcp-document-tests>"
-                --screenshot-fixture "$<TARGET_FILE:clip-shot-mcp-screenshot-fixture>" --samples 1)
-        set_tests_properties(clip-shot-mcp-fixture-tests PROPERTIES TIMEOUT 120 LABELS unit
-            ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-        add_test(NAME clip-shot-mcp-application-fixture-tests
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_application_fixture_tests.py"
-                "$<TARGET_FILE:clip_shot_mcp>" "$<TARGET_FILE:clip_shot>")
-        set_tests_properties(clip-shot-mcp-application-fixture-tests PROPERTIES TIMEOUT 120 LABELS unit
-            ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    endif()
-    add_test(NAME clip-shot-mcp-history-transient-tests
-        COMMAND clip-shot-screenshot-history-tests --mcp-transient-only -platform offscreen)
-    add_test(NAME clip-shot-mcp-recording-tests COMMAND clip-shot-screen-recording-controller-tests --automation-only)
-    add_test(NAME clip-shot-mcp-pinned-tests COMMAND clip-shot-pinned-window-tests --automation-only)
-    set_tests_properties(clip-shot-mcp-document-tests clip-shot-mcp-application-tests clip-shot-mcp-recording-tests
-        clip-shot-mcp-pinned-tests clip-shot-mcp-history-transient-tests PROPERTIES TIMEOUT 120 LABELS unit
-        ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-
-    if(CLIP_SHOT_BUILD_BENCHMARKS)
-        if(CLIP_SHOT_ENABLE_MCP AND Python3_Interpreter_FOUND)
-            add_custom_target(clip-shot-mcp-performance-benchmark
-                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_fixture_tests.py"
-                    "$<TARGET_FILE:clip_shot_mcp>" "$<TARGET_FILE:clip-shot-mcp-document-tests>"
-                    --benchmark --samples 50 --screenshot-fixture "$<TARGET_FILE:clip-shot-mcp-screenshot-fixture>"
-                    --output "${CMAKE_CURRENT_BINARY_DIR}/mcp-performance.json"
-                DEPENDS clip_shot_mcp clip-shot-mcp-document-tests clip-shot-mcp-screenshot-fixture
-                USES_TERMINAL)
-        endif()
-    endif()
-
     add_executable(clip-shot-qr-recognition-service-tests
         tests/screenshot_qr_recognition_service_tests.cpp
         include/clip_shot/presentation/screenshotqrrecognitionservice.h
@@ -8073,16 +7921,6 @@ target_compile_definitions(clip_shot PRIVATE
     $<$<CONFIG:Release>:QT_NO_DEBUG_OUTPUT>
 )
 add_dependencies(clip_shot clip_ocr_process)
-if(CLIP_SHOT_ENABLE_MCP)
-    add_dependencies(clip_shot clip_shot_mcp)
-    add_custom_command(TARGET clip_shot POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "$<TARGET_FILE:clip_shot_mcp>"
-            "$<TARGET_FILE_DIR:clip_shot>/$<TARGET_FILE_NAME:clip_shot_mcp>"
-        COMMENT "Staging Clip MCP bridge"
-        VERBATIM
-    )
-endif()
 
 if(WIN32 AND CLIP_SHOT_BUILD_BENCHMARKS)
     clip_windows_rust_environment(_clip_shot_benchmark_environment "${CLIP_SHOT_RUST_TARGET}")
@@ -8709,11 +8547,6 @@ install(TARGETS clip_shot
 install(PROGRAMS "$<TARGET_FILE:clip_ocr_process>"
     DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-if(CLIP_SHOT_ENABLE_MCP)
-    install(PROGRAMS "$<TARGET_FILE:clip_shot_mcp>"
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
-endif()
 if(EXISTS "${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
     install(FILES "${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}"
         DESTINATION "${CMAKE_INSTALL_BINDIR}/audios"
@@ -8918,7 +8751,6 @@ install(DIRECTORY
 )
 
 foreach(_conversion_view_target IN ITEMS clip_shot clip-shot-recognition-window-tests
-        clip-shot-mcp-document-tests
         clip-shot-recognition-session-controller-tests clip-shot-translation-tool-tests
         clip-shot-pinned-window-tests
         clip-shot-file-pin-batch-performance-benchmark)
@@ -8930,7 +8762,6 @@ foreach(_conversion_view_target IN ITEMS clip_shot clip-shot-recognition-window-
     endif()
 endforeach()
 foreach(_conversion_controller_target IN ITEMS clip_shot
-        clip-shot-mcp-document-tests
         clip-shot-recognition-session-controller-tests clip-shot-translation-tool-tests
         clip-shot-pinned-window-tests
         clip-shot-file-pin-batch-performance-benchmark)
@@ -9561,14 +9392,6 @@ if(CLIP_SHOT_BUILD_TESTS)
             COMMAND clip-shot-pinned-window-tests --clipboard-publication-only -platform offscreen)
         set_tests_properties(clip-shot-selection-clipboard-lifecycle-tests PROPERTIES
             ENVIRONMENT "${_clip_clipboard_qpa_environment}" LABELS "unit" TIMEOUT 60)
-    endif()
-    if(Python3_Interpreter_FOUND AND CLIP_SHOT_ENABLE_MCP)
-        add_test(NAME clip-shot-mcp-media-clipboard-tests
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_application_fixture_tests.py"
-                "$<TARGET_FILE:clip_shot_mcp>" "$<TARGET_FILE:clip_shot>" --clipboard-only)
-        set_tests_properties(clip-shot-mcp-media-clipboard-tests PROPERTIES TIMEOUT 120
-            LABELS "unit" RUN_SERIAL TRUE ENVIRONMENT "${_clip_clipboard_qpa_environment}"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     endif()
 
     if(APPLE)

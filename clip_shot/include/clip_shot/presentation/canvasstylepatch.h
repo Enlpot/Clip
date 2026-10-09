@@ -1,5 +1,5 @@
-#ifndef CLIP_SHOT_APP_MCP_MCPSTYLEPATCH_H
-#define CLIP_SHOT_APP_MCP_MCPSTYLEPATCH_H
+#ifndef CLIP_SHOT_PRESENTATION_CANVASSTYLEPATCH_H
+#define CLIP_SHOT_PRESENTATION_CANVASSTYLEPATCH_H
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QHash>
@@ -11,10 +11,10 @@
 #include "clip_draw_engine_qt/clip_canvas_widget.h"
 #include "clip_draw_engine_qt/clip_canvas_export_types.h"
 
-namespace clip_shot::app::mcp {
+namespace clip_shot::presentation {
 // Capture image geometry once per annotation. Rendering scale and monitor DPI are independent.
-inline QSizeF mcpDistancePixelScale(const QList<CanvasExportSource>& sources,
-                                    const QRectF& selection) {
+inline QSizeF distancePixelScale(const QList<CanvasExportSource>& sources,
+                                 const QRectF& selection) {
     QSizeF result(1.0, 1.0);
     bool found = false;
     for (const auto& source : sources) {
@@ -37,7 +37,7 @@ inline QSizeF mcpDistancePixelScale(const QList<CanvasExportSource>& sources,
     return result;
 }
 
-inline QJsonObject mcpDistanceAnnotationsWithPixelScale(QJsonObject payload, const QSizeF& scale) {
+inline QJsonObject distanceAnnotationsWithPixelScale(QJsonObject payload, const QSizeF& scale) {
     QJsonArray operations = payload.value(QStringLiteral("operations")).toArray();
     for (qsizetype index = 0; index < operations.size(); ++index) {
         QJsonObject operation = operations.at(index).toObject();
@@ -50,7 +50,7 @@ inline QJsonObject mcpDistanceAnnotationsWithPixelScale(QJsonObject payload, con
     return payload;
 }
 
-inline const QHash<QString, ClipCanvasTool>& mcpCanvasTools() {
+inline const QHash<QString, ClipCanvasTool>& canvasToolRegistry() {
     static const QHash<QString, ClipCanvasTool> tools{
         {QStringLiteral("select"), ClipCanvasTool::Select},
         {QStringLiteral("rectangle"), ClipCanvasTool::Shape},
@@ -73,7 +73,7 @@ inline const QHash<QString, ClipCanvasTool>& mcpCanvasTools() {
     return tools;
 }
 template <class Commands, class Canvas>
-inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject& params) {
+inline bool applyCanvasStylePatch(Commands& commands, Canvas& canvas, const QJsonObject& params) {
     const auto target = params.value(QStringLiteral("target")).toString();
     const auto patch = params.value(QStringLiteral("style")).toObject();
     if (patch.isEmpty())
@@ -487,5 +487,5 @@ inline bool mcpStylePatch(Commands& commands, Canvas& canvas, const QJsonObject&
         });
     }
 }
-} // namespace clip_shot::app::mcp
+} // namespace clip_shot::presentation
 #endif

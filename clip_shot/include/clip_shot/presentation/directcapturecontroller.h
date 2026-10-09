@@ -16,9 +16,6 @@ class DirectCaptureController final : public QObject {
     void captureFocusedWindow();
     void captureCurrentMonitor();
     void shutdown();
-    void cancelMcpCapture();
-    [[nodiscard]] bool mcpCapture(const QJsonObject& options,
-                                  std::function<void(QImage, QJsonObject, QString)> completion);
     [[nodiscard]] bool blocksApplicationUpdate() const;
 
   signals:
