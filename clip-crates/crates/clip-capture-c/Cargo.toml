@@ -24,7 +24,6 @@ name = "scroll_region_benchmark"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.3"
-clip-macos = { path = "../clip-macos" }
 clip-media = { path = "../clip-media" }
 
 [target.'cfg(windows)'.dev-dependencies]

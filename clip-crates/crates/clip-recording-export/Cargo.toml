@@ -44,4 +44,3 @@ windows = { workspace = true, features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-clip-macos = { path = "../clip-macos" }

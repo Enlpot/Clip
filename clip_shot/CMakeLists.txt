@@ -1,12 +1,3 @@
-if(APPLE)
-    set_source_files_properties(src/presentation/core/screenshotgeometry.cpp
-        src/presentation/selector/screenshotselectorserviceclient.cpp
-        src/presentation/recording/screenrecordingareawindow.cpp
-        src/presentation/globalcanvas/globalcanvasplatform.cpp
-        tests/global_canvas_tests.cpp
-        tests/screen_recording_shortcut_tests.cpp PROPERTIES LANGUAGE OBJCXX)
-endif()
-
 cmake_minimum_required(VERSION 3.30)
 
 project(clip_shot VERSION ${CLIP_SHOT_VERSION_NUMERIC} LANGUAGES CXX)
@@ -61,18 +52,11 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
-if(APPLE)
-    set(CLIP_SELECTED_FILES_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/selectedfiles.mm)
-    set(CLIP_SELECTED_FILES_LIBRARIES "-framework AppKit" "-framework ApplicationServices")
-else()
-    set(CLIP_SELECTED_FILES_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/windows/selectedfiles.cpp)
-endif()
+set(CLIP_SELECTED_FILES_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/windows/selectedfiles.cpp)
 
 set(CLIP_PINNED_PLATFORM_SOURCES)
-if(NOT APPLE)
-    list(APPEND CLIP_PINNED_PLATFORM_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/pinned/pinnedwindowplatform.cpp)
-endif()
+list(APPEND CLIP_PINNED_PLATFORM_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/pinned/pinnedwindowplatform.cpp)
 if(WIN32)
     list(APPEND CLIP_PINNED_PLATFORM_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/windows/pinnedwindowevents.cpp
@@ -115,32 +99,8 @@ clip_enable_clang_tidy()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClipQt.cmake")
 clip_find_qt(COMPONENTS Widgets LinguistTools Svg Network)
-if(APPLE)
-    add_library(clip_shot_macos_clipboard STATIC src/platform/macos/imageclipboard.mm)
-    target_link_libraries(clip_shot_macos_clipboard PUBLIC Qt6::Gui
-        PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework ImageIO")
-    add_library(clip_shot_macos_cursor STATIC
-        src/platform/macos/windowcursorcoordinator.cpp
-        src/platform/macos/windowcursorcoordinator.mm)
-    target_link_libraries(clip_shot_macos_cursor PUBLIC Qt6::Widgets PRIVATE "-framework AppKit")
-
-    # Window adapters own their shared cursor dependency. Link this target instead
-    # of compiling adapter sources in each executable.
-    add_library(clip_shot_macos_window_platform STATIC
-        src/platform/macos/screenshotnative.mm
-        src/platform/macos/pinnedwindowplatform.mm
-        src/presentation/pinned/pinnedwindowplatform.cpp)
-    target_include_directories(clip_shot_macos_window_platform PRIVATE include)
-    target_link_libraries(clip_shot_macos_window_platform PUBLIC Qt6::Widgets
-        PRIVATE Qt6::GuiPrivate clip_shot_macos_cursor "-framework AppKit" "-framework ApplicationServices")
-endif()
 
 
-function(clip_shot_link_macos_window_platform target)
-    if(APPLE)
-        target_link_libraries(${target} PRIVATE clip_shot_macos_window_platform)
-    endif()
-endfunction()
 include(ClipTestCliGuard)
 include(ClipQtOffscreenTest)
 
@@ -158,11 +118,6 @@ if(WIN32)
     list(APPEND _clip_shot_static_qt_plugins
         Qt6::QWindowsIntegrationPlugin
         Qt6::QSchannelBackendPlugin)
-elseif(APPLE)
-    list(APPEND _clip_shot_static_qt_plugins
-        Qt6::QCocoaIntegrationPlugin
-        Qt6::QMacStylePlugin
-        Qt6::QSecureTransportBackendPlugin)
 endif()
 
 if(CLIP_SHOT_QT_STATIC)
@@ -276,12 +231,6 @@ if(NOT TARGET clip_capture_c)
             clip_stitch_images_c
         STRIP_MSVC_DIRECTIVES
     )
-endif()
-
-# Selector framework requirements travel with the Rust static library on both Apple targets.
-if(APPLE)
-    target_link_libraries(clip_ui_selector_c INTERFACE
-        "-framework ApplicationServices" "-framework CoreFoundation" "-framework CoreGraphics")
 endif()
 
 if(NOT TARGET clip_recording_c)
@@ -417,21 +366,11 @@ if(CLIP_SHOT_OCR_STATIC_ONNXRUNTIME)
         "CLIP_ONNXRUNTIME_LINK_FILE=${CMAKE_CURRENT_BINARY_DIR}/generated/clip-ocr-process-onnxruntime-$<CONFIG>.rsp")
 endif()
 
-if(APPLE AND NOT CLIP_SHOT_OCR_STATIC_ONNXRUNTIME)
-    set(CLIP_SHOT_OCR_PROCESS_NO_DEFAULT_FEATURES NO_DEFAULT_FEATURES)
-    set(CLIP_SHOT_OCR_PROCESS_FEATURES dynamic-onnx-runtime)
-endif()
-
-if(WIN32 OR APPLE)
+if(WIN32)
     list(APPEND CLIP_SHOT_OCR_PROCESS_FEATURES crash-diagnostics)
     list(APPEND CLIP_SHOT_OCR_PROCESS_ENVIRONMENT
         "CLIP_CRASHPAD_LINK_FILE=${CMAKE_CURRENT_BINARY_DIR}/generated/clip-ocr-crash-$<CONFIG>.rsp"
         "CARGO_PROFILE_RELEASE_DEBUG=2" "CARGO_PROFILE_RELEASE_FAST_DEBUG=2")
-endif()
-if(APPLE)
-    list(APPEND CLIP_SHOT_OCR_PROCESS_ENVIRONMENT
-        "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=packed"
-        "CARGO_PROFILE_RELEASE_FAST_SPLIT_DEBUGINFO=packed")
 endif()
 clip_add_rust_executable(clip_ocr_process
     PACKAGE clip-ocr-process
@@ -444,7 +383,7 @@ clip_add_rust_executable(clip_ocr_process
     ENVIRONMENT ${CLIP_SHOT_OCR_PROCESS_ENVIRONMENT}
 )
 
-if(WIN32 OR APPLE)
+if(WIN32)
     add_dependencies(clip_ocr_process_build clip_ocr_diagnostics_bridge)
 endif()
 
@@ -546,9 +485,6 @@ target_link_libraries(clip_shot_image_codec PUBLIC
     Qt6::Gui
 )
 target_compile_features(clip_shot_image_codec PUBLIC cxx_std_20)
-if(APPLE)
-    target_link_libraries(clip_shot_macos_clipboard PRIVATE clip_shot_image_codec)
-endif()
 
 if(WIN32 AND NOT CLIP_SHOT_IMAGE_CODEC_BACKEND_STATIC)
     set(_CLIP_SHOT_IMAGE_RUNTIME_STAGING_SCRIPT
@@ -740,14 +676,6 @@ add_library(clip_shot_shortcuts STATIC
 )
 target_include_directories(clip_shot_shortcuts PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(clip_shot_shortcuts PUBLIC Qt6::Core Qt6::Gui)
-if(APPLE)
-    find_library(CLIP_SHOT_CARBON_FRAMEWORK NAMES Carbon REQUIRED)
-    find_library(CLIP_SHOT_CORE_FOUNDATION_FRAMEWORK NAMES CoreFoundation REQUIRED)
-    target_link_libraries(clip_shot_shortcuts PRIVATE
-        "${CLIP_SHOT_CARBON_FRAMEWORK}"
-        "${CLIP_SHOT_CORE_FOUNDATION_FRAMEWORK}"
-    )
-endif()
 
 add_library(clip_shot_storage STATIC ${CLIP_SHOT_STORAGE_SOURCES})
 clip_enable_unity_build(clip_shot_storage)
@@ -948,11 +876,6 @@ if(WIN32)
     list(APPEND CLIP_SHOT_GLOBAL_SHORTCUT_SOURCES
         src/platform/windows/globalshortcutbackend.cpp
         src/platform/windows/focusedfullscreenwindow.cpp)
-elseif(APPLE)
-    enable_language(OBJCXX)
-    list(APPEND CLIP_SHOT_GLOBAL_SHORTCUT_SOURCES
-        src/platform/macos/globalshortcutbackend.cpp
-        src/platform/macos/focusedfullscreenwindow.mm)
 endif()
 list(APPEND CLIP_SHOT_SETTINGS_SOURCES ${CLIP_SHOT_GLOBAL_SHORTCUT_SOURCES})
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/components/screenshothistorypagewidget.cpp"
@@ -965,22 +888,6 @@ if(NOT _clip_shot_history_global_pool_call EQUAL -1)
 endif()
 unset(_clip_shot_history_source)
 unset(_clip_shot_history_global_pool_call)
-add_library(clip_shot_login_item STATIC
-    include/clip_shot/platform/macos/loginitemservice.h
-    src/platform/macos/loginitemservice.cpp)
-target_include_directories(clip_shot_login_item PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(clip_shot_login_item PUBLIC Qt6::Core)
-if(APPLE)
-    target_sources(clip_shot_login_item PRIVATE src/platform/macos/loginitembackend.mm)
-    target_link_libraries(clip_shot_login_item PRIVATE clip_shot_storage
-        "-framework AppKit" "-framework Carbon" "-framework Security" "-framework ServiceManagement")
-endif()
-if(CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-login-item-tests tests/login_item_tests.cpp)
-    target_link_libraries(clip-shot-login-item-tests PRIVATE clip_shot_login_item)
-    add_test(NAME clip-shot-login-item-tests COMMAND clip-shot-login-item-tests)
-    set_tests_properties(clip-shot-login-item-tests PROPERTIES LABELS unit)
-endif()
 add_library(clip_shot_system_notification_controller STATIC
     include/clip_shot/presentation/systemnotificationcontroller.h
     src/presentation/services/systemnotificationcontroller.cpp
@@ -1001,26 +908,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     set_tests_properties(clip-shot-system-notification-controller-tests PROPERTIES
         LABELS "unit" TIMEOUT 30 ENVIRONMENT "${_CLIP_NOTIFICATION_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-endif()
-if(APPLE)
-    add_library(clip_shot_system_notifications STATIC
-        src/platform/macos/systemnotificationservice.h
-        src/platform/macos/systemnotificationservice.mm)
-    target_include_directories(clip_shot_system_notifications PUBLIC
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_link_libraries(clip_shot_system_notifications PUBLIC Qt6::Core
-        PRIVATE "-framework Foundation" "-framework UserNotifications")
-    if(CLIP_SHOT_BUILD_TESTS)
-        add_executable(clip-shot-macos-system-notification-tests
-            tests/macos_system_notification_tests.mm)
-        target_link_libraries(clip-shot-macos-system-notification-tests PRIVATE
-            clip_shot_system_notifications "-framework UserNotifications")
-        add_test(NAME clip-shot-macos-system-notification-tests
-            COMMAND clip-shot-macos-system-notification-tests)
-        set_tests_properties(clip-shot-macos-system-notification-tests PROPERTIES
-            LABELS "unit;macos" TIMEOUT 30)
-    endif()
 endif()
 add_library(clip_shot_administrator STATIC
     src/platform/windows/autostartregistration.cpp
@@ -1062,13 +949,6 @@ add_library(clip_shot_permissions STATIC
 target_include_directories(clip_shot_permissions PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(clip_shot_permissions PUBLIC Qt6::Widgets clip_shot_shortcuts
     PRIVATE clip_shot_diagnostics)
-if(APPLE)
-    target_sources(clip_shot_permissions PRIVATE src/platform/macos/apppermissionbackend.mm)
-    target_link_libraries(clip_shot_permissions PRIVATE
-        "-framework AppKit"
-        "-framework ApplicationServices"
-        "-framework AVFoundation")
-endif()
 find_package(Qt6 REQUIRED COMPONENTS Concurrent)
 add_library(clip_shot_cloud_upload STATIC
     include/clip_shot/presentation/screenshotclouduploadservice.h
@@ -1081,13 +961,10 @@ add_library(clip_shot_settings STATIC ${CLIP_SHOT_SETTINGS_SOURCES}
     include/clip_shot/presentation/components/permissionguidewidget.h
     src/presentation/services/permissionguidecontroller.cpp
     src/presentation/components/permissionguidewidget.cpp)
-if(APPLE)
-    target_sources(clip_shot_settings PRIVATE src/platform/macos/permissionguideplatform.mm)
-endif()
 target_sources(clip_shot_settings PRIVATE
     include/clip_shot/presentation/components/clouduploadsettingswidget.h
     src/presentation/components/clouduploadsettingswidget.cpp)
-target_link_libraries(clip_shot_settings PUBLIC clip_shot_permissions clip_shot_login_item)
+target_link_libraries(clip_shot_settings PUBLIC clip_shot_permissions)
 qt_add_resources(clip_shot_settings "clip_shot_about_assets"
     PREFIX "/clip_shot/about"
     BASE "resources/about"
@@ -1116,33 +993,11 @@ if(WIN32)
         src/platform/windows/globalmousebackend_p.h)
     target_link_libraries(clip_shot_global_mouse PRIVATE dwmapi user32)
 endif()
-if(APPLE)
-    enable_language(OBJCXX)
-    target_sources(clip_shot_global_mouse PRIVATE
-        src/platform/macos/globalmousebackend.mm
-        src/platform/macos/globalmouseinput.cpp
-        src/platform/macos/globalmousebackend_p.h)
-    find_library(CLIP_SHOT_APPKIT_FRAMEWORK NAMES AppKit REQUIRED)
-    find_library(CLIP_SHOT_APPLICATION_SERVICES_FRAMEWORK NAMES ApplicationServices REQUIRED)
-    find_library(CLIP_SHOT_CORE_FOUNDATION_FRAMEWORK NAMES CoreFoundation REQUIRED)
-    find_library(CLIP_SHOT_CORE_GRAPHICS_FRAMEWORK NAMES CoreGraphics REQUIRED)
-    target_link_libraries(clip_shot_global_mouse PRIVATE
-        "${CLIP_SHOT_CARBON_FRAMEWORK}"
-        "${CLIP_SHOT_APPKIT_FRAMEWORK}"
-        "${CLIP_SHOT_APPLICATION_SERVICES_FRAMEWORK}"
-        "${CLIP_SHOT_CORE_FOUNDATION_FRAMEWORK}"
-        "${CLIP_SHOT_CORE_GRAPHICS_FRAMEWORK}")
-    target_link_libraries(clip_shot_settings PRIVATE
-        "${CLIP_SHOT_CARBON_FRAMEWORK}"
-        "${CLIP_SHOT_APPKIT_FRAMEWORK}"
-        "${CLIP_SHOT_CORE_GRAPHICS_FRAMEWORK}")
-endif()
 target_link_libraries(clip_shot_settings PRIVATE clip_shot_global_mouse)
 clip_enable_unity_build(clip_shot_settings)
 set_source_files_properties(
     src/presentation/styles/thememanager.cpp
     src/presentation/components/shortcutkeyrow.cpp
-    src/platform/macos/globalshortcutbackend.cpp
     PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 target_include_directories(clip_shot_settings PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(clip_shot_settings PUBLIC
@@ -1312,10 +1167,6 @@ if(WIN32)
         src/platform/windows/nativeprintdocument.cpp)
     target_link_libraries(clip_shot_print PRIVATE shell32 uuid ole32 runtimeobject windowsapp
         d2d1 d3d11 dxgi windowscodecs)
-elseif(APPLE)
-    target_sources(clip_shot_print PRIVATE src/platform/macos/nativeprint.mm)
-    target_compile_options(clip_shot_print PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
-    target_link_libraries(clip_shot_print PRIVATE "-framework AppKit")
 else()
     target_sources(clip_shot_print PRIVATE src/presentation/services/nativeprintunsupported.cpp)
 endif()
@@ -1495,13 +1346,6 @@ set(PROJECT_CXX_SOURCES
     src/presentation/recording/screenrecordinggeometry.cpp
     src/presentation/recording/screenrecordingtoolbarwindow.cpp
 )
-if(APPLE)
-    list(APPEND PROJECT_CXX_SOURCES
-        src/platform/macos/applicationactivation.mm
-        src/platform/macos/systemtraymenu.mm
-        src/platform/macos/windowcaptureexclusion.mm)
-    list(APPEND PROJECT_HEADERS include/clip_shot/platform/macos/applicationactivation.h)
-endif()
 
 include(ClipSimd)
 clip_configure_avx2_sources(src/presentation/services/screenshotclipboarddibdecoder_avx2.cpp)
@@ -1519,7 +1363,6 @@ qt_add_executable(clip_shot
     MANUAL_FINALIZATION
     ${PROJECT_SOURCES}
 )
-clip_shot_link_macos_window_platform(clip_shot)
 if(CLIP_SHOT_BUILD_TESTS)
     clip_shot_import_offscreen_platform(clip_shot)
 endif()
@@ -1539,9 +1382,6 @@ endif()
 target_compile_definitions(clip_shot PRIVATE
     CLIP_SHOT_API_BASE_URL=\"${CLIP_SHOT_API_BASE_URL}\"
 )
-if(APPLE AND CLIP_SHOT_OCR_STATIC_ONNXRUNTIME)
-    target_compile_definitions(clip_shot PRIVATE CLIP_SHOT_OCR_STATIC_ONNXRUNTIME=1)
-endif()
 if(WIN32)
     target_compile_definitions(clip_shot PRIVATE
         CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE=\"${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}\"
@@ -1573,16 +1413,6 @@ if(MSVC)
 endif()
 
 target_link_libraries(clip_shot PRIVATE clip_shot_system_notification_controller)
-if(APPLE)
-    target_link_libraries(clip_shot PRIVATE ${CLIP_SELECTED_FILES_LIBRARIES})
-    target_link_libraries(clip_shot PRIVATE clip_shot_system_notifications)
-    target_sources(clip_shot PRIVATE src/platform/macos/camerashuttersound.mm)
-    target_link_libraries(clip_shot PRIVATE "-framework AVFoundation" "-framework Foundation" objc)
-    qt_add_resources(clip_shot "clip_shot_shutter_audio"
-        PREFIX "/clip-shot"
-        BASE "resources"
-        FILES "${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
-endif()
 
 if(EXISTS "${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
     add_custom_command(TARGET clip_shot POST_BUILD
@@ -1712,12 +1542,8 @@ if(CLIP_SHOT_BUILD_TESTS)
         COMMAND clip-shot-recognition-image-tests -platform offscreen)
     set_tests_properties(clip-shot-recognition-image-tests PROPERTIES LABELS "unit" TIMEOUT 60)
 
-    if(WIN32 OR APPLE)
-        if(APPLE)
-            set(_clip_shot_shortcut_platform_label macos)
-        else()
-            set(_clip_shot_shortcut_platform_label windows)
-        endif()
+    if(WIN32)
+        set(_clip_shot_shortcut_platform_label windows)
         add_executable(clip-shot-global-shortcut-manager-tests
             tests/global_shortcut_manager_tests.cpp
             ${CLIP_SHOT_GLOBAL_SHORTCUT_SOURCES})
@@ -1732,12 +1558,6 @@ if(CLIP_SHOT_BUILD_TESTS)
             COMMAND clip-shot-global-shortcut-manager-tests --native-registration-smoke)
         set_tests_properties(clip-shot-global-shortcut-native-smoke-tests PROPERTIES
             LABELS "interactive;${_clip_shot_shortcut_platform_label}" TIMEOUT 60)
-        if(APPLE)
-            target_link_libraries(clip-shot-global-shortcut-manager-tests PRIVATE
-                "${CLIP_SHOT_CARBON_FRAMEWORK}"
-                "${CLIP_SHOT_APPKIT_FRAMEWORK}"
-                "${CLIP_SHOT_CORE_GRAPHICS_FRAMEWORK}")
-        endif()
         unset(_clip_shot_shortcut_platform_label)
     endif()
 
@@ -1745,12 +1565,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         ${CLIP_SHOT_GLOBAL_SHORTCUT_SOURCES}
         src/presentation/capture/screenshotglobalmousedrag.cpp)
     target_link_libraries(clip-shot-global-mouse-tests PRIVATE clip_shot_global_mouse Qt6::Widgets)
-    if(APPLE)
-        target_link_libraries(clip-shot-global-mouse-tests PRIVATE
-            "${CLIP_SHOT_CARBON_FRAMEWORK}"
-            "${CLIP_SHOT_APPKIT_FRAMEWORK}"
-            "${CLIP_SHOT_CORE_GRAPHICS_FRAMEWORK}")
-    endif()
     add_test(NAME clip-shot-global-mouse-tests COMMAND clip-shot-global-mouse-tests)
     add_test(NAME clip-shot-global-mouse-storage-tests
         COMMAND clip-shot-application-storage-tests --global-mouse-only)
@@ -1767,16 +1581,6 @@ if(CLIP_SHOT_BUILD_TESTS)
             COMMAND clip-shot-global-mouse-tests --native-hook-smoke)
         set_tests_properties(clip-shot-global-mouse-native-smoke-tests PROPERTIES
             LABELS "interactive;windows" TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=windows")
-    elseif(APPLE)
-        add_executable(clip-shot-macos-global-mouse-tests tests/macos_global_mouse_tests.mm)
-        target_link_libraries(clip-shot-macos-global-mouse-tests PRIVATE clip_shot_global_mouse Qt6::Widgets)
-        add_test(NAME clip-shot-macos-global-mouse-tests COMMAND clip-shot-macos-global-mouse-tests)
-        set_tests_properties(clip-shot-macos-global-mouse-tests PROPERTIES
-            LABELS "unit;macos" TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-        add_test(NAME clip-shot-global-mouse-native-smoke-tests
-            COMMAND clip-shot-macos-global-mouse-tests --native-hook-smoke)
-        set_tests_properties(clip-shot-global-mouse-native-smoke-tests PROPERTIES
-            LABELS "interactive;macos" TIMEOUT 30 SKIP_RETURN_CODE 77 ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
     endif()
 
     add_executable(clip-shot-diagnostics-tests tests/diagnostics_tests.cpp)
@@ -1848,12 +1652,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         COMMAND clip-shot-application-storage-tests --update-settings-only)
     set_tests_properties(clip-shot-update-settings-tests PROPERTIES LABELS "unit" TIMEOUT 30
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    if(APPLE)
-        add_test(NAME clip-shot-storage-startup-directory-tests
-            COMMAND clip-shot-application-storage-tests --directory-resolution-only)
-        set_tests_properties(clip-shot-storage-startup-directory-tests PROPERTIES
-            LABELS "unit;macos" TIMEOUT 30)
-    endif()
     add_test(NAME clip-shot-selection-aspect-ratio-settings-tests
         COMMAND clip-shot-application-storage-tests --selection-aspect-ratio-only)
     set_tests_properties(clip-shot-selection-aspect-ratio-settings-tests PROPERTIES LABELS "unit"
@@ -2201,9 +1999,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     )
     target_link_libraries(clip-shot-physical-cursor-tests PRIVATE Qt6::Widgets)
     clip_shot_import_offscreen_platform(clip-shot-physical-cursor-tests)
-    if(APPLE)
-        target_link_libraries(clip-shot-physical-cursor-tests PRIVATE "-framework CoreGraphics")
-    endif()
     if(WIN32)
         target_compile_definitions(clip-shot-physical-cursor-tests PRIVATE NOMINMAX)
         target_link_libraries(clip-shot-physical-cursor-tests PRIVATE user32)
@@ -2310,11 +2105,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/services/screenshotclipboardservice.cpp
         src/platform/windows/windowchrome.cpp
     )
-    if(APPLE)
-        target_sources(clip-shot-about-page-tests PRIVATE
-            src/platform/macos/applicationactivation.mm)
-        target_link_libraries(clip-shot-about-page-tests PRIVATE "-framework AppKit")
-    endif()
     target_link_libraries(clip-shot-about-page-tests PRIVATE
         clip_shot_settings
         clip_shot_image_codec
@@ -2344,9 +2134,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     )
     target_link_libraries(clip-shot-main-window-font-tests PRIVATE
         clip_shot_settings clip_shot_image_codec clip_shot_updates)
-    if(APPLE)
-        target_link_libraries(clip-shot-main-window-font-tests PRIVATE "-framework AppKit")
-    endif()
     clip_shot_import_offscreen_platform(clip-shot-main-window-font-tests)
     add_test(NAME clip-shot-main-window-font-tests COMMAND clip-shot-main-window-font-tests)
     set_tests_properties(clip-shot-main-window-font-tests PROPERTIES
@@ -2362,9 +2149,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     )
     target_link_libraries(clip-shot-window-geometry-memory-tests PRIVATE
         clip_shot_settings clip_shot_image_codec clip_shot_updates)
-    if(APPLE)
-        target_link_libraries(clip-shot-window-geometry-memory-tests PRIVATE "-framework AppKit")
-    endif()
     clip_shot_import_offscreen_platform(clip-shot-window-geometry-memory-tests)
     add_test(NAME clip-shot-window-geometry-memory-tests
              COMMAND clip-shot-window-geometry-memory-tests)
@@ -2701,33 +2485,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         LABELS "unit" ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
     clip_shot_import_offscreen_platform(clip-shot-app-permissions-tests)
 
-    if(APPLE)
-        add_executable(clip-shot-macos-permission-guide-tests MACOSX_BUNDLE
-            tests/macos_permission_guide_tests.mm
-            src/presentation/services/screenshotclipboardservice.cpp)
-        target_link_libraries(clip-shot-macos-permission-guide-tests PRIVATE
-            clip_shot_settings "-framework AppKit")
-        clip_shot_add_translations(clip-shot-macos-permission-guide-tests)
-        set_target_properties(clip-shot-macos-permission-guide-tests PROPERTIES
-            MACOSX_BUNDLE_GUI_IDENTIFIER "com.clipshot.tests.permission-guide"
-            MACOSX_BUNDLE_BUNDLE_NAME "Clip Permission Guide")
-        add_test(NAME clip-shot-macos-permission-guide-tests
-            COMMAND clip-shot-macos-permission-guide-tests)
-        set_tests_properties(clip-shot-macos-permission-guide-tests PROPERTIES
-            LABELS "interactive;macos" TIMEOUT 30 RUN_SERIAL TRUE)
-        add_executable(clip-shot-macos-smart-selection-smoke
-            tests/macos_smart_selection_smoke_test.mm
-            src/platform/macos/windowcaptureexclusion.mm)
-        target_include_directories(clip-shot-macos-smart-selection-smoke PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/include"
-            "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-ui-selector-c/include")
-        target_link_libraries(clip-shot-macos-smart-selection-smoke PRIVATE
-            clip_ui_selector_c Qt6::Widgets "-framework AppKit")
-        add_test(NAME clip-shot-macos-smart-selection-smoke COMMAND clip-shot-macos-smart-selection-smoke)
-        set_tests_properties(clip-shot-macos-smart-selection-smoke PROPERTIES
-            LABELS "interactive;macos" SKIP_RETURN_CODE 77 TIMEOUT 30 RUN_SERIAL TRUE)
-    endif()
-
     add_executable(clip-shot-selector-policy-tests
         tests/screenshot_selector_policy_tests.cpp
         src/presentation/selector/screenshotselectorpolicy.h
@@ -2771,10 +2528,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip_shot_settings
         Qt6::Widgets
     )
-    if(APPLE)
-        target_link_libraries(clip-shot-window-element-api-tests PRIVATE
-            "-framework CoreGraphics" "-framework AppKit")
-    endif()
     add_test(NAME clip-shot-window-element-api-tests
              COMMAND clip-shot-window-element-api-tests)
     add_test(NAME clip-shot-selector-phased-tests
@@ -2876,19 +2629,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         )
     endif()
 
-    if(APPLE)
-        target_link_libraries(clip-shot-system-tray-controller-tests PRIVATE
-            clip_shot_system_notifications)
-        target_sources(clip-shot-system-tray-controller-tests PRIVATE
-            src/platform/macos/systemtraymenu.mm
-            tests/system_tray_menu_native_tests.mm)
-        target_link_libraries(clip-shot-system-tray-controller-tests PRIVATE "-framework AppKit")
-        add_test(NAME clip-shot-system-tray-menu-native-tests
-            COMMAND clip-shot-system-tray-controller-tests --native-menu -platform cocoa)
-        set_tests_properties(clip-shot-system-tray-menu-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 30)
-    endif()
-
     add_executable(clip-shot-window-group-switcher-tests
         tests/window_group_switcher_tests.cpp
         ${CLIP_SHOT_GLOBAL_SHORTCUT_SOURCES}
@@ -2906,15 +2646,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     target_include_directories(clip-shot-window-group-switcher-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CLIP_SHOT_DRAW_ENGINE_QT_DIR}/include")
     target_link_libraries(clip-shot-window-group-switcher-tests PRIVATE clip_shot_global_mouse ant_design_qt Qt6::Widgets)
-    if(APPLE)
-        set_source_files_properties(tests/window_group_switcher_tests.cpp PROPERTIES LANGUAGE OBJCXX)
-        target_link_libraries(clip-shot-window-group-switcher-tests PRIVATE
-            "${CLIP_SHOT_CARBON_FRAMEWORK}" "${CLIP_SHOT_APPKIT_FRAMEWORK}" "${CLIP_SHOT_CORE_GRAPHICS_FRAMEWORK}")
-        add_test(NAME clip-shot-window-group-switcher-native-tests
-            COMMAND clip-shot-window-group-switcher-tests -platform cocoa)
-        set_tests_properties(clip-shot-window-group-switcher-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
     if(WIN32)
         add_test(NAME clip-shot-window-group-switcher-native-tests
             COMMAND clip-shot-window-group-switcher-tests --native -platform windows)
@@ -2956,20 +2687,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
     )
-
-    if(APPLE)
-        clip_find_qt(COMPONENTS Test)
-        add_executable(clip-shot-action-popup-native-tests tests/action_popup_menu_native_tests.mm)
-        target_include_directories(clip-shot-action-popup-native-tests PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        target_link_libraries(clip-shot-action-popup-native-tests PRIVATE
-            ant_design_qt clip_shot_shortcuts Qt6::Test "-framework AppKit")
-        add_test(NAME clip-shot-action-popup-native-tests COMMAND clip-shot-action-popup-native-tests)
-        set_tests_properties(clip-shot-action-popup-native-tests PROPERTIES
-            LABELS "interactive"
-            ENVIRONMENT "QT_QPA_PLATFORM=cocoa"
-            TIMEOUT 20)
-    endif()
 
     add_executable(clip-shot-context-menu-rendering-tests
         tests/context_menu_rendering_tests.cpp
@@ -3165,25 +2882,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     )
     add_test(NAME clip-shot-direct-capture-workflow-tests
         COMMAND clip-shot-direct-capture-workflow-tests)
-
-    if(APPLE)
-        add_executable(clip-shot-camera-shutter-sound-tests
-            tests/camera_shutter_sound_tests.mm
-            src/presentation/capture/camerashuttersound.cpp
-            src/platform/macos/camerashuttersound.mm)
-        target_include_directories(clip-shot-camera-shutter-sound-tests PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/capture")
-        target_link_libraries(clip-shot-camera-shutter-sound-tests PRIVATE
-            Qt6::Core "-framework AVFoundation" "-framework Foundation" objc)
-        qt_add_resources(clip-shot-camera-shutter-sound-tests "clip_shot_shutter_audio_tests"
-            PREFIX "/clip-shot"
-            BASE "resources"
-            FILES "${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
-        add_test(NAME clip-shot-camera-shutter-sound-tests
-            COMMAND clip-shot-camera-shutter-sound-tests)
-        set_tests_properties(clip-shot-camera-shutter-sound-tests PROPERTIES
-            LABELS "unit" TIMEOUT 30)
-    endif()
 
     add_executable(clip-shot-direct-capture-frame-tests tests/direct_capture_frame_tests.cpp)
     target_include_directories(clip-shot-direct-capture-frame-tests PRIVATE
@@ -3563,7 +3261,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/styles/thememanager.cpp
         src/presentation/styles/themecolorscheme.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-screenshot-color-picker-tests)
     target_include_directories(clip-shot-screenshot-color-picker-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
@@ -3571,15 +3268,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip_shot_storage clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets
     )
     clip_shot_import_offscreen_platform(clip-shot-screenshot-color-picker-tests)
-    if(APPLE)
-        set_source_files_properties(tests/screenshot_color_picker_tests.cpp
-            PROPERTIES LANGUAGE OBJCXX)
-        target_link_libraries(clip-shot-screenshot-color-picker-tests PRIVATE "-framework AppKit")
-        add_test(NAME clip-shot-macos-color-picker-animation-native-tests
-            COMMAND clip-shot-screenshot-color-picker-tests --magnifier-animation-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-color-picker-animation-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 30)
-    endif()
     add_test(NAME clip-shot-screenshot-color-picker-tests
         COMMAND clip-shot-screenshot-color-picker-tests)
     set_tests_properties(clip-shot-screenshot-color-picker-tests PROPERTIES
@@ -3862,7 +3550,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(NAME clip-shot-selection-effect-preview-tests
         COMMAND clip-shot-screenshot-canvas-renderer-tests --selection-effect-preview-only -platform offscreen)
     set_tests_properties(clip-shot-selection-effect-preview-tests PROPERTIES LABELS "unit")
-    clip_shot_link_macos_window_platform(clip-shot-screenshot-canvas-renderer-tests)
     target_include_directories(clip-shot-screenshot-canvas-renderer-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
@@ -3922,20 +3609,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(NAME clip-shot-overlay-boundary-input-tests
         COMMAND clip-shot-screenshot-canvas-renderer-tests --overlay-boundary-input -platform offscreen)
     set_tests_properties(clip-shot-overlay-boundary-input-tests PROPERTIES LABELS "unit")
-    if(APPLE)
-        target_sources(clip-shot-screenshot-canvas-renderer-tests PRIVATE
-            ../cmake/test-support/macos_native_input.mm)
-        target_include_directories(clip-shot-screenshot-canvas-renderer-tests PRIVATE
-            ../cmake/test-support)
-        add_test(NAME clip-shot-macos-overlay-window-shadow-native-tests
-            COMMAND clip-shot-screenshot-canvas-renderer-tests --window-shadow-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-overlay-window-shadow-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 30)
-        add_test(NAME clip-shot-macos-overlay-boundary-input-native-tests
-            COMMAND clip-shot-screenshot-canvas-renderer-tests --overlay-boundary-input -platform cocoa)
-        set_tests_properties(clip-shot-macos-overlay-boundary-input-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30)
-    endif()
     set_tests_properties(clip-shot-scrolling-overlay-tests PROPERTIES LABELS "unit")
     add_test(NAME clip-shot-overlay-close-release-tests
         COMMAND clip-shot-screenshot-canvas-renderer-tests --close-release-only -platform offscreen)
@@ -4174,7 +3847,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/tools/screenshottoolpalettestylemodel.cpp
         src/presentation/tools/screenshottoolpalettestylepresets.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-pinned-window-tests)
     target_include_directories(clip-shot-pinned-window-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
@@ -4557,11 +4229,7 @@ if(CLIP_SHOT_BUILD_TESTS)
     )
     target_include_directories(clip-shot-file-pin-batch-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_link_libraries(clip-shot-file-pin-batch-tests PRIVATE clip_shot_image_codec Qt6::Widgets
-        ${CLIP_SELECTED_FILES_LIBRARIES})
-    if(APPLE)
-        target_link_libraries(clip-shot-file-pin-batch-tests PRIVATE clip_shot_rust_ffi_selector)
-    endif()
+    target_link_libraries(clip-shot-file-pin-batch-tests PRIVATE clip_shot_image_codec Qt6::Widgets)
     if(WIN32)
         target_link_libraries(clip-shot-file-pin-batch-tests PRIVATE ole32 oleaut32 shell32 uuid)
         add_executable(clip-shot-selected-files-native-smoke-tests
@@ -4574,27 +4242,6 @@ if(CLIP_SHOT_BUILD_TESTS)
             COMMAND clip-shot-selected-files-native-smoke-tests)
         set_tests_properties(clip-shot-selected-files-native-smoke-tests PROPERTIES
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
-    if(APPLE)
-        add_executable(clip-shot-macos-selected-files-tests
-            tests/macos_selected_files_tests.mm ${CLIP_SELECTED_FILES_SOURCES})
-        target_include_directories(clip-shot-macos-selected-files-tests PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        target_link_libraries(clip-shot-macos-selected-files-tests PRIVATE
-            Qt6::Core ${CLIP_SELECTED_FILES_LIBRARIES})
-        add_test(NAME clip-shot-macos-selected-files-tests COMMAND clip-shot-macos-selected-files-tests)
-        add_executable(clip-shot-macos-selected-files-native-smoke MACOSX_BUNDLE
-            tests/macos_selected_files_native_smoke.mm ${CLIP_SELECTED_FILES_SOURCES})
-        target_include_directories(clip-shot-macos-selected-files-native-smoke PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        target_link_libraries(clip-shot-macos-selected-files-native-smoke PRIVATE
-            Qt6::Gui ${CLIP_SELECTED_FILES_LIBRARIES})
-        set_target_properties(clip-shot-macos-selected-files-native-smoke PROPERTIES
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/tests/macos_selected_files_smoke.plist.in")
-        add_test(NAME clip-shot-macos-selected-files-native-smoke
-            COMMAND clip-shot-macos-selected-files-native-smoke)
-        set_tests_properties(clip-shot-macos-selected-files-native-smoke PROPERTIES
-            LABELS "interactive" RUN_SERIAL TRUE TIMEOUT 120 SKIP_RETURN_CODE 77)
     endif()
     clip_shot_import_offscreen_platform(clip-shot-file-pin-batch-tests)
     add_test(NAME clip-shot-file-pin-batch-tests COMMAND clip-shot-file-pin-batch-tests)
@@ -4894,12 +4541,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     target_link_libraries(clip-shot-export-dialog-workflow-tests PRIVATE
         clip_shot_image_codec clip_shot_settings clip_draw_engine_qt_canvas Qt6::Widgets
     )
-    if(APPLE)
-        target_sources(clip-shot-export-dialog-workflow-tests PRIVATE
-            ../cmake/test-support/macos_native_input.mm)
-        target_include_directories(clip-shot-export-dialog-workflow-tests PRIVATE ../cmake/test-support)
-        target_link_libraries(clip-shot-export-dialog-workflow-tests PRIVATE "-framework AppKit")
-    endif()
     clip_shot_import_offscreen_platform(clip-shot-export-dialog-workflow-tests)
     add_test(NAME clip-shot-pdf-dialog-tests COMMAND clip-shot-export-dialog-workflow-tests --pdf)
     set_tests_properties(clip-shot-pdf-dialog-tests PROPERTIES
@@ -5346,7 +4987,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/styles/thememanager.cpp
         src/presentation/styles/themecolorscheme.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-screenshot-toolbar-remembered-tool-tests)
     target_include_directories(clip-shot-screenshot-toolbar-remembered-tool-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
@@ -5420,7 +5060,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     target_link_libraries(clip-shot-global-canvas-tests PRIVATE
         clip_shot_window_shortcuts clip_shot_storage clip_draw_engine_qt_canvas
         adqt_icon_core ant_design_icons_qt ant_design_qt Qt6::Widgets Qt6::GuiPrivate)
-    clip_shot_link_macos_window_platform(clip-shot-global-canvas-tests)
     if(WIN32)
         target_sources(clip-shot-global-canvas-tests PRIVATE src/platform/windows/pinnedwindownative.cpp)
         target_link_libraries(clip-shot-global-canvas-tests PRIVATE Qt6::GuiPrivate comctl32)
@@ -5436,20 +5075,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         set_tests_properties(clip-shot-global-canvas-color-sampling-native-tests PROPERTIES
             LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 30
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    endif()
-    if(APPLE)
-        add_test(NAME clip-shot-global-canvas-platform-tests
-            COMMAND clip-shot-global-canvas-tests --platform-only -platform offscreen)
-        set_tests_properties(clip-shot-global-canvas-platform-tests PROPERTIES
-            LABELS "unit;macos" TIMEOUT 30)
-        add_test(NAME clip-shot-global-canvas-native-tests
-            COMMAND clip-shot-global-canvas-tests --native-only -platform cocoa)
-        set_tests_properties(clip-shot-global-canvas-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 90)
-        add_test(NAME clip-shot-global-canvas-window-shadow-native-tests
-            COMMAND clip-shot-global-canvas-tests --window-shadow-only -platform cocoa)
-        set_tests_properties(clip-shot-global-canvas-window-shadow-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 30)
     endif()
     clip_shot_import_offscreen_platform(clip-shot-global-canvas-tests)
     add_test(NAME clip-shot-global-canvas-window-shadow-tests
@@ -5632,7 +5257,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/recording/recordingaudiogainpopover.cpp
         src/presentation/recording/recordingaudiogainpopover.h
     )
-    clip_shot_link_macos_window_platform(clip-shot-screen-recording-shortcut-tests)
     target_compile_definitions(clip-shot-screen-recording-shortcut-tests PRIVATE
         CLIP_SHOT_TEST_HOOKS=1
     )
@@ -5668,13 +5292,8 @@ if(CLIP_SHOT_BUILD_TESTS)
                 ENVIRONMENT "QT_QPA_PLATFORM=windows")
         endforeach()
     endif()
-    if(APPLE)
-        set(_clip_recording_shortcut_platform cocoa)
-        set(_clip_recording_shortcut_os macos)
-    else()
-        set(_clip_recording_shortcut_platform windows)
-        set(_clip_recording_shortcut_os windows)
-    endif()
+    set(_clip_recording_shortcut_platform windows)
+    set(_clip_recording_shortcut_os windows)
     add_test(NAME clip-shot-recording-history-shortcut-tests
         COMMAND clip-shot-screen-recording-shortcut-tests --history-shortcuts-only)
     set_tests_properties(clip-shot-screen-recording-shortcut-tests
@@ -5714,7 +5333,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/recording/recordingaudiogainpopover.h
         src/presentation/toolbar/screenshottoolbarwindow.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-floating-toolbar-drag-tests)
     target_compile_definitions(clip-shot-floating-toolbar-drag-tests PRIVATE
         CLIP_SHOT_TEST_HOOKS=1
     )
@@ -5732,21 +5350,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         target_link_libraries(clip-shot-floating-toolbar-drag-tests PRIVATE
             comctl32
         )
-    endif()
-    if(APPLE)
-        target_sources(clip-shot-floating-toolbar-drag-tests PRIVATE
-            ../cmake/test-support/macos_native_input.mm)
-        target_link_libraries(clip-shot-floating-toolbar-drag-tests PRIVATE "-framework AppKit")
-        target_include_directories(clip-shot-floating-toolbar-drag-tests PRIVATE ../cmake/test-support)
-        add_test(NAME clip-shot-macos-toolbar-shadow-input-tests
-            COMMAND clip-shot-floating-toolbar-drag-tests --macos-shadow-input-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-toolbar-shadow-input-tests PROPERTIES
-            LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60)
-        add_test(NAME clip-shot-macos-toolbar-cross-display-drag-tests
-            COMMAND clip-shot-floating-toolbar-drag-tests --macos-cross-display-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-toolbar-cross-display-drag-tests PROPERTIES
-            LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE
-            TIMEOUT 60 SKIP_RETURN_CODE 77)
     endif()
     # Exercise the real UI host with the same overlay and toolbar implementations.
     get_target_property(_color_picker_overlay_sources
@@ -5791,14 +5394,8 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip-shot-scrolling-settings-test-runtime clip_shot_diagnostics clip_shot_storage
         clip_shot_window_shortcuts clip_draw_engine_qt_canvas clip_canvas_image clip_stitch_images_c
         ant_design_qt adqt_icon_core ant_design_icons_qt Qt6::Widgets)
-    clip_shot_link_macos_window_platform(clip-shot-scrolling-capture-settings-tests)
     if(WIN32)
         target_link_libraries(clip-shot-scrolling-capture-settings-tests PRIVATE comctl32)
-    elseif(APPLE)
-        target_sources(clip-shot-scrolling-capture-settings-tests PRIVATE
-            src/platform/macos/windowcaptureexclusion.mm)
-        target_link_libraries(clip-shot-scrolling-capture-settings-tests PRIVATE
-            "-framework AppKit" "-framework CoreGraphics")
     endif()
     clip_shot_import_offscreen_platform(clip-shot-scrolling-capture-settings-tests)
     add_test(NAME clip-shot-scrolling-capture-settings-tests
@@ -5827,7 +5424,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(NAME clip-shot-selection-toolbar-visibility-tests
         COMMAND clip-shot-color-picker-lifecycle-tests --selection-toolbar-visibility-only -platform offscreen)
     set_tests_properties(clip-shot-selection-toolbar-visibility-tests PROPERTIES LABELS "unit" TIMEOUT 60)
-    clip_shot_link_macos_window_platform(clip-shot-color-picker-lifecycle-tests)
     target_compile_definitions(clip-shot-color-picker-lifecycle-tests PRIVATE
         CLIP_SHOT_BENCH_INTERNALS=1)
     target_include_directories(clip-shot-color-picker-lifecycle-tests PRIVATE include)
@@ -5836,19 +5432,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip_draw_engine_qt_canvas ant_design_qt adqt_icon_core ant_design_icons_qt Qt6::Widgets)
     if(WIN32)
         target_link_libraries(clip-shot-color-picker-lifecycle-tests PRIVATE comctl32)
-    elseif(APPLE)
-        target_sources(clip-shot-color-picker-lifecycle-tests PRIVATE
-            src/platform/macos/windowcaptureexclusion.mm)
-        target_link_libraries(clip-shot-color-picker-lifecycle-tests PRIVATE
-            "-framework AppKit" "-framework CoreGraphics")
-    endif()
-    if(APPLE)
-        set_source_files_properties(tests/screenshot_color_picker_lifecycle_tests.cpp
-            PROPERTIES LANGUAGE OBJCXX)
-        add_test(NAME clip-shot-macos-canvas-sampler-stacking-native-tests
-            COMMAND clip-shot-color-picker-lifecycle-tests --canvas-sampler-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-canvas-sampler-stacking-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
     endif()
     clip_shot_import_offscreen_platform(clip-shot-color-picker-lifecycle-tests)
     add_test(NAME clip-shot-color-picker-lifecycle-tests
@@ -5892,30 +5475,12 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(NAME clip-shot-interrupted-toolbar-drag-tests
         COMMAND clip-shot-floating-toolbar-drag-tests --interrupted-drag-only -platform offscreen)
     set_tests_properties(clip-shot-interrupted-toolbar-drag-tests PROPERTIES LABELS "unit")
-    if(NOT APPLE)
-        add_test(NAME clip-shot-floating-toolbar-dpi-frame-reconcile-tests
-            COMMAND clip-shot-floating-toolbar-drag-tests --dpi-frame-reconcile-only)
-        set_tests_properties(clip-shot-floating-toolbar-dpi-frame-reconcile-tests PROPERTIES
-            ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
-            ENVIRONMENT_MODIFICATION
-                "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    endif()
-    if(APPLE)
-        foreach(_toolbar_dpr IN ITEMS 1 2)
-            add_test(NAME clip-shot-macos-toolbar-logical-${_toolbar_dpr}x-tests
-                COMMAND clip-shot-floating-toolbar-drag-tests --macos-logical-only)
-            set_tests_properties(clip-shot-macos-toolbar-logical-${_toolbar_dpr}x-tests PROPERTIES
-                LABELS "unit;macos" CLIP_TEST_CROSS_PLATFORM TRUE TIMEOUT 60
-                ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT};QT_SCALE_FACTOR=${_toolbar_dpr}")
-        endforeach()
-        add_test(NAME clip-shot-macos-toolbar-native-tests
-            COMMAND clip-shot-floating-toolbar-drag-tests --macos-logical-only -platform cocoa)
-        add_test(NAME clip-shot-macos-toolbar-focus-tests
-            COMMAND clip-shot-floating-toolbar-drag-tests --keyboard-focus-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-toolbar-native-tests clip-shot-macos-toolbar-focus-tests
-            PROPERTIES LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE
-            RUN_SERIAL TRUE TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
-    endif()
+    add_test(NAME clip-shot-floating-toolbar-dpi-frame-reconcile-tests
+        COMMAND clip-shot-floating-toolbar-drag-tests --dpi-frame-reconcile-only)
+    set_tests_properties(clip-shot-floating-toolbar-dpi-frame-reconcile-tests PROPERTIES
+        ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     if(WIN32)
         add_test(NAME clip-shot-floating-toolbar-capture-screen-switch-tests
             COMMAND clip-shot-floating-toolbar-drag-tests --capture-screen-switch-only)
@@ -6318,23 +5883,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         LABELS "unit;windows"
     )
 
-    if(APPLE)
-        add_executable(clip-shot-macos-window-capture-exclusion-tests
-            tests/macos_window_capture_exclusion_tests.mm
-            src/platform/macos/windowcaptureexclusion.mm)
-        target_include_directories(clip-shot-macos-window-capture-exclusion-tests PRIVATE
-            include src "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-capture-c/include")
-        target_link_libraries(clip-shot-macos-window-capture-exclusion-tests PRIVATE
-            Qt6::Widgets clip_capture_c "${CLIP_SHOT_APPKIT_FRAMEWORK}")
-        add_test(NAME clip-shot-macos-window-capture-exclusion-tests
-            COMMAND clip-shot-macos-window-capture-exclusion-tests -platform cocoa)
-        add_test(NAME clip-shot-macos-window-capture-exclusion-pixels-tests
-            COMMAND clip-shot-macos-window-capture-exclusion-tests -platform cocoa --pixels)
-        set_tests_properties(clip-shot-macos-window-capture-exclusion-tests
-            clip-shot-macos-window-capture-exclusion-pixels-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77)
-    endif()
-
     add_executable(clip-shot-window-capture-exclusion-tests
         tests/window_capture_exclusion_tests.cpp
         src/presentation/capture/windowcaptureexclusion.h
@@ -6428,7 +5976,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/services/screenshotpdfexport.cpp
         src/platform/windows/windowchrome.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-screen-recording-controller-tests)
     target_include_directories(clip-shot-screen-recording-controller-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-capture-c/include"
@@ -6436,13 +5983,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     target_link_libraries(clip-shot-screen-recording-controller-tests PRIVATE
         adqt_icon_core ant_design_icons_qt ant_design_qt clip_draw_engine_qt_canvas
         clip_shot_storage clip_shot_image_codec clip_shot_window_shortcuts clip_shot_settings Qt6::Widgets clip_recording_effects_c clip_capture_c)
-    if(APPLE)
-        target_sources(clip-shot-screen-recording-controller-tests PRIVATE
-            src/platform/macos/windowcaptureexclusion.mm
-            tests/macos_capture_exclusion_probe.mm
-            tests/macos_recording_modal_probe.mm)
-        target_link_libraries(clip-shot-screen-recording-controller-tests PRIVATE "${CLIP_SHOT_APPKIT_FRAMEWORK}")
-    endif()
     target_compile_definitions(clip-shot-screen-recording-controller-tests PRIVATE CLIP_SHOT_TEST_HOOKS=1)
     target_compile_definitions(clip-shot-screen-recording-controller-tests PRIVATE
         CLIP_SHOT_TEST_TRANSLATIONS_DIR="${CMAKE_CURRENT_BINARY_DIR}")
@@ -6536,12 +6076,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(NAME clip-shot-recording-modal-stacking-tests
         COMMAND clip-shot-screen-recording-controller-tests --modal-stacking-only -platform offscreen)
     set_tests_properties(clip-shot-recording-modal-stacking-tests PROPERTIES LABELS "unit" TIMEOUT 30)
-    if(APPLE)
-        add_test(NAME clip-shot-macos-recording-modal-stacking-tests
-            COMMAND clip-shot-screen-recording-controller-tests --modal-stacking-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-recording-modal-stacking-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
     add_test(NAME clip-shot-screen-recording-controller-tests
         COMMAND clip-shot-screen-recording-controller-tests)
     add_test(NAME clip-shot-recording-finalization-close-tests
@@ -6576,26 +6110,10 @@ if(CLIP_SHOT_BUILD_TESTS)
         ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
-    if(APPLE)
-        foreach(_preview_scale IN ITEMS 1 1.25 1.5 1.75 2)
-            add_test(NAME clip-shot-recording-effects-preview-dpi-${_preview_scale}-tests
-                COMMAND clip-shot-screen-recording-controller-tests --effects-preview-dpi-only)
-            set_tests_properties(clip-shot-recording-effects-preview-dpi-${_preview_scale}-tests
-                PROPERTIES
-                ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT};QT_SCALE_FACTOR=${_preview_scale}"
-                LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60)
-        endforeach()
-    endif()
     add_test(NAME clip-shot-recording-capture-exclusion-tests
         COMMAND clip-shot-screen-recording-controller-tests --capture-exclusion-only)
     set_tests_properties(clip-shot-recording-capture-exclusion-tests PROPERTIES
         LABELS "unit" RUN_SERIAL TRUE TIMEOUT 60 ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
-    if(APPLE)
-        add_test(NAME clip-shot-macos-recording-capture-exclusion-tests
-            COMMAND clip-shot-screen-recording-controller-tests --capture-exclusion-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-recording-capture-exclusion-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
     clip_shot_import_offscreen_platform(clip-shot-screen-recording-controller-tests)
     set_tests_properties(clip-shot-screen-recording-controller-tests PROPERTIES
         ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}"
@@ -6650,7 +6168,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/recording/recordingcountdownoverlay.cpp
         src/presentation/recording/recordingcountdownoverlay.h
     )
-    clip_shot_link_macos_window_platform(clip-shot-screen-recording-area-window-tests)
     target_include_directories(clip-shot-screen-recording-area-window-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -6662,22 +6179,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip_draw_engine_qt_canvas
         clip_shot_storage
     )
-    if(APPLE)
-        target_sources(clip-shot-screen-recording-area-window-tests PRIVATE
-            ../cmake/test-support/macos_native_input.mm)
-        target_include_directories(clip-shot-screen-recording-area-window-tests PRIVATE
-            ../cmake/test-support)
-        add_test(NAME clip-shot-macos-recording-border-input-tests
-            COMMAND clip-shot-screen-recording-area-window-tests --native-border-input-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-recording-border-input-tests PROPERTIES
-            LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE
-            TIMEOUT 60 SKIP_RETURN_CODE 77)
-        add_test(NAME clip-shot-macos-recording-cross-display-drag-tests
-            COMMAND clip-shot-screen-recording-area-window-tests --native-logical-drag-only -platform cocoa)
-        set_tests_properties(clip-shot-macos-recording-cross-display-drag-tests PROPERTIES
-            LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE
-            TIMEOUT 60 SKIP_RETURN_CODE 77)
-    endif()
     if(WIN32)
         target_link_libraries(clip-shot-screen-recording-area-window-tests PRIVATE user32)
     endif()
@@ -6766,7 +6267,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/overlay/screenshotselectionshadowrenderer.cpp
         src/presentation/styles/buttonborder.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-recognition-window-tests)
     target_include_directories(clip-shot-recognition-window-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
@@ -6783,11 +6283,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         )
     endif()
     clip_shot_import_offscreen_platform(clip-shot-recognition-window-tests)
-    if(APPLE)
-        set_source_files_properties(tests/screenshot_recognition_window_tests.cpp
-            PROPERTIES LANGUAGE OBJCXX)
-        target_link_libraries(clip-shot-recognition-window-tests PRIVATE "-framework AppKit")
-    endif()
     add_test(NAME clip-shot-recognition-message-shadow-tests
         COMMAND clip-shot-recognition-window-tests --message-shadow-only -platform offscreen)
     set_tests_properties(clip-shot-recognition-message-shadow-tests PROPERTIES
@@ -6865,7 +6360,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         src/presentation/services/languagemanager.cpp
         src/presentation/styles/buttonborder.cpp
     )
-    clip_shot_link_macos_window_platform(clip-shot-recognition-session-controller-tests)
     target_include_directories(clip-shot-recognition-session-controller-tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CLIP_DRAW_ENGINE_SOURCE_DIR}/include"
@@ -6968,7 +6462,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip_shot_diagnostics clip_shot_storage clip_shot_image_codec clip_shot_window_shortcuts
         clip_draw_engine_qt_canvas ant_design_qt adqt_icon_core ant_design_icons_qt
         Qt6::Widgets Qt6::Network Qt6::GuiPrivate)
-    clip_shot_link_macos_window_platform(clip-shot-translation-tool-tests)
     if(WIN32)
         target_link_libraries(clip-shot-translation-tool-tests PRIVATE user32 comctl32)
     endif()
@@ -6994,9 +6487,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         Qt6::Core
         Qt6::Gui
     )
-    if(APPLE)
-        target_link_libraries(clip-shot-qr-recognition-service-tests PRIVATE clip_shot_rust_ffi_selector)
-    endif()
     add_test(
         NAME clip-shot-qr-recognition-service-tests
         COMMAND clip-shot-qr-recognition-service-tests
@@ -7303,19 +6793,6 @@ function(clip_shot_configure_scrolling_replay_target target)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-bin")
 endfunction()
 
-if(APPLE AND CLIP_SHOT_BUILD_BENCHMARKS)
-    add_executable(clip-shot-permission-guide-benchmark MACOSX_BUNDLE
-        tests/macos_permission_guide_tests.mm
-        src/presentation/services/screenshotclipboardservice.cpp)
-    target_compile_definitions(clip-shot-permission-guide-benchmark PRIVATE
-        CLIP_PERMISSION_GUIDE_BENCHMARK=1)
-    target_link_libraries(clip-shot-permission-guide-benchmark PRIVATE
-        clip_shot_settings "-framework AppKit")
-    set_target_properties(clip-shot-permission-guide-benchmark PROPERTIES
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.clipshot.tests.permission-guide-benchmark"
-        MACOSX_BUNDLE_BUNDLE_NAME "Clip Permission Guide Benchmark")
-endif()
-
 if(CLIP_SHOT_BUILD_BENCHMARKS)
     add_executable(clip-shot-window-group-switcher-benchmark
         tests/window_group_switcher_benchmark.cpp
@@ -7367,12 +6844,6 @@ if(CLIP_SHOT_BUILD_BENCHMARKS)
         src/presentation/components/titlebarwidget.cpp
         src/presentation/services/screenshotclipboardservice.cpp
         src/platform/windows/windowchrome.cpp)
-    if(APPLE)
-        target_sources(clip-shot-main-window-no-skin-performance-benchmark PRIVATE
-            src/platform/macos/applicationactivation.mm)
-        target_link_libraries(clip-shot-main-window-no-skin-performance-benchmark PRIVATE
-            "-framework AppKit")
-    endif()
     target_link_libraries(clip-shot-main-window-no-skin-performance-benchmark PRIVATE
         clip_shot_settings clip_shot_image_codec clip_shot_updates)
     clip_shot_import_offscreen_platform(clip-shot-main-window-no-skin-performance-benchmark)
@@ -7837,7 +7308,6 @@ if(WIN32 AND CLIP_SHOT_BUILD_BENCHMARKS)
         "${CMAKE_CURRENT_SOURCE_DIR}/../clip_draw_engine_qt/crates/clip-draw-engine-c/include"
     )
     target_link_libraries(clip-shot-file-pin-batch-performance-benchmark PRIVATE
-        ${CLIP_SELECTED_FILES_LIBRARIES}
         clip_shot_translation
         adqt_icon_core
         ant_design_icons_qt
@@ -8497,10 +7967,6 @@ if(CLIP_SHOT_ENABLE_STRICT_COMPILE)
 endif()
 
 set_target_properties(clip_shot PROPERTIES
-    MACOSX_BUNDLE_GUI_IDENTIFIER com.clipshot.clip_shot
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-    MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
 )
 if(MSVC AND CLIP_SHOT_RELEASE_STATIC AND NOT CLIP_SHOT_QT_STATIC)
@@ -8533,12 +7999,6 @@ if(WIN32 AND NOT CLIP_SHOT_IMAGE_CODEC_BACKEND_STATIC)
 endif()
 
 include(GNUInstallDirs)
-if(APPLE)
-    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME ClipShot)
-    set(CMAKE_INSTALL_BINDIR "clip_shot.app/Contents/MacOS")
-    set(CMAKE_INSTALL_LIBDIR "clip_shot.app/Contents/Frameworks")
-    set(CMAKE_INSTALL_DATADIR "clip_shot.app/Contents/Resources")
-endif()
 install(TARGETS clip_shot
     BUNDLE DESTINATION .
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -8870,15 +8330,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         clip-shot-scrolling-toolbar-tests
         clip-shot-screen-recording-toolbar-tests
         PROPERTIES CLIP_TEST_CROSS_PLATFORM TRUE)
-    if(APPLE)
-        set_tests_properties(clip-shot-pinned-toolbar-parity-tests
-            clip-shot-pinned-toolbar-layout-tests PROPERTIES
-            ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
-    endif()
-endif()
-
-if(APPLE)
-    include(ClipShotMacOS)
 endif()
 
 if(CLIP_SHOT_BUILD_TESTS)
@@ -8907,75 +8358,9 @@ if(CLIP_SHOT_BUILD_TESTS)
         CLIP_TEST_CROSS_PLATFORM TRUE)
 endif()
 
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_test(NAME clip-shot-macos-startup-tests COMMAND clip_shot --startup-probe)
-    set_tests_properties(clip-shot-macos-startup-tests PROPERTIES
-        LABELS "unit;macos" TIMEOUT 30)
-    add_executable(clip-shot-macos-shell-policy-tests
-        tests/macos_shell_policy_tests.cpp
-        include/clip_shot/app/featureavailability.h
-        src/app/featureavailability.cpp)
-    target_include_directories(clip-shot-macos-shell-policy-tests PRIVATE include)
-    target_link_libraries(clip-shot-macos-shell-policy-tests PRIVATE Qt6::Core Qt6::Gui)
-    add_test(NAME clip-shot-macos-shell-policy-tests
-        COMMAND clip-shot-macos-shell-policy-tests)
-    set_tests_properties(clip-shot-macos-shell-policy-tests PROPERTIES
-        LABELS "unit;macos" TIMEOUT 30)
-
-    add_executable(clip-shot-macos-shell-native-tests
-        tests/macos_shell_native_tests.mm
-        include/clip_shot/platform/macos/applicationactivation.h
-        src/platform/macos/applicationactivation.mm)
-    target_include_directories(clip-shot-macos-shell-native-tests PRIVATE include)
-    target_compile_definitions(clip-shot-macos-shell-native-tests PRIVATE
-        CLIP_SHOT_MACOS_INFO_PLIST="${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in")
-    target_link_libraries(clip-shot-macos-shell-native-tests PRIVATE
-        clip_shot_login_item Qt6::Widgets "-framework AppKit")
-    add_test(NAME clip-shot-macos-shell-native-tests
-        COMMAND clip-shot-macos-shell-native-tests -platform cocoa)
-    set_tests_properties(clip-shot-macos-shell-native-tests PROPERTIES
-        LABELS "unit;macos" RUN_SERIAL TRUE TIMEOUT 30)
-
-    add_executable(clip-shot-macos-pinned-window-tests
-        tests/macos_pinned_window_tests.mm
-        ${CLIP_PINNED_PLATFORM_SOURCES}
-        src/presentation/services/mousereleaseactioncontroller.cpp)
-    clip_shot_link_macos_window_platform(clip-shot-macos-pinned-window-tests)
-    set_target_properties(clip-shot-macos-pinned-window-tests PROPERTIES
-        MACOSX_BUNDLE TRUE MACOSX_BUNDLE_GUI_IDENTIFIER "top.clipshot.tests.pinned")
-    target_include_directories(clip-shot-macos-pinned-window-tests PRIVATE include src)
-    target_link_libraries(clip-shot-macos-pinned-window-tests PRIVATE Qt6::Widgets adqt::widgets
-        "-framework AppKit" "-framework CoreGraphics")
-    add_test(NAME clip-shot-pinned-auxiliary-ownership-tests
-        COMMAND clip-shot-macos-pinned-window-tests --ownership-only -platform offscreen)
-    set_tests_properties(clip-shot-pinned-auxiliary-ownership-tests PROPERTIES
-        LABELS "unit;macos" CLIP_TEST_CROSS_PLATFORM TRUE TIMEOUT 30)
-    add_test(NAME clip-shot-macos-pinned-window-tests
-        COMMAND clip-shot-macos-pinned-window-tests -platform cocoa)
-    add_test(NAME clip-shot-macos-pinned-focus-tests
-        COMMAND clip-shot-macos-pinned-window-tests --focus -platform cocoa)
-    add_test(NAME clip-shot-macos-pinned-delivery-tests
-        COMMAND clip-shot-macos-pinned-window-tests --delivery -platform cocoa)
-    add_test(NAME clip-shot-macos-pinned-modal-delivery-tests
-        COMMAND clip-shot-macos-pinned-window-tests --modal-delivery -platform cocoa)
-    add_test(NAME clip-shot-macos-pinned-application-modal-delivery-tests
-        COMMAND clip-shot-macos-pinned-window-tests --application-modal-delivery -platform cocoa)
-    set_tests_properties(clip-shot-macos-pinned-window-tests clip-shot-macos-pinned-focus-tests clip-shot-macos-pinned-delivery-tests clip-shot-macos-pinned-modal-delivery-tests clip-shot-macos-pinned-application-modal-delivery-tests
-        PROPERTIES LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77)
-endif()
-
 if(CLIP_SHOT_BUILD_TESTS)
     set_tests_properties(clip-shot-pinned-window-repository-tests clip-shot-pinned-window-group-tests
         PROPERTIES CLIP_TEST_CROSS_PLATFORM TRUE)
-endif()
-
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    # Shared behavior fixtures synthesize Qt input. Real Cocoa delivery and
-    # native window policy are covered by the serial interactive targets above.
-    set_tests_properties(${_clip_shot_pinned_window_test_names}
-        clip-shot-pinned-save-dialog-tests
-        clip-shot-pinned-hidden-text-selection-restore-tests
-        PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" CLIP_TEST_CROSS_PLATFORM TRUE)
 endif()
 
 if(CLIP_SHOT_BUILD_TESTS)
@@ -9049,43 +8434,10 @@ if(WIN32 AND CLIP_SHOT_BUILD_TESTS)
         ENVIRONMENT_MODIFICATION "QT_SCREEN_SCALE_FACTORS=unset:;QT_SCALE_FACTOR=unset:;CLIP_PIN_TEST_DPR=unset:")
 endif()
 
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_test(NAME clip-shot-pinned-pixel-alignment-tests
-        COMMAND clip-shot-pinned-window-tests --pixel-alignment-only -platform offscreen)
-    set_tests_properties(clip-shot-pinned-pixel-alignment-tests PROPERTIES
-        LABELS unit CLIP_TEST_CROSS_PLATFORM TRUE ENVIRONMENT "QT_SCALE_FACTOR=2" RUN_SERIAL TRUE)
-    add_test(NAME clip-shot-pinned-retina-interaction-tests
-        COMMAND clip-shot-pinned-window-tests --controlled-interaction-only -platform offscreen)
-    set_tests_properties(clip-shot-pinned-retina-interaction-tests PROPERTIES
-        LABELS unit CLIP_TEST_CROSS_PLATFORM TRUE ENVIRONMENT "QT_SCALE_FACTOR=2" RUN_SERIAL TRUE)
-    add_test(NAME clip-shot-pinned-creation-tests
-        COMMAND clip-shot-pinned-window-tests --creation-only -platform offscreen)
-    set_tests_properties(clip-shot-pinned-creation-tests PROPERTIES
-        LABELS "unit;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME clip-shot-macos-pinned-creation-tests
-        COMMAND clip-shot-pinned-window-tests --creation-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-pinned-creation-tests PROPERTIES
-        LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME clip-shot-macos-pinned-drag-tests
-        COMMAND clip-shot-pinned-window-tests --native-controlled-drag-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-pinned-drag-tests PROPERTIES
-        LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE
-        TIMEOUT 60 SKIP_RETURN_CODE 77)
-    add_test(NAME clip-shot-macos-pinned-pixel-alignment-tests
-        COMMAND clip-shot-pinned-window-tests --pixel-alignment-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-pinned-pixel-alignment-tests PROPERTIES
-        LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE RUN_SERIAL TRUE TIMEOUT 60)
-endif()
-
 if(CLIP_SHOT_BUILD_TESTS)
     set_tests_properties(clip-shot-pinned-recognition-context-menu-tests
         clip-shot-image-conversion-pinned-tests clip-shot-auto-filter-pinned-tests
         PROPERTIES CLIP_TEST_CROSS_PLATFORM TRUE LABELS unit)
-    if(APPLE)
-        set_tests_properties(clip-shot-image-conversion-pinned-tests
-            clip-shot-pinned-quick-save-tests
-            PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" CLIP_TEST_CROSS_PLATFORM TRUE LABELS unit)
-    endif()
 endif()
 
 if(CLIP_SHOT_BUILD_TESTS)
@@ -9127,144 +8479,6 @@ foreach(_target IN LISTS _overlay_widget_targets)
     endif()
 endforeach()
 
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-macos-raster-color-space-tests
-        tests/macos_raster_color_space_tests.mm)
-    target_include_directories(clip-shot-macos-raster-color-space-tests PRIVATE include)
-    target_link_libraries(clip-shot-macos-raster-color-space-tests PRIVATE Qt6::Widgets
-        "-framework AppKit")
-    clip_shot_import_offscreen_platform(clip-shot-macos-raster-color-space-tests)
-    add_test(NAME clip-shot-raster-color-space-tests
-        COMMAND clip-shot-macos-raster-color-space-tests -platform offscreen)
-    set_tests_properties(clip-shot-raster-color-space-tests PROPERTIES LABELS "unit;macos")
-    add_test(NAME clip-shot-macos-raster-color-space-tests
-        COMMAND clip-shot-macos-raster-color-space-tests -platform cocoa)
-    set_tests_properties(clip-shot-macos-raster-color-space-tests PROPERTIES LABELS "unit;macos")
-
-    add_executable(clip-shot-macos-screenshot-window-target-tests
-        tests/macos_screenshot_window_target_tests.mm)
-    target_link_libraries(clip-shot-macos-screenshot-window-target-tests PRIVATE Qt6::Core
-        "-framework Foundation" "-framework CoreGraphics")
-    add_test(NAME clip-shot-macos-screenshot-window-target-tests
-        COMMAND clip-shot-macos-screenshot-window-target-tests)
-    set_tests_properties(clip-shot-macos-screenshot-window-target-tests PROPERTIES LABELS "unit;macos")
-
-    add_executable(clip-shot-macos-screenshot-native-smoke
-        tests/macos_screenshot_native_smoke.mm
-        src/presentation/capture/directcapturenative.cpp
-        src/presentation/core/screenshotgeometry.cpp
-        src/presentation/services/screenshotsourceimagecomposer.cpp)
-    clip_shot_link_macos_window_platform(clip-shot-macos-screenshot-native-smoke)
-    target_include_directories(clip-shot-macos-screenshot-native-smoke PRIVATE include
-        "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-capture-c/include")
-    target_link_libraries(clip-shot-macos-screenshot-native-smoke PRIVATE Qt6::Widgets clip_capture_c clip_canvas_image
-        clip_image::clip_image_static
-        "-framework AppKit" "-framework ApplicationServices")
-    add_test(NAME clip-shot-macos-screenshot-native-smoke COMMAND clip-shot-macos-screenshot-native-smoke)
-    set_tests_properties(clip-shot-macos-screenshot-native-smoke PROPERTIES LABELS "interactive;macos" SKIP_RETURN_CODE 77 TIMEOUT 60)
-endif()
-
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-macos-region-shortcut-native-tests
-        tests/macos_region_shortcut_native_tests.mm)
-    target_include_directories(clip-shot-macos-region-shortcut-native-tests PRIVATE include)
-    target_link_libraries(clip-shot-macos-region-shortcut-native-tests PRIVATE
-        clip_shot_window_shortcuts Qt6::Widgets "-framework AppKit"
-        "-framework ApplicationServices")
-    add_test(NAME clip-shot-macos-region-shortcut-native-tests
-        COMMAND clip-shot-macos-region-shortcut-native-tests)
-    set_tests_properties(clip-shot-macos-region-shortcut-native-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=cocoa" LABELS "interactive;macos"
-        RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30)
-
-    add_executable(clip-shot-macos-recapture-native-tests
-        tests/macos_recapture_native_tests.mm
-        src/platform/macos/applicationactivation.mm)
-    clip_shot_link_macos_window_platform(clip-shot-macos-recapture-native-tests)
-    target_include_directories(clip-shot-macos-recapture-native-tests PRIVATE include
-        "${CLIP_SHOT_CAPTURE_CRATES_DIR}/crates/clip-capture-c/include")
-    target_link_libraries(clip-shot-macos-recapture-native-tests PRIVATE Qt6::Widgets clip_capture_c
-        clip_shot_login_item
-        "-framework AppKit" "-framework ApplicationServices")
-    add_test(NAME clip-shot-macos-recapture-native-tests COMMAND clip-shot-macos-recapture-native-tests)
-    set_tests_properties(clip-shot-macos-recapture-native-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=cocoa" LABELS "interactive;macos"
-        RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30)
-    foreach(target_kind IN ITEMS floating local local-floating)
-        add_test(NAME clip-shot-macos-recapture-${target_kind}-tests
-            COMMAND clip-shot-macos-recapture-native-tests --${target_kind})
-        set_tests_properties(clip-shot-macos-recapture-${target_kind}-tests PROPERTIES
-            ENVIRONMENT "QT_QPA_PLATFORM=cocoa" LABELS "interactive;macos"
-            RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30)
-    endforeach()
-
-    add_executable(clip-shot-macos-recapture-focus-tests tests/macos_recapture_focus_tests.cpp)
-    target_include_directories(clip-shot-macos-recapture-focus-tests PRIVATE include)
-    target_link_libraries(clip-shot-macos-recapture-focus-tests PRIVATE Qt6::Core)
-    add_test(NAME clip-shot-macos-recapture-focus-tests COMMAND clip-shot-macos-recapture-focus-tests)
-    set_tests_properties(clip-shot-macos-recapture-focus-tests PROPERTIES LABELS "unit;macos")
-
-    add_executable(clip-shot-macos-scrolling-input-tests
-        tests/macos_scrolling_input_tests.mm)
-    clip_shot_link_macos_window_platform(clip-shot-macos-scrolling-input-tests)
-    target_include_directories(clip-shot-macos-scrolling-input-tests PRIVATE include)
-    target_link_libraries(clip-shot-macos-scrolling-input-tests PRIVATE Qt6::Widgets
-        "-framework AppKit" "-framework ApplicationServices")
-    add_test(NAME clip-shot-macos-scrolling-input-tests
-        COMMAND clip-shot-macos-scrolling-input-tests)
-    set_tests_properties(clip-shot-macos-scrolling-input-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "unit;macos")
-    add_test(NAME clip-shot-macos-scrolling-input-native-tests
-        COMMAND clip-shot-macos-scrolling-input-tests -platform cocoa)
-    set_tests_properties(clip-shot-macos-scrolling-input-native-tests PROPERTIES
-        LABELS "interactive;macos" RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30)
-
-    add_executable(clip-shot-macos-overlay-initialization-tests
-        tests/macos_overlay_initialization_tests.mm
-        ${CLIP_PINNED_PLATFORM_SOURCES}
-        src/presentation/core/screenshotgeometry.cpp)
-    clip_shot_link_macos_window_platform(clip-shot-macos-overlay-initialization-tests)
-    target_include_directories(clip-shot-macos-overlay-initialization-tests PRIVATE include src)
-    target_link_libraries(clip-shot-macos-overlay-initialization-tests PRIVATE ant_design_qt Qt6::Widgets
-        "-framework AppKit" "-framework ApplicationServices")
-    add_test(NAME clip-shot-macos-overlay-initialization-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests)
-    set_tests_properties(clip-shot-macos-overlay-initialization-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "unit;macos")
-    add_test(NAME clip-shot-macos-overlay-animation-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --overlay-animation-only -platform offscreen)
-    set_tests_properties(clip-shot-macos-overlay-animation-tests PROPERTIES LABELS "unit;macos")
-    add_test(NAME clip-shot-macos-overlay-animation-native-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --overlay-animation-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-overlay-animation-native-tests PROPERTIES
-        LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 30)
-    add_test(NAME clip-shot-macos-recognition-stacking-native-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --recognition-stacking-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-recognition-stacking-native-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=cocoa" LABELS "interactive;macos"
-        RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME clip-shot-macos-screenshot-stacking-native-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests -platform cocoa)
-    set_tests_properties(clip-shot-macos-screenshot-stacking-native-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=cocoa" LABELS "interactive;macos"
-        RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME clip-shot-macos-modal-stacking-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --modal-stacking-only -platform offscreen)
-    set_tests_properties(clip-shot-macos-modal-stacking-tests PROPERTIES LABELS "unit;macos" TIMEOUT 60)
-    add_test(NAME clip-shot-macos-modal-stacking-native-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --modal-stacking-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-modal-stacking-native-tests PROPERTIES
-        LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    add_test(NAME clip-shot-macos-file-panel-stacking-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --native-file-panels-only -platform offscreen)
-    set_tests_properties(clip-shot-macos-file-panel-stacking-tests PROPERTIES
-        LABELS "unit;macos" TIMEOUT 60)
-    add_test(NAME clip-shot-macos-file-panel-stacking-native-tests
-        COMMAND clip-shot-macos-overlay-initialization-tests --native-file-panels-only -platform cocoa)
-    set_tests_properties(clip-shot-macos-file-panel-stacking-native-tests PROPERTIES
-        LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-endif()
-
 # Physical cursor warps enter Qt's platform input path so Qt's pointer state and
 # widget grabs remain consistent with subsequent native mouse events.
 foreach(_cursor_host IN ITEMS clip_shot clip-shot-physical-cursor-tests clip-shot-color-picker-lifecycle-tests
@@ -9273,35 +8487,6 @@ foreach(_cursor_host IN ITEMS clip_shot clip-shot-physical-cursor-tests clip-sho
         target_link_libraries(${_cursor_host} PRIVATE Qt6::GuiPrivate)
     endif()
 endforeach()
-
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-application-qos-tests tests/application_qos_tests.cpp
-        src/presentation/services/screenshotclipboardservice.cpp)
-    target_link_libraries(clip-shot-application-qos-tests PRIVATE clip_shot_settings clip_shot_image_codec)
-    clip_shot_import_offscreen_platform(clip-shot-application-qos-tests)
-    foreach(_clip_qos IN ITEMS user_interactive user_initiated default utility background invalid missing)
-        add_test(NAME clip-shot-application-qos-${_clip_qos}-tests COMMAND clip-shot-application-qos-tests ${_clip_qos})
-        set_tests_properties(clip-shot-application-qos-${_clip_qos}-tests PROPERTIES LABELS "unit;macos" TIMEOUT 30 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-    endforeach()
-    unset(_clip_qos)
-endif()
-
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-login-item-settings-tests tests/login_item_settings_tests.cpp
-        src/presentation/services/screenshotclipboardservice.cpp)
-    target_link_libraries(clip-shot-login-item-settings-tests PRIVATE clip_shot_settings clip_shot_image_codec)
-    clip_shot_import_offscreen_platform(clip-shot-login-item-settings-tests)
-    clip_shot_add_translations(clip-shot-login-item-settings-tests)
-    add_test(NAME clip-shot-login-item-settings-tests COMMAND clip-shot-login-item-settings-tests)
-    set_tests_properties(clip-shot-login-item-settings-tests PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" LABELS "unit;macos")
-endif()
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-login-item-native-tests tests/login_item_native_tests.mm)
-    target_link_libraries(clip-shot-login-item-native-tests PRIVATE clip_shot_login_item)
-    add_test(NAME clip-shot-login-item-native-tests COMMAND clip-shot-login-item-native-tests)
-    set_tests_properties(clip-shot-login-item-native-tests PROPERTIES LABELS "unit;macos")
-endif()
 
 if(CLIP_SHOT_BUILD_TESTS)
     add_executable(clip-shot-qr-controller-tests
@@ -9336,25 +8521,6 @@ if(TARGET clip-shot-pinned-window-tests)
         LABELS "unit" CLIP_TEST_CROSS_PLATFORM TRUE TIMEOUT 60)
     add_test(NAME clip-shot-pinned-latex-tests COMMAND clip-shot-pinned-window-tests --latex-only -platform offscreen)
     set_tests_properties(clip-shot-pinned-latex-tests PROPERTIES LABELS "unit" TIMEOUT 60)
-endif()
-
-if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-    add_executable(clip-shot-macos-cursor-tests tests/macos_cursor_tests.cpp)
-    target_link_libraries(clip-shot-macos-cursor-tests PRIVATE clip_shot_macos_cursor)
-    clip_shot_import_offscreen_platform(clip-shot-macos-cursor-tests)
-    add_test(NAME clip-shot-macos-cursor-tests COMMAND clip-shot-macos-cursor-tests -platform offscreen)
-    set_tests_properties(clip-shot-macos-cursor-tests PROPERTIES LABELS "unit;macos")
-
-    add_executable(clip-shot-macos-cursor-native-tests tests/macos_cursor_native_tests.mm
-        ../cmake/test-support/macos_native_input.mm)
-    clip_shot_link_macos_window_platform(clip-shot-macos-cursor-native-tests)
-    target_include_directories(clip-shot-macos-cursor-native-tests PRIVATE include src)
-    target_link_libraries(clip-shot-macos-cursor-native-tests PRIVATE clip_shot_macos_cursor
-        "-framework AppKit" "-framework ApplicationServices")
-    add_test(NAME clip-shot-macos-cursor-native-tests
-        COMMAND clip-shot-macos-cursor-native-tests -platform cocoa)
-    set_tests_properties(clip-shot-macos-cursor-native-tests PROPERTIES
-        LABELS "interactive;macos" RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
 
 if(TARGET clip-shot-pinned-window-tests)
@@ -9393,21 +8559,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         set_tests_properties(clip-shot-selection-clipboard-lifecycle-tests PROPERTIES
             ENVIRONMENT "${_clip_clipboard_qpa_environment}" LABELS "unit" TIMEOUT 60)
     endif()
-
-    if(APPLE)
-        add_executable(clip-shot-macos-clipboard-roundtrip-tests
-            tests/macos_clipboard_roundtrip_tests.mm
-            src/presentation/services/screenshotclipboardservice.cpp
-            src/presentation/services/screenshotclipboardcontent.cpp)
-        target_include_directories(clip-shot-macos-clipboard-roundtrip-tests PRIVATE include)
-        target_link_libraries(clip-shot-macos-clipboard-roundtrip-tests PRIVATE
-            clip_shot_image_codec clip_shot_diagnostics Qt6::Widgets
-            "-framework AppKit" "-framework ImageIO")
-        add_test(NAME clip-shot-macos-clipboard-roundtrip-tests
-            COMMAND clip-shot-macos-clipboard-roundtrip-tests -platform cocoa)
-        set_tests_properties(clip-shot-macos-clipboard-roundtrip-tests PROPERTIES
-            LABELS "unit;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
     unset(_clip_clipboard_qpa_environment)
 endif()
 
@@ -9420,9 +8571,7 @@ add_library(clip_shot_history_pin STATIC
     src/presentation/overlay/screenshotselectionshadowrenderer.cpp)
 target_include_directories(clip_shot_history_pin PUBLIC include)
 target_link_libraries(clip_shot_history_pin PUBLIC Qt6::Widgets PRIVATE ant_design_qt clip_canvas_image)
-if(APPLE)
-    target_link_libraries(clip_shot_history_pin PRIVATE "-framework AppKit")
-elseif(WIN32)
+if(WIN32)
     target_link_libraries(clip_shot_history_pin PRIVATE user32)
 endif()
 target_link_libraries(clip_shot_settings PRIVATE clip_shot_history_pin clip_shot_clipboard_placement)
@@ -9433,10 +8582,7 @@ add_library(clip_shot_clipboard_placement STATIC
     src/presentation/services/screenshotclipboardappearance.cpp)
 target_include_directories(clip_shot_clipboard_placement PUBLIC include)
 target_link_libraries(clip_shot_clipboard_placement PUBLIC Qt6::Gui)
-if(APPLE)
-    target_sources(clip_shot_clipboard_placement PRIVATE src/platform/macos/clipboardrevision.mm)
-    target_link_libraries(clip_shot_clipboard_placement PRIVATE "-framework AppKit")
-elseif(WIN32)
+if(WIN32)
     target_link_libraries(clip_shot_clipboard_placement PRIVATE user32)
 endif()
 
@@ -9456,17 +8602,13 @@ if(CLIP_SHOT_BUILD_TESTS)
         LABELS "unit" ENVIRONMENT "${_clip_clipboard_placement_qpa_environment}"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
     unset(_clip_clipboard_placement_qpa_environment)
-    if(APPLE OR WIN32)
+    if(WIN32)
         add_test(NAME clip-shot-clipboard-placement-native-tests
             COMMAND clip-shot-clipboard-placement-tests --native-roundtrip)
+        target_link_libraries(clip-shot-clipboard-placement-tests PRIVATE user32)
         set_tests_properties(clip-shot-clipboard-placement-native-tests PROPERTIES
-            LABELS "interactive" RUN_SERIAL TRUE TIMEOUT 60)
-        if(APPLE)
-            set_tests_properties(clip-shot-clipboard-placement-native-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
-        else()
-            target_link_libraries(clip-shot-clipboard-placement-tests PRIVATE user32)
-            set_tests_properties(clip-shot-clipboard-placement-native-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=windows")
-        endif()
+            LABELS "interactive;windows" RUN_SERIAL TRUE TIMEOUT 60
+            ENVIRONMENT "QT_QPA_PLATFORM=windows")
     endif()
 endif()
 
@@ -9541,12 +8683,6 @@ if(CLIP_SHOT_BUILD_BENCHMARKS)
         clip_shot_system_notification_controller
         clip_shot_storage clip_shot_image_codec clip_shot_settings_catalog
         clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets)
-    if(APPLE)
-        target_sources(clip-shot-skin-surface-performance-benchmark PRIVATE
-            src/platform/macos/systemtraymenu.mm)
-        target_link_libraries(clip-shot-skin-surface-performance-benchmark PRIVATE
-            clip_shot_system_notifications "-framework AppKit")
-    endif()
     qt_import_plugins(clip-shot-skin-surface-performance-benchmark EXCLUDE Qt6::QICOPlugin)
     qt_add_resources(clip-shot-skin-surface-performance-benchmark "clip_shot_skin_surface_tray_assets"
         PREFIX "/clip-shot/app-icons"
@@ -9617,34 +8753,12 @@ if(CLIP_SHOT_BUILD_TESTS OR CLIP_APPS_BUILD_BENCHMARKS)
         add_executable(clip-shot-floating-toolbar-performance-benchmark ${_clip_floating_test_sources})
         list(APPEND _clip_floating_targets clip-shot-floating-toolbar-performance-benchmark)
     endif()
-    if(APPLE AND CLIP_SHOT_BUILD_TESTS)
-        set(_clip_floating_macos_sources ${_clip_floating_test_sources})
-        list(REMOVE_ITEM _clip_floating_macos_sources tests/floating_toolbar_tests.cpp)
-        add_executable(clip-shot-macos-floating-toolbar-drop-tests
-            tests/macos_floating_toolbar_drop_tests.mm
-            ../cmake/test-support/macos_native_input.mm
-            ${_clip_floating_macos_sources})
-        list(APPEND _clip_floating_targets clip-shot-macos-floating-toolbar-drop-tests)
-        target_include_directories(clip-shot-macos-floating-toolbar-drop-tests PRIVATE src)
-        target_link_libraries(clip-shot-macos-floating-toolbar-drop-tests PRIVATE
-            "-framework AppKit" "-framework ApplicationServices")
-        add_test(NAME clip-shot-macos-floating-toolbar-drop-policy-tests
-            COMMAND clip-shot-macos-floating-toolbar-drop-tests -platform offscreen)
-        set_tests_properties(clip-shot-macos-floating-toolbar-drop-policy-tests PROPERTIES
-            LABELS "unit;macos" CLIP_TEST_CROSS_PLATFORM TRUE TIMEOUT 30)
-        add_test(NAME clip-shot-macos-floating-toolbar-content-drop-native-tests
-            COMMAND clip-shot-macos-floating-toolbar-drop-tests --native -platform cocoa)
-        set_tests_properties(clip-shot-macos-floating-toolbar-content-drop-native-tests PROPERTIES
-            LABELS "interactive;macos" CLIP_TEST_CROSS_PLATFORM TRUE
-            RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 30)
-    endif()
     foreach(_clip_floating_target IN LISTS _clip_floating_targets)
         target_include_directories(${_clip_floating_target} PRIVATE include src/image)
         target_link_libraries(${_clip_floating_target} PRIVATE
             clip_shot_settings clip_shot_image_codec clip_shot_clipboard_placement
             clip_draw_engine_qt_canvas ant_design_qt Qt6::Widgets)
         clip_shot_import_offscreen_platform(${_clip_floating_target})
-        clip_shot_link_macos_window_platform(${_clip_floating_target})
         if(WIN32)
             target_link_libraries(${_clip_floating_target} PRIVATE dwmapi gdi32 user32)
             if(NOT CLIP_SHOT_IMAGE_CODEC_BACKEND_STATIC)
@@ -9671,7 +8785,6 @@ add_library(clip_shot_original_image_preview STATIC
 target_include_directories(clip_shot_original_image_preview PUBLIC include)
 target_link_libraries(clip_shot_original_image_preview PUBLIC Qt6::Widgets
     PRIVATE clip_canvas_image adqt::dpi_window)
-clip_shot_link_macos_window_platform(clip_shot_original_image_preview)
 if(WIN32)
     target_link_libraries(clip_shot_original_image_preview PRIVATE user32 gdi32)
 endif()
@@ -9694,15 +8807,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         COMMAND clip-shot-original-image-preview-tests -platform offscreen)
     set_tests_properties(clip-shot-original-image-preview-tests PROPERTIES LABELS "unit"
         TIMEOUT 60 ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    if(APPLE)
-        set_source_files_properties(tests/screenshot_original_image_preview_tests.cpp
-            PROPERTIES LANGUAGE OBJCXX)
-        target_link_libraries(clip-shot-original-image-preview-tests PRIVATE "-framework AppKit")
-        add_test(NAME clip-shot-original-image-preview-native-macos-tests
-            COMMAND clip-shot-original-image-preview-tests --native-only -platform cocoa)
-        set_tests_properties(clip-shot-original-image-preview-native-macos-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 120)
-    endif()
     if(WIN32)
         set(_preview_scales 1 1.25 1.5 1.75 2)
         set(_preview_factors 0.5 0.625 0.75 0.875 1)
@@ -9790,9 +8894,6 @@ foreach(_clip_target IN LISTS _clip_clipboard_consumers)
     if("${_clip_sources}" MATCHES "screenshotclipboard(service|content)\\.cpp")
         target_link_libraries(${_clip_target} PRIVATE clip_shot_clipboard_placement)
     endif()
-    if(APPLE AND "${_clip_sources}" MATCHES "screenshotclipboard(service|content)\\.cpp")
-        target_link_libraries(${_clip_target} PRIVATE clip_shot_macos_clipboard)
-    endif()
 endforeach()
 
 foreach(_clip_hidden_shortcut_pair IN ITEMS
@@ -9869,21 +8970,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         ENVIRONMENT "${_CLIP_SHOT_OFFSCREEN_QPA_ENVIRONMENT}")
     add_executable(clip-shot-native-print-smoke tests/native_print_smoke.cpp)
     target_link_libraries(clip-shot-native-print-smoke PRIVATE clip_shot_print)
-    if(APPLE)
-        add_executable(clip-shot-macos-native-print-stacking-tests
-            tests/macos_native_print_stacking_tests.mm)
-        target_include_directories(clip-shot-macos-native-print-stacking-tests PRIVATE include src)
-        target_link_libraries(clip-shot-macos-native-print-stacking-tests PRIVATE
-            clip_shot_print clip_shot_macos_window_platform "-framework AppKit")
-        add_test(NAME clip-shot-macos-native-print-stacking-tests
-            COMMAND clip-shot-macos-native-print-stacking-tests -platform offscreen)
-        set_tests_properties(clip-shot-macos-native-print-stacking-tests PROPERTIES
-            LABELS "unit;macos" TIMEOUT 30)
-        add_test(NAME clip-shot-macos-native-print-stacking-native-tests
-            COMMAND clip-shot-macos-native-print-stacking-tests -platform cocoa)
-        set_tests_properties(clip-shot-macos-native-print-stacking-native-tests PROPERTIES
-            LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-    endif()
     if(WIN32)
         add_executable(clip-shot-windows-print-dialog-tests tests/windows_print_dialog_tests.cpp)
         target_link_libraries(clip-shot-windows-print-dialog-tests PRIVATE clip_shot_print)
@@ -9930,16 +9016,7 @@ if(CLIP_SHOT_BUILD_TESTS)
             COMMAND clip-shot-pinned-window-tests --multi-selection-only -platform offscreen)
         set_tests_properties(clip-shot-pinned-multi-selection-tests PROPERTIES
             LABELS "unit" RUN_SERIAL TRUE TIMEOUT 90)
-        if(APPLE)
-            add_test(NAME clip-shot-macos-pinned-multi-selection-geometry-tests
-                COMMAND clip-shot-pinned-window-tests --multi-selection-geometry-only -platform cocoa)
-            set_tests_properties(clip-shot-macos-pinned-multi-selection-geometry-tests PROPERTIES
-                LABELS "interactive;macos" RUN_SERIAL TRUE TIMEOUT 60)
-            add_test(NAME clip-shot-macos-pinned-multi-selection-tests
-                COMMAND clip-shot-pinned-window-tests --multi-selection-native-only -platform cocoa)
-            set_tests_properties(clip-shot-macos-pinned-multi-selection-tests PROPERTIES
-                LABELS "interactive;e2e;macos" RUN_SERIAL TRUE SKIP_RETURN_CODE 77 TIMEOUT 60)
-        elseif(WIN32)
+        if(WIN32)
             add_test(NAME clip-shot-pinned-multi-selection-native-tests
                 COMMAND clip-shot-pinned-window-tests --multi-selection-native-only -platform windows)
             set_tests_properties(clip-shot-pinned-multi-selection-native-tests PROPERTIES

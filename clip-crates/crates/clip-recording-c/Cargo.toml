@@ -14,5 +14,4 @@ anyhow.workspace = true
 clip-recording-export = { path = "../clip-recording-export" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-clip-macos = { path = "../clip-macos" }
 clip-media = { path = "../clip-media" }

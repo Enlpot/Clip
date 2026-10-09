@@ -26,4 +26,3 @@ bench-timing = []
 bench-synthetic-input = []
 
 [target.'cfg(target_os = "macos")'.dependencies]
-clip-macos = { path = "../clip-macos" }

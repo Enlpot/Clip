@@ -95,7 +95,6 @@ function(clip_shot_add_translations target)
     )
     qt_add_lupdate(
         SOURCE_TARGETS
-            clip_shot_login_item
             clip_shot_administrator
             clip_shot
             clip_shot_storage
@@ -110,12 +109,8 @@ function(clip_shot_add_translations target)
             clip_shot_print
             clip_shot_diagnostics
             clip_shot_updates
-        # Preserve macOS-only messages when extracting on Windows as well.
-        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/loginitembackend.mm"
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/update/macosupdateservice.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/update/updateservice.cpp"
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/update/updateservice.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/windows/nativeprint.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/macos/nativeprint.mm"
         TS_FILES ${_clip_shot_update_ts}
         LUPDATE_TARGET clip_shot_update_translations
         OPTIONS -no-obsolete -locations none

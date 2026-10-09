@@ -92,4 +92,3 @@ bench-pipeline-timing = ["clip-capture/stage-timing", "clip-recording-export/ben
 bench-synthetic-input = ["clip-recording-effects/bench-synthetic-input", "clip-recording-effects/bench-experiments", "clip-recording-export/bench-experiments"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
-clip-macos = { path = "../clip-macos" }

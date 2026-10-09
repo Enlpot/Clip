@@ -11,7 +11,7 @@ endforeach()
 
 set(_clip_mini_libraries
     clip_shot_cloud_upload clip_shot_storage clip_shot_main_window_skin clip_shot_settings_catalog clip_shot_settings_search
-    clip_shot_settings clip_shot_global_mouse clip_shot_login_item
+    clip_shot_settings clip_shot_global_mouse
     clip_shot_administrator clip_shot_permissions clip_shot_updates
     clip_shot_diagnostics clip_shot_crash_bridge)
 
@@ -107,7 +107,6 @@ target_compile_definitions(clip_shot_crash_bridge_mini PRIVATE
 
 _clip_mini_share_resources(clip_shot)
 get_target_property(_sources clip_shot SOURCES)
-list(FILTER _sources EXCLUDE REGEX "/packaging/macos/[^/]+\\.lproj/InfoPlist\\.strings$")
 list(FILTER _sources EXCLUDE REGEX "windows-app-resource\\.rc$|_plugin_import\\.cpp$")
 clip_shot_mini_filter_sources(_sources ${_sources})
 qt_add_executable(clip_shot_mini MANUAL_FINALIZATION ${_sources})
@@ -120,11 +119,7 @@ endif()
 clip_shot_add_translations(clip_shot_mini MINI)
 set_target_properties(clip_shot_mini PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/clip_shot_mini"
-    MACOSX_BUNDLE TRUE WIN32_EXECUTABLE TRUE
-    MACOSX_BUNDLE_GUI_IDENTIFIER com.clipshot.clip_shot_mini
-    MACOSX_BUNDLE_BUNDLE_NAME "Clip Mini"
-    MACOSX_BUNDLE_BUNDLE_VERSION "${CLIP_SHOT_VERSION_NUMERIC}"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "${CLIP_SHOT_VERSION_NUMERIC}")
+    WIN32_EXECUTABLE TRUE)
 if(MSVC AND CLIP_SHOT_RELEASE_STATIC AND NOT CLIP_SHOT_QT_STATIC)
     set_property(TARGET clip_shot_mini PROPERTY qt_no_entrypoint TRUE)
 endif()
@@ -143,27 +138,19 @@ function(_clip_add_mini_helpers)
     # Cargo features and build-script identity change these executables. Separate
     # output roots avoid races and accidentally staging the other edition.
     set(CLIP_RUST_CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/cargo-mini")
-    if(NOT APPLE)
-        clip_add_rust_executable(clip-shot-mini-updater-binary
-            PACKAGE clip-shot-updater MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rust/clip-shot-updater"
-            OUTPUT_NAME clip-shot-updater PRODUCTION_PROFILE release-size
-            FEATURES mini REPRODUCIBLE SIZE_OPTIMIZED
-            ENVIRONMENT
-                "CLIP_SHOT_UPDATE_KEYS_PATH=${CMAKE_CURRENT_SOURCE_DIR}/resources/update-trusted-keys.json"
-                "CLIP_SHOT_VERSION=${CLIP_SHOT_VERSION}"
-                "CLIP_SHOT_ICON_PATH=${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.ico")
-    endif()
+    clip_add_rust_executable(clip-shot-mini-updater-binary
+        PACKAGE clip-shot-updater MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rust/clip-shot-updater"
+        OUTPUT_NAME clip-shot-updater PRODUCTION_PROFILE release-size
+        FEATURES mini REPRODUCIBLE SIZE_OPTIMIZED
+        ENVIRONMENT
+            "CLIP_SHOT_UPDATE_KEYS_PATH=${CMAKE_CURRENT_SOURCE_DIR}/resources/update-trusted-keys.json"
+            "CLIP_SHOT_VERSION=${CLIP_SHOT_VERSION}"
+            "CLIP_SHOT_ICON_PATH=${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon.ico")
 endfunction()
 _clip_add_mini_helpers()
-if(WIN32)
-    set(_mini_bindir bin)
-    set(_mini_libdir lib)
-    set(_mini_datadir share)
-else()
-    set(_mini_bindir "clip_shot_mini.app/Contents/MacOS")
-    set(_mini_libdir "clip_shot_mini.app/Contents/Frameworks")
-    set(_mini_datadir "clip_shot_mini.app/Contents/Resources")
-endif()
+set(_mini_bindir bin)
+set(_mini_libdir lib)
+set(_mini_datadir share)
 install(TARGETS clip_shot_mini BUNDLE DESTINATION . COMPONENT ClipShotMini
     RUNTIME DESTINATION "${_mini_bindir}" COMPONENT ClipShotMini)
 foreach(_helper IN ITEMS clip-shot-mini-updater-binary)
@@ -180,26 +167,11 @@ foreach(_helper IN ITEMS clip-shot-mini-updater-binary)
             RENAME "${_name}" COMPONENT ClipShotMini)
     endif()
 endforeach()
-if(APPLE)
-    add_custom_command(TARGET clip_shot_mini POST_BUILD
-        COMMAND "${CMAKE_COMMAND}"
-            "-DCLIP_HANDLER_SOURCE=${CLIP_CRASHPAD_HANDLER}"
-            "-DCLIP_HANDLER_DIRECTORY=$<TARGET_FILE_DIR:clip_shot_mini>"
-            "-DCLIP_HANDLER_ZLIB=${_clip_handler_zlib}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/StageClipShotCrashHandler.cmake" VERBATIM)
-else()
-    add_custom_command(TARGET clip_shot_mini POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CLIP_CRASHPAD_HANDLER}"
-            "$<TARGET_FILE_DIR:clip_shot_mini>/crashpad_handler.exe" VERBATIM)
-endif()
+add_custom_command(TARGET clip_shot_mini POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CLIP_CRASHPAD_HANDLER}"
+        "$<TARGET_FILE_DIR:clip_shot_mini>/crashpad_handler.exe" VERBATIM)
 install(PROGRAMS "${CLIP_CRASHPAD_HANDLER}" DESTINATION "${_mini_bindir}" COMPONENT ClipShotMini)
 if(NOT CLIP_SHOT_IMAGE_CODEC_BACKEND_STATIC)
-    if(APPLE)
-        # Remove the library left in MacOS by earlier Mini install rules.
-        install(CODE [[
-            file(REMOVE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/clip_shot_mini.app/Contents/MacOS/$<TARGET_FILE_NAME:clip_shot_image_codec_backend>")
-        ]] COMPONENT ClipShotMini)
-    endif()
     install(TARGETS clip_shot_image_codec_backend
         RUNTIME_DEPENDENCY_SET clip_shot_mini_image_runtime_dependencies
         LIBRARY DESTINATION "${_mini_libdir}" COMPONENT ClipShotMini
@@ -260,9 +232,7 @@ foreach(_project IN ITEMS clip_image ant_design_qt clip-crates clip_draw_engine_
         DESTINATION "${_mini_datadir}/clip-shot-mini/licenses/components/${_project}"
         COMPONENT ClipShotMini)
 endforeach()
-if(APPLE)
-    include("${CMAKE_CURRENT_LIST_DIR}/ClipShotMiniMacOS.cmake")
-elseif(NOT CLIP_SHOT_QT_STATIC)
+if(NOT CLIP_SHOT_QT_STATIC)
     qt_generate_deploy_app_script(TARGET clip_shot_mini OUTPUT_SCRIPT _mini_qt_deploy
         NO_UNSUPPORTED_PLATFORM_ERROR)
     install(SCRIPT "${_mini_qt_deploy}" COMPONENT ClipShotMini)
@@ -300,9 +270,6 @@ if(CLIP_SHOT_BUILD_TESTS)
     target_link_libraries(clip-shot-mini-settings-reset-tests PRIVATE
         clip_shot_settings_mini clip_shot_edition_mini clip_shot_image_codec
         clip_shot_clipboard_placement Qt6::Widgets)
-    if(APPLE)
-        target_link_libraries(clip-shot-mini-settings-reset-tests PRIVATE clip_shot_macos_clipboard)
-    endif()
     clip_shot_import_offscreen_platform(clip-shot-mini-settings-reset-tests)
 
     add_executable(clip-shot-mini-local-shortcut-reset-tests tests/local_shortcut_reset_tests.cpp
@@ -363,10 +330,6 @@ if(CLIP_SHOT_BUILD_TESTS)
         target_link_libraries(clip-shot-${_edition}-branding-tests PRIVATE
             clip_shot_edition_${_edition} clip_shot_settings${_suffix}
             clip_shot_updates${_suffix} clip_shot_image_codec clip_shot_clipboard_placement Qt6::Widgets)
-        if(APPLE)
-            target_link_libraries(clip-shot-${_edition}-branding-tests PRIVATE
-                clip_shot_macos_clipboard "-framework AppKit")
-        endif()
         clip_shot_import_offscreen_platform(clip-shot-${_edition}-branding-tests)
         add_dependencies(clip-shot-${_edition}-branding-tests ${_branding_translation_target})
     endforeach()

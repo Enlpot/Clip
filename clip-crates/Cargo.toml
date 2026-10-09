@@ -2,7 +2,6 @@
 members = [
     "crates/clip-memory",
     "crates/clip-media",
-    "crates/clip-macos",
     "crates/visual-region-detector",
     "crates/clip-visual-region-detector-c",
     "crates/clip-core",
