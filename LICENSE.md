@@ -2,6 +2,12 @@
 
 Copyright (C) 2025-2026 mg-chao
 
+## Provenance
+
+This repository is a continuation of [snow-apps](https://github.com/mg-chao/snow-apps)
+(author: mg-chao). The original copyright and license statements are preserved
+in full and are not affected by this repository's migration or rename.
+
 Clip Apps is a multi-license repository. Each component is licensed according
 to the following table. A component license applies to the original files in
 that directory tree unless a file or nested directory states otherwise.
