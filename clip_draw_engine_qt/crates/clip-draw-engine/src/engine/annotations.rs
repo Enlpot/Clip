@@ -19,7 +19,7 @@ struct Batch {
     operations: Vec<Annotation>,
 }
 fn default_label() -> String {
-    "MCP annotation".into()
+    "Automation annotation".into()
 }
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]

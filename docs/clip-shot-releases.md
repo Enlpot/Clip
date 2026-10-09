@@ -159,7 +159,7 @@ The source and target policies are centralized in
 
 Clip and Clip Mini are built from one CMake configuration and published
 under the same `v<version>_clip-shot` tag. The `clip_shot` and `clip_shot_mini`
-targets keep separate executable, helper, install, storage, and MCP identities.
+targets keep separate executable, helper, install, and storage identities.
 `CLIP_APPS_BUILD_CLIP_SHOT_MINI=ON` enables Mini alongside the full edition in
 Windows and macOS Apple Silicon presets; macOS Intel presets exclude Mini.
 The `scripts/build.ps1` and `scripts/build.sh` wrappers select the enabled
@@ -192,7 +192,7 @@ the full product's feed or installation record; full-edition helpers continue to
 accept historical full metadata without a product field. Mini ownership is stored
 in `clip-shot-mini-installation.json`, its portable marker is
 `bin/__mini_data_directory`, and its installed helpers are
-`bin/clip-shot-mini-updater.exe` and `bin/clip-shot-mini-mcp.exe` beside
+`bin/clip-shot-mini-updater.exe` beside
 `bin/clip_shot_mini.exe`. Publish and verify both signed feeds together. Package
 manager submissions use separate Mini identities (`mg-chao.clip-shot-mini`,
 `clipshot-mini`, and `clip-shot-mini` Homebrew casks).

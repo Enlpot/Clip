@@ -439,7 +439,7 @@ $updaterCargoManifest = Join-Path $repoRoot "clip_shot\rust\clip-shot-updater\Ca
     -VcpkgPrefix $staticVcpkgPrefix `
     -QtPrefix $qtPrefix `
     -CargoManifest @((Join-Path $repoRoot "clip_rust_ffi\Cargo.toml"), $ocrCargoManifest,
-        $updaterCargoManifest, (Join-Path $repoRoot "clip_shot\rust\clip-shot-mcp\Cargo.toml")) `
+        $updaterCargoManifest) `
     -CargoOptions @{ (Join-Path $repoRoot "clip_rust_ffi\Cargo.toml") = @('--features', 'selected-text');
         # Runtime 1.0.9 ships the raw-pixel worker without convenience dependencies.
         $ocrCargoManifest = @('--no-default-features', '--features',
@@ -480,10 +480,6 @@ foreach ($property in $expectedBinaryMetadata.Keys) {
     }
 }
 
-$mcpExecutable = Join-Path $installDirectory 'bin\clip-shot-mcp.exe'
-if (-not (Test-Path -LiteralPath $mcpExecutable -PathType Leaf)) {
-    throw "The staged Rust MCP bridge was not found: $mcpExecutable"
-}
 $updaterExecutable = Join-Path $installDirectory 'bin\clip-shot-updater.exe'
 if (-not (Test-Path -LiteralPath $updaterExecutable -PathType Leaf)) {
     throw "The staged Rust updater was not found: $updaterExecutable"
@@ -550,7 +546,7 @@ if (Test-Path -LiteralPath $stagedQtPluginDirectory -PathType Container) {
 }
 
 $stagedExecutables = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File -Filter "*.exe")
-$expectedExecutables = @("clip_shot.exe", "clip-ocr-process.exe", "crashpad_handler.exe", "clip-shot-updater.exe", "clip-shot-mcp.exe")
+$expectedExecutables = @("clip_shot.exe", "clip-ocr-process.exe", "crashpad_handler.exe", "clip-shot-updater.exe")
 $unexpectedExecutables = @($stagedExecutables | Where-Object { $_.Name -notin $expectedExecutables })
 if ($unexpectedExecutables.Count -gt 0) {
     throw "Release staging contains unexpected executables: $($unexpectedExecutables.FullName -join ', ')"
@@ -573,7 +569,6 @@ $stagedBinaries = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File 
 $expectedBinaryPaths = @(
     "bin\clip_shot.exe",
     "bin\clip-shot-updater.exe",
-    "bin\clip-shot-mcp.exe",
     "bin\crashpad_handler.exe",
     "bin\clip-ocr-process.exe",
     "bin\DirectML.dll"
@@ -658,7 +653,6 @@ $allowedSystemImports = @(
 $allowedLocalImports = @{
     "clip_shot.exe" = @()
     "clip-shot-updater.exe" = @()
-    "clip-shot-mcp.exe" = @()
     "crashpad_handler.exe" = @()
     "clip-ocr-process.exe" = @("directml.dll")
     "directml.dll" = @()

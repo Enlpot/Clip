@@ -35,7 +35,7 @@ The Apple Silicon package command produces both
 `clip-shot-mini-<version>-macos-arm64.dmg`, each with a `.sha256` sidecar.
 Mini installs as `Clip Mini.app`, with executable `clip_shot_mini` and
 bundle ID `com.clipshot.clip_shot_mini`. Its settings, launch-at-login entry,
-MCP discovery, and installer state use separate product identities. For direct
+and installer state use separate product identities. For direct
 staging, use `cmake --install build/<preset> --component ClipShotMini --prefix
 /path/to/staging`. Both editions share a version and release tag.
 

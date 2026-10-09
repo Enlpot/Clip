@@ -1,13 +1,6 @@
 set(_app "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/clip_shot.app")
 # Remove the obsolete helper from reused install/package staging directories.
 file(REMOVE "${_app}/Contents/MacOS/clip-shot-updater")
-if(@CLIP_SHOT_ENABLE_MCP@ AND NOT EXISTS "${_app}/Contents/MacOS/clip-shot-mcp")
-    message(FATAL_ERROR "The packaged Clip MCP bridge is missing")
-endif()
-set(_clip_mcp_deploy_arguments)
-if(@CLIP_SHOT_ENABLE_MCP@)
-    list(APPEND _clip_mcp_deploy_arguments "-executable=${_app}/Contents/MacOS/clip-shot-mcp")
-endif()
 set(_clip_codesign_identity [==[@CLIP_MACOS_CODESIGN_IDENTITY@]==])
 if(_clip_codesign_identity STREQUAL "-")
     message(WARNING "Clip is ad-hoc signed. Rebuilds can invalidate macOS privacy grants even when System Settings shows them enabled. Use CLIP_MACOS_CODESIGN_IDENTITY with a persistent certificate to retain the signing identity.")
@@ -46,7 +39,6 @@ if(NOT @CLIP_SHOT_QT_STATIC@)
     endif()
     execute_process(COMMAND "@CLIP_MACDEPLOYQT@" "${_app}"
         "-executable=${_app}/Contents/MacOS/clip-ocr-process"
-        ${_clip_mcp_deploy_arguments}
         "-executable=${_app}/Contents/MacOS/crashpad_handler"
         "-executable=${_app}/Contents/MacOS/libonnxruntime.dylib"
         "-executable=${_app}/Contents/PlugIns/platforms/libqoffscreen.dylib"

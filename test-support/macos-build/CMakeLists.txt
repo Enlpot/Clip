@@ -10,8 +10,6 @@ set(CLIP_SHOT_COPYRIGHT "Copyright (C) 2025-2026 mg-chao")
 set(CLIP_SHOT_RELEASE_STATIC OFF)
 set(CLIP_SHOT_QT_STATIC OFF)
 set(CLIP_SHOT_OCR_STATIC_ONNXRUNTIME OFF)
-# The deployment fixture contains no MCP bridge target or helper.
-set(CLIP_SHOT_ENABLE_MCP OFF)
 if(NOT CLIP_FFMPEG_ROOT)
     message(FATAL_ERROR "Pass CLIP_FFMPEG_ROOT to the provisioned native FFmpeg prefix")
 endif()

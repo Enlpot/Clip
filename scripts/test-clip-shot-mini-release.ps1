@@ -11,7 +11,7 @@ function Must-Fail([scriptblock]$Action) {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) "clip-shot-mini-release-$([guid]::NewGuid().ToString('N'))"
 try {
     foreach ($name in @('bin/clip_shot_mini.exe', 'bin/clip-shot-mini-updater.exe',
-            'bin/clip-shot-mini-mcp.exe', 'bin/crashpad_handler.exe',
+            'bin/crashpad_handler.exe',
             'bin/assets/ocr/asset-manifest.json', 'bin/audios/camera_shutter.mp3',
             'bin/__mini_data_directory', 'share/clip-shot-mini/licenses/LICENSE')) {
         $path = Join-Path $fixture $name

@@ -31,8 +31,7 @@ if ([string]::IsNullOrWhiteSpace($env:FFMPEG_DIR)) {
 $rustWorkspaces = @(
     (Join-Path $workspaceRoot "clip-crates"),
     (Join-Path $workspaceRoot "clip_draw_engine_qt"),
-    (Join-Path $workspaceRoot "clip_shot\rust\clip-shot-updater"),
-    (Join-Path $workspaceRoot "clip_shot\rust\clip-shot-mcp")
+    (Join-Path $workspaceRoot "clip_shot\rust\clip-shot-updater")
 )
 
 if ($Workspace.Count -gt 0) {

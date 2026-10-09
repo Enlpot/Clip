@@ -16,8 +16,8 @@ visibility, recapture suspension/reset, unchanged exported pixels, hover handoff
 actions, and literal Unicode/HTML-like text. Move toolbar tests cover order and disabled/checked states.
 
 The existing recognition-session tests and pinned recognition shortcut/context-menu tests also pass.
-Pinned recognition uses the unchanged manual workflow. Both the pinned-window and MCP-document test
-targets compile with the new optional recognition mode. Six distinct targeted CTest groups passed.
+Pinned recognition uses the unchanged manual workflow. The pinned-window test
+target compiles with the new optional recognition mode. Six distinct targeted CTest groups passed.
 
 ## Visual checks
 
