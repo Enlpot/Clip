@@ -350,9 +350,7 @@ $qtStamp = Get-ValidatedStaticQtStamp -Prefix $qtPrefix `
     -ExpectedVersion $script:ClipQtVersion -ExpectedConfiguration "Release" -Architecture $Architecture
 
 $cachePath = Join-Path $buildDirectory "CMakeCache.txt"
-$ocrAssetManifestPath = Join-Path $repoRoot $(if ($Architecture -eq 'x64') {
-    'clip_shot/packaging/clip-shot-ocr-asset-manifest.json'
-} else { 'clip_shot/packaging/clip-shot-ocr-asset-manifest-arm64.json' })
+$ocrAssetManifestPath = Join-Path $repoRoot 'clip_shot/packaging/clip-shot-ocr-asset-manifest.json'
 if ($OcrRuntimeArchive) {
     $OcrRuntimeArchive = Resolve-RepoPath $OcrRuntimeArchive
     $generatedManifest = Join-Path $buildDirectory "clip-shot-ocr-asset-manifest-$($windowsTarget.Platform).json"

@@ -92,21 +92,6 @@ function(clip_shot_add_ocr_runtime_tests)
     add_test(NAME clip-shot-ocr-assets-tests COMMAND clip-shot-ocr-assets-tests)
     set_tests_properties(clip-shot-ocr-assets-tests PROPERTIES TIMEOUT 60 LABELS "unit"
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    if(WIN32 AND CLIP_WINDOWS_ARCHITECTURE STREQUAL "x64")
-        add_executable(clip-shot-ocr-assets-arm64-contract-tests
-            tests/screenshot_ocr_assets_arm64_tests.cpp
-            tests/screenshot_ocr_assets_arm64_fixture.cpp
-            include/clip_shot/presentation/screenshotocrassets.h)
-        target_include_directories(clip-shot-ocr-assets-arm64-contract-tests PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/include")
-        target_link_libraries(clip-shot-ocr-assets-arm64-contract-tests PRIVATE
-            Qt6::Core Qt6::Network MINIZIP::minizip-ng)
-        add_test(NAME clip-shot-ocr-assets-arm64-contract-tests
-            COMMAND clip-shot-ocr-assets-arm64-contract-tests)
-        set_tests_properties(clip-shot-ocr-assets-arm64-contract-tests PROPERTIES
-            TIMEOUT 60 LABELS "unit;windows"
-            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
-    endif()
     add_test(NAME clip-shot-ocr-managed-runtime-tests
         COMMAND clip-shot-ocr-recognition-service-tests --managed-runtime-only)
     add_test(NAME clip-shot-ocr-managed-directml-runtime-tests
@@ -121,7 +106,7 @@ function(clip_shot_add_ocr_runtime_tests)
     if(NOT CLIP_SHOT_BUILD_TESTS)
         clip_add_qt_test_cli_guard()
         foreach(_runtime_test IN ITEMS clip-shot-ocr-recognition-service-tests
-                clip-shot-ocr-assets-tests clip-shot-ocr-assets-arm64-contract-tests)
+                clip-shot-ocr-assets-tests)
             if(TARGET ${_runtime_test})
                 target_link_libraries(${_runtime_test} PRIVATE clip_test_cli_guard_qt)
             endif()

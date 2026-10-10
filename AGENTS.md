@@ -7,7 +7,7 @@
 - `cmake/` – shared modules, `vcpkg-overlay-ports/`, `vcpkg-overlay-triplets/`, `test-support/`. `scripts/` – PowerShell entry points. `build/<preset>/` and `.tools/vcpkg/` are generated; never commit them.
 
 ## Build, Test, and Development Commands
-- Toolchain: VS 2026 x64 or ARM64 developer tools, CMake 4.2+, MSVC 14.51, Rust 1.97.1, repository-managed vcpkg/Qt. Windows ARM64 requires the ARM64 compiler/SDK and host-matching Qt tools/libclang; see `docs-windows-arm64-build.md`.
+- Toolchain: VS 2026 x64 developer tools, CMake 4.2+, MSVC 14.51, Rust 1.97.1, repository-managed vcpkg/Qt.
 - `scripts/bootstrap.ps1` – installs vcpkg deps and validates Qt/MSVC once per machine.
 - `scripts/build.ps1 -Preset windows-msvc-debug [-Target clip_shot] [-Clean]` – configure + build (`clip-all` by default). Presets: `windows-msvc-debug`, `windows-msvc-performance`, `clip-shot-msvc-release`, `clip-shot-msvc-fast`.
 - `ctest --preset test-windows-msvc-debug -R <regex>` – run only matching tests after a change. Do not run unfiltered `ctest --preset …` (full suite) unless the user explicitly asks.
@@ -15,7 +15,6 @@
 - `scripts/run-clip-shot.ps1` / `scripts/run-clip-image-viewer.ps1` – launch from the build tree.
 - `scripts/check-cpp-format.ps1 [-Fix]`, `scripts/check-rust.ps1 [-Fix]` – format and lint (also CMake targets `clip-format`, `clip-lint`).
 - `scripts/package-clip-shot.ps1` – NSIS installer (`clip-shot-msvc-release`).
-- Windows ARM64: use `clip-shot-msvc-arm64-{debug|performance|release|fast}` and `-Architecture arm64` for bootstrap/Qt/package scripts. ARM64 benchmarks require `clip-shot-msvc-arm64-performance`. Cross builds require native ARM64 validation before production publication.
 
 ## Coding Style & Naming Conventions
 - C++: `.clang-format` (LLVM base, 4 spaces, 100 columns, attached braces, `T* ptr`, includes unsorted). Strict warnings are on; `.clang-tidy` is enforced when `CLIP_APPS_ENABLE_CLANG_TIDY=ON`.

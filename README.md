@@ -2,7 +2,7 @@
 
 Clip 是一款面向 Windows 的截图与屏幕录制工具，集成了截图、长图拼接、屏幕录制、OCR 文字识别、图片编辑、钉窗（窗口置顶）、云上传与文本翻译等能力，追求开箱即用的体验与较高的工程可靠性。
 
-本仓库源自 [snow-apps](https://github.com/mg-chao/snow-apps)（原作者：mg-chao），在保留原作者版权与许可的前提下进行持续维护与优化。当前版本仅支持 Windows（x64 与 ARM64），已移除 macOS 支持。
+本仓库源自 [snow-apps](https://github.com/mg-chao/snow-apps)（原作者：mg-chao），在保留原作者版权与许可的前提下进行持续维护与优化。当前版本仅支持 Windows x64，已移除 macOS 与 Windows ARM64 支持。
 
 ## 主要特性
 
@@ -16,11 +16,9 @@ Clip 是一款面向 Windows 的截图与屏幕录制工具，集成了截图、
 
 ## 系统要求
 
-- Windows 10/11（x64 或 ARM64）
+- Windows 10/11（x64）
 - 构建工具链：Visual Studio 2026 Build Tools（MSVC 14.51）、CMake 4.2+、Rust 1.97.1
 - 依赖由仓库管理：vcpkg 依赖与 Qt 6.12.0 均安装在仓库内 `.tools/` 下，不污染系统全局环境
-
-Windows ARM64 构建说明见 [docs-windows-arm64-build.md](docs-windows-arm64-build.md)。
 
 ## 构建
 

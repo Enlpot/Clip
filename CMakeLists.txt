@@ -93,12 +93,7 @@ if(CLIP_APPS_BUILD_ANT_DESIGN_QT OR CLIP_APPS_BUILD_DRAW_ENGINE OR
 endif()
 clip_workspace_configure_options()
 
-clip_msvc_arm64_requires_native_codegen(_clip_arm64_native_codegen)
-if(_clip_arm64_native_codegen)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL OFF)
-    add_compile_options($<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/GL->)
-elseif(CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION)
+if(CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION)
     # CMake's IPO abstraction selects /GL + /LTCG on MSVC and -flto on GCC/Clang.
     # Applying it at directory scope also covers the C++ libraries that feed the
     # Clip executable, instead of optimizing only the final executable.

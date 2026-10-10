@@ -140,124 +140,6 @@
         "CLIP_APPS_PACKAGE_CLIP_SHOT": "OFF",
         "CLIP_RUST_RELEASE_PROFILE": "release-fast"
       }
-    },
-    {
-      "name": "clip-shot-msvc-arm64-base",
-      "hidden": true,
-      "generator": "Visual Studio 18 2026",
-      "architecture": "ARM64",
-      "toolset": "version=14.51",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "toolchainFile": "${sourceDir}/.tools/vcpkg/scripts/buildsystems/vcpkg.cmake",
-      "environment": {
-        "VCPKG_ROOT": "${sourceDir}/.tools/vcpkg"
-      },
-      "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION": "ON",
-        "CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
-        "VCPKG_TARGET_TRIPLET": "arm64-windows",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/.tools/vcpkg/installed/arm64/dynamic",
-        "VCPKG_OVERLAY_PORTS": "${sourceDir}/cmake/vcpkg-overlay-ports/crashpad;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg;${sourceDir}/cmake/vcpkg-overlay-ports/ffmpeg-bin2c;${sourceDir}/cmake/vcpkg-overlay-ports/libde265;${sourceDir}/cmake/vcpkg-overlay-ports/libheif;${sourceDir}/cmake/vcpkg-overlay-ports/libjxl;${sourceDir}/cmake/vcpkg-overlay-ports/libvpl;${sourceDir}/cmake/vcpkg-overlay-ports/amd-amf;${sourceDir}/cmake/vcpkg-overlay-ports/minizip-ng;${sourceDir}/cmake/vcpkg-overlay-ports/onnx;${sourceDir}/cmake/vcpkg-overlay-ports/onnxruntime;${sourceDir}/cmake/vcpkg-overlay-ports/opencv4;${sourceDir}/cmake/vcpkg-overlay-ports/x264;${sourceDir}/cmake/vcpkg-overlay-ports/x265;${sourceDir}/cmake/vcpkg-overlay-ports/zlib",
-        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-overlay-triplets",
-        "VCPKG_MANIFEST_INSTALL": "ON",
-        "VCPKG_MANIFEST_FEATURES": "clip-shot",
-        "CLIP_APPS_STRICT_COMPILE": "ON",
-        "CLIP_APPS_ENABLE_CLANG_TIDY": "OFF",
-        "CLIP_APPS_BUILD_ANT_DESIGN_QT": "ON",
-        "CLIP_APPS_BUILD_CLIP_IMAGE": "ON",
-        "CLIP_APPS_BUILD_DRAW_ENGINE": "ON",
-        "CLIP_APPS_BUILD_IMAGE_VIEWER": "OFF",
-        "CLIP_APPS_BUILD_CLIP_SHOT": "ON",
-        "CLIP_APPS_BUILD_CLIP_SHOT_MINI": "ON",
-        "CLIP_RUST_TARGET": "aarch64-pc-windows-msvc"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      }
-    },
-    {
-      "name": "clip-shot-msvc-arm64-debug",
-      "displayName": "Clip MSVC ARM64 Debug",
-      "inherits": "clip-shot-msvc-arm64-base",
-      "cacheVariables": {
-        "CMAKE_CONFIGURATION_TYPES": "Debug",
-        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebugDLL",
-        "CLIP_APPS_BUILD_TESTS": "ON",
-        "CLIP_APPS_BUILD_BENCHMARKS": "OFF",
-        "CLIP_APPS_RELEASE_STATIC": "OFF",
-        "CLIP_APPS_PACKAGE_CLIP_SHOT": "OFF",
-        "CLIP_APPS_API_BASE_URL": "http://localhost:8080",
-        "CLIP_IMAGE_PROFILE": "full",
-        "CLIP_IMAGE_DEFAULT_LINKAGE": "static",
-        "VCPKG_MANIFEST_FEATURES": "clip-shot;full-codecs",
-        "CLIP_APPS_BUILD_IMAGE_VIEWER": "OFF"
-      }
-    },
-    {
-      "name": "clip-shot-msvc-arm64-performance",
-      "displayName": "Clip MSVC ARM64 Performance",
-      "inherits": "clip-shot-msvc-arm64-base",
-      "cacheVariables": {
-        "CMAKE_CONFIGURATION_TYPES": "Release",
-        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL",
-        "CLIP_APPS_BUILD_TESTS": "ON",
-        "CLIP_APPS_BUILD_BENCHMARKS": "ON",
-        "CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE": "OFF",
-        "CLIP_APPS_RELEASE_STATIC": "OFF",
-        "CLIP_APPS_PACKAGE_CLIP_SHOT": "OFF",
-        "CLIP_APPS_API_BASE_URL": "https://clipshot.top",
-        "CLIP_IMAGE_PROFILE": "full",
-        "CLIP_IMAGE_DEFAULT_LINKAGE": "static",
-        "VCPKG_MANIFEST_FEATURES": "clip-shot;full-codecs",
-        "CLIP_APPS_BUILD_IMAGE_VIEWER": "OFF"
-      }
-    },
-    {
-      "name": "clip-shot-msvc-arm64-release",
-      "displayName": "Clip MSVC ARM64 Release",
-      "inherits": "clip-shot-msvc-arm64-base",
-      "cacheVariables": {
-        "CMAKE_CONFIGURATION_TYPES": "Release",
-        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded",
-        "VCPKG_TARGET_TRIPLET": "arm64-windows-static",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/.tools/vcpkg/installed/arm64/static",
-        "VCPKG_MANIFEST_FEATURES": "clip-shot",
-        "CLIP_APPS_BUILD_ANT_DESIGN_QT": "ON",
-        "CLIP_APPS_BUILD_CLIP_IMAGE": "ON",
-        "CLIP_APPS_BUILD_DRAW_ENGINE": "ON",
-        "CLIP_APPS_BUILD_IMAGE_VIEWER": "OFF",
-        "CLIP_APPS_BUILD_CLIP_SHOT": "ON",
-        "CLIP_APPS_BUILD_TESTS": "OFF",
-        "CLIP_APPS_BUILD_BENCHMARKS": "OFF",
-        "CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE": "OFF",
-        "CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "ON",
-        "CLIP_APPS_RELEASE_STATIC": "ON",
-        "CLIP_APPS_QT_STATIC": "ON",
-        "CLIP_APPS_PACKAGE_CLIP_SHOT": "ON",
-        "CLIP_APPS_API_BASE_URL": "https://clipshot.top",
-        "CLIP_IMAGE_PROFILE": "redistributable",
-        "CLIP_IMAGE_DEFAULT_LINKAGE": "static",
-        "CLIP_APPS_BUILD_CLIP_SHOT_MINI": "ON"
-      }
-    },
-    {
-      "name": "clip-shot-msvc-arm64-fast",
-      "displayName": "Clip MSVC ARM64 Fast",
-      "inherits": "clip-shot-msvc-arm64-release",
-      "binaryDir": "${sourceDir}/build/${presetName}",
-      "cacheVariables": {
-        "CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION": "OFF",
-        "CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION": "OFF",
-        "CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE": "OFF",
-        "CLIP_APPS_PACKAGE_CLIP_SHOT": "OFF",
-        "CLIP_RUST_RELEASE_PROFILE": "release-fast",
-        "VCPKG_MANIFEST_FEATURES": "clip-shot",
-        "CLIP_APPS_BUILD_IMAGE_VIEWER": "OFF"
-      }
     }
   ],
   "buildPresets": [
@@ -296,42 +178,6 @@
     {
       "name": "build-clip-shot-msvc-fast",
       "configurePreset": "clip-shot-msvc-fast",
-      "configuration": "Release",
-      "targets": [
-        "clip_shot",
-        "clip_shot_mini"
-      ]
-    },
-    {
-      "name": "build-clip-shot-msvc-arm64-debug",
-      "configurePreset": "clip-shot-msvc-arm64-debug",
-      "configuration": "Debug",
-      "targets": [
-        "clip_shot",
-        "clip_shot_mini"
-      ]
-    },
-    {
-      "name": "build-clip-shot-msvc-arm64-performance",
-      "configurePreset": "clip-shot-msvc-arm64-performance",
-      "configuration": "Release",
-      "targets": [
-        "clip_shot",
-        "clip_shot_mini"
-      ]
-    },
-    {
-      "name": "build-clip-shot-msvc-arm64-release",
-      "configurePreset": "clip-shot-msvc-arm64-release",
-      "configuration": "Release",
-      "targets": [
-        "clip_shot",
-        "clip_shot_mini"
-      ]
-    },
-    {
-      "name": "build-clip-shot-msvc-arm64-fast",
-      "configurePreset": "clip-shot-msvc-arm64-fast",
       "configuration": "Release",
       "targets": [
         "clip_shot",
@@ -378,45 +224,12 @@
           "label": "interactive"
         }
       }
-    },
-    {
-      "name": "test-clip-shot-msvc-arm64-debug",
-      "configurePreset": "clip-shot-msvc-arm64-debug",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      },
-      "filter": {
-        "exclude": {
-          "label": "interactive|e2e|benchmark"
-        }
-      }
-    },
-    {
-      "name": "test-clip-shot-msvc-arm64-performance",
-      "configurePreset": "clip-shot-msvc-arm64-performance",
-      "configuration": "Release",
-      "output": {
-        "outputOnFailure": true
-      },
-      "filter": {
-        "exclude": {
-          "label": "interactive|e2e|benchmark"
-        }
-      }
     }
   ],
   "packagePresets": [
     {
       "name": "package-clip-shot",
       "configurePreset": "clip-shot-msvc-release",
-      "generators": [
-        "NSIS"
-      ]
-    },
-    {
-      "name": "package-clip-shot-msvc-arm64-release",
-      "configurePreset": "clip-shot-msvc-arm64-release",
       "generators": [
         "NSIS"
       ]

@@ -7,7 +7,6 @@ on:
       - 'scripts/*winget*.ps1'
       - 'scripts/clip-shot-editions.ps1'
       - 'scripts/test-clip-shot-mini-release.ps1'
-      - 'scripts/test-clip-shot-arm64-distribution.ps1'
       - '.github/workflows/clip-shot-winget*.yml'
       - 'cmake/ClipShotInstaller.cmake'
       - 'clip_shot/tests/installer_packaging/**'
@@ -16,7 +15,6 @@ on:
       - 'scripts/*winget*.ps1'
       - 'scripts/clip-shot-editions.ps1'
       - 'scripts/test-clip-shot-mini-release.ps1'
-      - 'scripts/test-clip-shot-arm64-distribution.ps1'
       - '.github/workflows/clip-shot-winget*.yml'
       - 'cmake/ClipShotInstaller.cmake'
       - 'clip_shot/tests/installer_packaging/**'
@@ -41,14 +39,14 @@ on:
         description: Native Windows architecture of both upgrade releases
         default: x64
         type: choice
-        options: [x64, arm64]
+        options: [x64]
 
 permissions:
   contents: read
 
 jobs:
   install:
-    runs-on: ${{ inputs.architecture == 'arm64' && 'windows-11-vs2026-arm' || 'windows-2025-vs2026' }}
+    runs-on: windows-2025-vs2026
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +55,6 @@ jobs:
         run: |
           ./scripts/test-clip-shot-winget.ps1
           ./scripts/test-clip-shot-mini-release.ps1
-          ./scripts/test-clip-shot-arm64-distribution.ps1
       - name: Verify submission credentials without submitting
         if: github.event_name != 'pull_request'
         shell: pwsh

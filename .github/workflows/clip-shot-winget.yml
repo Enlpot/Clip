@@ -29,7 +29,6 @@ jobs:
         run: |
           ./scripts/test-clip-shot-winget.ps1
           ./scripts/test-clip-shot-mini-release.ps1
-          ./scripts/test-clip-shot-arm64-distribution.ps1
       - name: Resolve Clip tag
         id: release
         shell: pwsh
@@ -121,8 +120,6 @@ jobs:
         include:
           - architecture: x64
             runner: windows-2025-vs2026
-          - architecture: arm64
-            runner: windows-11-vs2026-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:

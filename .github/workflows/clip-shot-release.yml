@@ -25,12 +25,6 @@ jobs:
             rust-target: x86_64-pc-windows-msvc
             qt-kit: msvc2026_64-static-system-codecs
             installed-root: .tools/vcpkg/installed/static
-          - architecture: arm64
-            runner: windows-11-vs2026-arm
-            preset: clip-shot-msvc-arm64-release
-            rust-target: aarch64-pc-windows-msvc
-            qt-kit: msvc2026_arm64-static-system-codecs
-            installed-root: .tools/vcpkg/installed/arm64/static
     runs-on: ${{ matrix.runner }}
     env:
       VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
@@ -52,15 +46,6 @@ jobs:
       - name: Install Python build helper
         shell: pwsh
         run: python -m pip install --disable-pip-version-check virtualenv
-
-      - name: Provision and validate native ARM64 libclang
-        if: matrix.architecture == 'arm64'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $bin = ./scripts/initialize-clip-shot-arm64-libclang.ps1
-          "LIBCLANG_PATH=$bin" >> $env:GITHUB_ENV
 
       - name: Export GitHub Actions cache service
         uses: actions/github-script@v7
@@ -133,7 +118,7 @@ jobs:
           $null = Set-ClipBuildEnvironment -Preset $env:CLIP_PRESET
           python scripts/test-release-optimization.py
           if ($LASTEXITCODE -ne 0) { throw "Release optimization policy tests failed." }
-          python scripts/test-release-optimization-pch.py --architecture $(if ($env:CLIP_ARCHITECTURE -eq 'arm64') { 'ARM64' } else { 'x64' }) --toolset "version=14.51"
+          python scripts/test-release-optimization-pch.py --architecture x64 --toolset "version=14.51"
           if ($LASTEXITCODE -ne 0) { throw "Mixed optimization precompiled-header tests failed." }
           python scripts/test-clip-shot-mini-package.py
           if ($LASTEXITCODE -ne 0) { throw "Full/Mini compression configuration tests failed." }
@@ -150,7 +135,6 @@ jobs:
           python scripts/test-clip-shot-gitee-release.py
           if ($LASTEXITCODE -ne 0) { throw "Gitee mirror tests failed." }
           & scripts/test-clip-shot-github-release.ps1
-          & scripts/test-clip-shot-arm64-distribution.ps1
           cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --lib service::tests
           if ($LASTEXITCODE -ne 0) { throw "Updater fallback tests failed." }
           cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --lib github::tests
@@ -211,39 +195,21 @@ jobs:
             throw "Unexpected release tag: $env:GITHUB_REF_NAME"
           }
           $names = @()
-          foreach ($prefix in @('clip-shot', 'clip-shot-mini')) {
-            $variants = if ($prefix -eq 'clip-shot-mini') { @('online') } else { @('online', 'offline') }
-            foreach ($variant in $variants) {
-              $base = "$prefix-$version-windows-${{ matrix.architecture }}-$variant"
-              $names += @("$base.exe", "$base.exe.sha256", "$base.manifest.json",
-                "$base-update.zip", "$base-update.zip.sha256", "$base-update.manifest.json")
-            }
-            $base = "$prefix-$version-windows-${{ matrix.architecture }}-portable"
-            $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
-          }
-          $descriptor = if ($env:CLIP_ARCHITECTURE -eq 'arm64') { 'clip_shot/packaging/clip-shot-ocr-asset-manifest-arm64.json' } else { 'clip_shot/packaging/clip-shot-ocr-asset-manifest.json' }
+          $base = "clip-shot-$version-windows-${{ matrix.architecture }}-offline"
+          $names += @("$base.exe", "$base.exe.sha256", "$base.manifest.json")
+          $base = "clip-shot-$version-windows-${{ matrix.architecture }}-portable"
+          $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
+          $descriptor = 'clip_shot/packaging/clip-shot-ocr-asset-manifest.json'
           $runtime = (Get-Content -Raw $descriptor | ConvertFrom-Json).runtime.version
           $base = "clip-ocr-runtime-$runtime-windows-$env:CLIP_ARCHITECTURE"
           $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
           $packages = @($names | ForEach-Object { Get-Item -LiteralPath "build/${{ matrix.preset }}/$_" -ErrorAction Stop })
           $packages += @(Get-ChildItem build/${{ matrix.preset }}/native-validation -Filter '*.native-validation.json' -File)
-          if (@($packages | Where-Object Name -like '*.native-validation.json').Count -ne 8) { throw 'Missing final package native validation evidence.' }
+          if (@($packages | Where-Object Name -like '*.native-validation.json').Count -ne 3) { throw 'Missing final package native validation evidence.' }
           $assets = ($packages | ForEach-Object { $_.FullName }) -join "`n"
           "assets<<CLIP_ASSETS" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           $assets | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "CLIP_ASSETS" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Preserve matching release symbols separately
-        uses: actions/upload-artifact@v4
-        with:
-          name: clip-shot-symbols-${{ matrix.architecture }}-${{ github.ref_name }}
-          path: |
-            build/${{ matrix.preset }}/clip-shot-symbols-windows-${{ matrix.architecture }}.zip
-            build/${{ matrix.preset }}/clip-shot-symbols-windows-${{ matrix.architecture }}.zip.sha256
-            build/${{ matrix.preset }}/clip-shot-mini-symbols-windows-${{ matrix.architecture }}.zip
-            build/${{ matrix.preset }}/clip-shot-mini-symbols-windows-${{ matrix.architecture }}.zip.sha256
-          if-no-files-found: error
-          retention-days: 90
 
       - name: Preserve final packages and native validation manifests
         uses: actions/upload-artifact@v4
@@ -251,119 +217,3 @@ jobs:
           name: clip-shot-packages-${{ matrix.architecture }}
           path: ${{ steps.package.outputs.assets }}
           if-no-files-found: error
-
-  cross:
-    name: Cross build Windows ARM64 on x64
-    needs: build
-    runs-on: windows-2025-vs2026
-    env:
-      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install x64 Rust host and ARM64 target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.97.1
-          target: aarch64-pc-windows-msvc
-      - name: Install Python build helper
-        shell: pwsh
-        run: python -m pip install --disable-pip-version-check virtualenv
-      - name: Export GitHub Actions cache service
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-      - name: Resolve Qt version and cross host
-        id: qt-toolchain
-        shell: pwsh
-        run: |
-          . ./scripts/clip-build-environment.ps1
-          if ((Get-ClipWindowsHostArchitecture) -cne 'x64') { throw 'The ARM64 cross build requires an x64 host.' }
-          "version=$script:ClipQtVersion" >> $env:GITHUB_OUTPUT
-      - name: Restore native x64 Qt host tools
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.tool_cache }}\clip-qt\${{ steps.qt-toolchain.outputs.version }}\msvc2026_64-static-system-codecs
-          key: clip-qt-static-system-codecs-v6-development-${{ steps.qt-toolchain.outputs.version }}-msvc2026-x64-${{ runner.os }}-${{ hashFiles('scripts/qt-toolchain.json', 'scripts/build-static-qt.ps1', 'scripts/clip-build-environment.ps1', 'scripts/static-qt-features.json', 'scripts/qtbase-timezone-without-cldr.patch', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
-          fail-on-cache-miss: true
-      - name: Provision ARM64 dependencies for the x64 host
-        shell: pwsh
-        run: ./scripts/bootstrap.ps1 -Architecture arm64 -VcpkgVariants Static -SkipQtValidation
-      - name: Cache the separate cross compiled ARM64 Qt target kit
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.tool_cache }}\clip-qt-cross-x64\${{ steps.qt-toolchain.outputs.version }}\msvc2026_arm64-static-system-codecs
-          key: clip-qt-static-system-codecs-v6-cross-x64-arm64-${{ steps.qt-toolchain.outputs.version }}-msvc2026-${{ runner.os }}-${{ hashFiles('scripts/qt-toolchain.json', 'scripts/build-static-qt.ps1', 'scripts/clip-build-environment.ps1', 'scripts/static-qt-features.json', 'scripts/qtbase-timezone-without-cldr.patch', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
-      - name: Build ARM64 Qt with the restored x64 host kit
-        shell: pwsh
-        run: |
-          . ./scripts/clip-build-environment.ps1
-          $hostPrefix = Join-Path $env:RUNNER_TOOL_CACHE "clip-qt\$script:ClipQtVersion\msvc2026_64-static-system-codecs"
-          $prefix = Join-Path $env:RUNNER_TOOL_CACHE "clip-qt-cross-x64\$script:ClipQtVersion\msvc2026_arm64-static-system-codecs"
-          $dependencies = Join-Path $env:GITHUB_WORKSPACE '.tools/vcpkg/installed/arm64/static/arm64-windows-static'
-          ./scripts/build-static-qt.ps1 -Architecture arm64 -InstallPrefix $prefix `
-            -DependencyPrefix $dependencies -HostQtPrefix $hostPrefix
-          "CLIP_QT_HOST_PREFIX=$hostPrefix" >> $env:GITHUB_ENV
-          "QT_HOST_PATH=$hostPrefix" >> $env:GITHUB_ENV
-          "CLIP_QT_STATIC_DIR=$prefix\lib\cmake\Qt6" >> $env:GITHUB_ENV
-          "Qt6_DIR=$prefix\lib\cmake\Qt6" >> $env:GITHUB_ENV
-      - name: Cross build and package with static audits
-        shell: pwsh
-        run: |
-          ./scripts/stage-clip-shot-release.ps1 -Architecture arm64
-          $manifests = @(Get-ChildItem build/clip-shot-msvc-arm64-release -Filter 'clip-shot*-windows-arm64-*.manifest.json')
-          if ($manifests.Count -ne 8) { throw 'The cross build must package all Full and Mini variants.' }
-          foreach ($file in $manifests) {
-            $manifest = Get-Content -Raw -LiteralPath $file.FullName | ConvertFrom-Json
-            if ($manifest.Architecture -cne 'arm64' -or $manifest.NativeValidationRequired -ne $true -or
-                $manifest.NativeValidation.Passed -ne $false -or $manifest.NativeValidation.HostPlatform -cne 'windows-x64') {
-              throw 'A cross package must retain static-only evidence and require native validation.'
-            }
-          }
-      - name: Preserve cross package audit manifests separately
-        uses: actions/upload-artifact@v4
-        with:
-          name: clip-shot-cross-arm64-static-audits
-          path: build/clip-shot-msvc-arm64-release/clip-shot*-windows-arm64-*.manifest.json
-          if-no-files-found: error
-
-  draft:
-    name: Assemble both Windows architectures for local signing
-    needs: [build, cross]
-    runs-on: windows-2025-vs2026
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: clip-shot-packages-*
-          path: build/release-assets
-          merge-multiple: true
-      # The local publisher signs all four architecture/product feeds and rechecks native proof.
-      # CI never receives the private release signing key or publishes a release automatically.
-      - name: Create complete draft for local signing and finalization
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $version = [regex]::Match((Get-Content -Raw CMakeLists.txt), 'set\(CLIP_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
-          if ($env:GITHUB_REF_NAME -cne "v${version}_clip-shot") { throw 'Release tag differs from source.' }
-          $assets = @(Get-ChildItem build/release-assets -File | ForEach-Object { $_.FullName })
-          . ./scripts/clip-shot-native-validation.ps1
-          foreach ($architecture in @('x64', 'arm64')) {
-            foreach ($product in @('clip-shot', 'clip-shot-mini')) {
-              $name = "$product-$version-windows-$architecture-online.exe"
-              if (-not (Test-Path -LiteralPath (Join-Path build/release-assets $name))) { throw "Missing $name." }
-            }
-            foreach ($manifestFile in @(Get-ChildItem build/release-assets -Filter "*-windows-$architecture-*.manifest.json" -File)) {
-              $manifest = Get-Content -Raw -LiteralPath $manifestFile.FullName | ConvertFrom-Json
-              $descriptor = if ($manifest.PSObject.Properties['Installer']) { $manifest.Installer } else { $manifest.Archive }
-              $artifact = Join-Path build/release-assets $descriptor.Path
-              $null = Assert-ClipShotNativeValidation -Manifest $manifest -ArtifactPath $artifact `
-                -Platform "windows-$architecture" -ProofDirectory build/release-assets
-            }
-          }
-          $releaseFlags = if (($version -split '\+')[0].Contains('-')) { @('--prerelease') } else { @() }
-          gh release create $env:GITHUB_REF_NAME @assets --draft @releaseFlags --generate-notes `
-            --title "Clip and Clip Mini $env:GITHUB_REF_NAME"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not create release draft.' }
