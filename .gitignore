@@ -3,7 +3,7 @@
 /.codex/
 /scripts/publish-clip-shot-release.local.ps1
 .zcode
-output
+/output
 
 # Rust build output
 **/target/
