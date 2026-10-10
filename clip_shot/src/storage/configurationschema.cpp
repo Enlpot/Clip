@@ -1283,7 +1283,7 @@ const QVector<ConfigurationSchemaEntry> kRawEntries = {
      {QStringLiteral("mouse_position"), QStringLiteral("top_left"), QStringLiteral("top_right"),
       QStringLiteral("bottom_left"), QStringLiteral("bottom_right"), QStringLiteral("center")}},
     {QStringLiteral("pin_to_screen/double_click_action"),
-     QStringLiteral("thumbnail_mode"),
+     QStringLiteral("close"),
      ConfigurationValueKind::String,
      std::nullopt,
      {QStringLiteral("none"), QStringLiteral("thumbnail_mode"), QStringLiteral("hide_to_top"),

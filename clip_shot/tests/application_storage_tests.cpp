@@ -1868,8 +1868,8 @@ void settingsAdaptersRoundTripAndRejectInvalidValues() {
             "drawing exclusion adapter must use schema canonicalization");
 
     const storage::PinToScreenSettings pin;
-    require(pin.doubleClickAction() == QStringLiteral("thumbnail_mode"),
-            "pinned double-click must default to thumbnail mode");
+    require(pin.doubleClickAction() == QStringLiteral("close"),
+            "pinned double-click must default to close");
     for (const QString& action : {QStringLiteral("none"), QStringLiteral("thumbnail_mode"),
                                   QStringLiteral("hide_to_top"), QStringLiteral("close")}) {
         require(pin.setDoubleClickAction(action) && pin.doubleClickAction() == action,
