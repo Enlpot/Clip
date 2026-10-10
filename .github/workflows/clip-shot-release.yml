@@ -107,6 +107,15 @@ jobs:
           ctest --test-dir build/qt-timezone-size -R '^clip-qt-timezone-tests$' --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Qt timezone behavior tests failed." }
 
+      - name: Provision NSIS installer toolchain
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}/NSIS/makensis.exe") -and
+              -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS provisioning failed.' }
+          }
+
       - name: Build, audit, and package statically
         shell: pwsh
         run: .\scripts\stage-clip-shot-release.ps1 -Architecture $env:CLIP_ARCHITECTURE
