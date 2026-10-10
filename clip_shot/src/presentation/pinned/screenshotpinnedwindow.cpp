@@ -1472,6 +1472,10 @@ bool ScreenshotPinnedWindow::prewarm(QScreen* screen) {
 }
 
 ScreenshotPinnedWindow::~ScreenshotPinnedWindow() {
+    if (m_ocrAppFilterActive) {
+        m_ocrAppFilterActive = false;
+        QCoreApplication::instance()->removeEventFilter(this);
+    }
     if (m_selectionController)
         m_selectionController->unregisterWindow(this);
     m_pointerPresence->setActive(false);
@@ -2340,7 +2344,9 @@ bool ScreenshotPinnedWindow::present(const Config& requestedConfig,
                 return;
             }
             if (m_canvas != nullptr) {
-                m_canvas->setCanvasContentVisible(!m_ocrMode);
+                // Keep the screenshot visible regardless of OCR mode; the
+                // recognition layer overlays it transparently.
+                m_canvas->setCanvasContentVisible(true);
             }
             requestFirstContentFramePaint();
         });
@@ -2398,6 +2404,16 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
     if (watched == nullptr || !watched->isWidgetType() || event == nullptr || m_closing) {
         return QWidget::eventFilter(watched, event);
     }
+    // While OCR is active this filter also watches QApplication so wheel events
+    // delivered to sibling top-level windows (e.g. the original-image preview)
+    // still zoom the pin. Only wheel events pass that gate; everything else
+    // keeps its original routing to avoid disturbing unrelated windows.
+    const bool ownTree =
+        watched == this || watched == m_canvas || watched == m_recognitionContent ||
+        (watched->isWidgetType() && static_cast<QWidget*>(watched)->window() == window());
+    if (!ownTree && !(m_ocrAppFilterActive && event->type() == QEvent::Wheel)) {
+        return QWidget::eventFilter(watched, event);
+    }
     if (m_editController != nullptr && watched == m_editController->toolbarWindow()) {
         if (event->type() == QEvent::Show || event->type() == QEvent::Hide) {
             updateOriginalImagePreviewVisibility();
@@ -2414,10 +2430,14 @@ bool ScreenshotPinnedWindow::eventFilter(QObject* watched, QEvent* event) {
     if ((m_platform->usesControlledInteraction() && handlePinnedGesture(watched, event)) ||
         handleControlledPointer(watched, event))
         return true;
-    if (event->type() == QEvent::Wheel &&
-        (handleOpacityWheel(watched, static_cast<QWheelEvent*>(event)) ||
-         handleScaleWheel(watched, static_cast<QWheelEvent*>(event)))) {
-        return true;
+    if (event->type() == QEvent::Wheel) {
+        const bool ocrWheelCapture =
+            m_ocrAppFilterActive && cursorInsideWindowGeometry();
+        if ((ownTree || ocrWheelCapture) &&
+            (handleOpacityWheel(watched, static_cast<QWheelEvent*>(event)) ||
+             handleScaleWheel(watched, static_cast<QWheelEvent*>(event)))) {
+            return true;
+        }
     }
     if (watched == m_clickThroughMoveButton.get()) {
         if (event->type() == QEvent::Hide || event->type() == QEvent::UngrabMouse) {
@@ -3398,9 +3418,8 @@ void ScreenshotPinnedWindow::refreshContextMenu() {
         }
     }
     if (m_scaleMenuAction != nullptr) {
-        m_scaleMenuAction->setEnabled(!m_ocrMode ||
-                                      (m_recognitionSession != nullptr &&
-                                       m_recognitionSession->originalImageTranslationActive()));
+        // Zoom stays available while OCR is active (PixPin-style).
+        m_scaleMenuAction->setEnabled(true);
     }
     if (m_scaleReadoutAction != nullptr) {
         m_scaleReadoutAction->setText(tr("Current: %1%").arg(qRound(m_scalePercent)));
@@ -3852,7 +3871,9 @@ void ScreenshotPinnedWindow::finishMaterializedImage(ScreenshotExportTaskResult 
     }
 
     if (succeeded && m_canvas != nullptr && !m_firstContentFramePublished) {
-        m_canvas->setCanvasContentVisible(!m_ocrMode);
+        // Keep the screenshot visible regardless of OCR mode; the
+        // recognition layer overlays it transparently.
+        m_canvas->setCanvasContentVisible(true);
         m_firstFramePaintSucceeded = true;
         requestFirstContentFramePaint();
         return;
@@ -4416,6 +4437,13 @@ void ScreenshotPinnedWindow::activateRecognitionMode(int mode, bool showToolbar)
         m_editController->prepareRecognitionToolActivation();
     }
     m_recognitionSession->activate(selectedMode);
+    // Capture wheel events application-wide while OCR is active so zoom works
+    // even when the wheel lands on a sibling top-level window (original-image
+    // preview overlay). Removed again in deactivateRecognition().
+    if (!m_ocrAppFilterActive) {
+        m_ocrAppFilterActive = true;
+        QCoreApplication::instance()->installEventFilter(this);
+    }
     refreshContextMenu();
     schedulePersistence();
 }
@@ -4469,6 +4497,10 @@ void ScreenshotPinnedWindow::deactivateRecognition() {
     m_initialRecognitionVisible = false;
     m_initialTranslationVisible = false;
     m_translateAfterRecognition = false;
+    if (m_ocrAppFilterActive) {
+        m_ocrAppFilterActive = false;
+        QCoreApplication::instance()->removeEventFilter(this);
+    }
     if (m_recognitionSession != nullptr) {
         m_recognitionSession->deactivate();
     }
@@ -4682,7 +4714,10 @@ void ScreenshotPinnedWindow::configureRecognitionSession() {
                     }
                 }
                 if (m_canvas != nullptr) {
-                    m_canvas->setCanvasContentVisible(!active);
+                    // Keep the screenshot visible while OCR is active so the
+                    // recognition text layer overlays the original image
+                    // (PixPin-style) instead of hiding it behind a fill.
+                    m_canvas->setCanvasContentVisible(true);
                     if (m_editController != nullptr) {
                         m_editController->syncCanvasInteractionState();
                     } else {
@@ -4999,6 +5034,17 @@ ScreenshotRecognitionWindow* ScreenshotPinnedWindow::ensureRecognitionContent() 
         });
         content->syncOriginalImagePreviewStacking(m_alwaysOnTop);
         content->installEventFilter(this);
+        // Route wheel events straight to window zoom regardless of which child
+        // of the recognition overlay ends up as the receiver (PixPin-style
+        // immediate zoom). The overlay's mouse-transparent text layer and hit-
+        // test container otherwise leave the first wheel event unhandled until
+        // a mouse move re-establishes the hover target.
+        const QList<QWidget*> overlayChildren = content->findChildren<QWidget*>();
+        for (QWidget* child : overlayChildren) {
+            if (child != nullptr) {
+                child->installEventFilter(this);
+            }
+        }
         connect(content, &ScreenshotRecognitionWindow::embeddedContextMenuRequested, this,
                 &ScreenshotPinnedWindow::showContextMenu);
         QScreen* contentScreen =
@@ -5106,7 +5152,16 @@ void ScreenshotPinnedWindow::updateOcrPresentation() {
             m_displayOcrPresentation,
             ScreenshotCanvasRenderer::OcrPresentationMode::BackgroundOnly);
         if (m_recognitionContent != nullptr) {
-            m_recognitionContent->setOcrPresentation(m_displayOcrPresentation);
+            // PixPin-style: while the original image stays visible, render the
+            // overlay as a transparent selection layer (faint tint + strong
+            // selection highlight). Recognized text is painted only while the
+            // user actively edits it.
+            const bool textEditing =
+                m_recognitionSession != nullptr && m_recognitionSession->editing();
+            m_recognitionContent->setOcrPresentation(
+                m_displayOcrPresentation,
+                textEditing ? ScreenshotOcrTextLayer::RenderingMode::Normal
+                            : ScreenshotOcrTextLayer::RenderingMode::SelectionOnly);
             updateBorderOutline();
         }
     }
@@ -5123,6 +5178,12 @@ QPointF ScreenshotPinnedWindow::canvasPositionForViewPosition(const QPointF& pos
 
 void ScreenshotPinnedWindow::copyEditToolbarContent() {
     if (m_recognitionSession == nullptr || !m_recognitionSession->active()) {
+        copyCurrentViewport();
+        return;
+    }
+    // PixPin-style: without a text selection, Ctrl+C copies the image instead
+    // of dumping every recognized line as text.
+    if (m_displayOcrPresentation == nullptr || !m_displayOcrPresentation->hasTextSelection()) {
         copyCurrentViewport();
         return;
     }
@@ -5377,7 +5438,10 @@ void ScreenshotPinnedWindow::copyCurrentViewport() {
     if (copyHiddenTextSelection()) {
         return;
     }
-    if (m_ocrMode && m_recognitionSession != nullptr && m_recognitionSession->active()) {
+    // PixPin-style: copy selected text only when a text selection exists;
+    // otherwise fall through and copy the image.
+    if (m_ocrMode && m_recognitionSession != nullptr && m_recognitionSession->active() &&
+        m_displayOcrPresentation != nullptr && m_displayOcrPresentation->hasTextSelection()) {
         copyEditToolbarContent();
         return;
     }
@@ -6453,13 +6517,16 @@ void ScreenshotPinnedWindow::rebuildTransformedImage() {
 }
 
 void ScreenshotPinnedWindow::applyScale(int percent) {
+    // See applyWheelScale: a stale native move flag must not block zoom.
+    if (m_windowDragActive) {
+        finishWindowMove();
+    }
     if (m_lockedMode) {
         showLockedReadout();
         return;
     }
-    if ((m_ocrMode && (m_recognitionSession == nullptr ||
-                       !m_recognitionSession->originalImageTranslationActive())) ||
-        percent < kMinimumScalePercent || percent > kMaximumScalePercent) {
+    // OCR mode keeps zoom available (PixPin-style).
+    if (percent < kMinimumScalePercent || percent > kMaximumScalePercent) {
         return;
     }
     restoreFromThumbnailImmediately();
@@ -6486,6 +6553,13 @@ void ScreenshotPinnedWindow::applyScale(int percent) {
 }
 
 void ScreenshotPinnedWindow::applyWheelScale(double percent, const QPointF& nativeCursor) {
+    // A wheel event only reaches us after any native move loop has already
+    // ended (the loop is modal), so a stale drag flag means the move finished
+    // without its WM_EXITSIZEMOVE/NCLBUTTONUP callback. End it here so zoom is
+    // never blocked by a phantom move (OCR backdrop click can start one).
+    if (m_windowDragActive) {
+        finishWindowMove();
+    }
     if (m_selectionController && m_selectionController->usesSharedGeometry(this)) {
         static_cast<void>(m_selectionController->scaleBy(this, percent));
         return;
@@ -6494,9 +6568,8 @@ void ScreenshotPinnedWindow::applyWheelScale(double percent, const QPointF& nati
         showLockedReadout();
         return;
     }
-    if ((m_ocrMode && (m_recognitionSession == nullptr ||
-                       !m_recognitionSession->originalImageTranslationActive())) ||
-        percent < kMinimumScalePercent || percent > kMaximumScalePercent) {
+    // OCR mode keeps wheel zoom available (PixPin-style).
+    if (percent < kMinimumScalePercent || percent > kMaximumScalePercent) {
         return;
     }
     restoreFromThumbnailImmediately();
@@ -6582,15 +6655,22 @@ bool ScreenshotPinnedWindow::handleOpacityWheel(QObject* watched, QWheelEvent* e
     return true;
 }
 
+bool ScreenshotPinnedWindow::cursorInsideWindowGeometry() const {
+    const QPoint cursorPosition = QCursor::pos();
+    const QRect native = authoritativeNativeGeometry();
+    if (native.isValid() && native.contains(cursorPosition)) {
+        return true;
+    }
+    const QRect frame = frameGeometry();
+    return frame.isValid() && frame.contains(cursorPosition);
+}
+
 bool ScreenshotPinnedWindow::handleScaleWheel(QObject* watched, QWheelEvent* event) {
     if (event == nullptr || m_closing) {
         return false;
     }
-    if (m_ocrMode && (m_recognitionSession == nullptr ||
-                      !m_recognitionSession->originalImageTranslationActive())) {
-        event->accept();
-        return true;
-    }
+    // OCR mode keeps wheel zoom available (PixPin-style); the recognition
+    // layer geometry follows through updateCanvasViewport().
     if (!m_ocrMode && m_editController != nullptr && m_editController->editMode()) {
         return false;
     }

@@ -11,6 +11,7 @@
 #include "clip_shot/presentation/screenshotdisplaysession.h"
 #include "clip_shot/presentation/screenshotgeometry.h"
 #include "clip_shot/presentation/screenshotocrpresentation.h"
+#include "clip_shot/presentation/screenshotocrtextlayer.h"
 #include "clip_shot/presentation/screenshotrecognitionsessioncontroller.h"
 #include "clip_shot/presentation/screenshotrecognitionwindow.h"
 #include "clip_shot/presentation/screenshotoverlaycoordinator.h"
@@ -126,7 +127,14 @@ ScreenshotOcrController::ScreenshotOcrController(ScreenshotOcrControllerContext 
             },
             [this](std::shared_ptr<ScreenshotOcrPresentation> presentation) {
                 if (m_recognitionWindow != nullptr) {
-                    m_recognitionWindow->setOcrPresentation(std::move(presentation));
+                    // PixPin-style: keep the original screenshot visible and
+                    // render the recognition overlay as a transparent selection
+                    // layer; painted text appears only while editing.
+                    const bool textEditing = m_session != nullptr && m_session->editing();
+                    m_recognitionWindow->setOcrPresentation(
+                        std::move(presentation),
+                        textEditing ? ScreenshotOcrTextLayer::RenderingMode::Normal
+                                    : ScreenshotOcrTextLayer::RenderingMode::SelectionOnly);
                 }
             },
             [this](std::shared_ptr<ScreenshotOcrPresentation> presentation) {
@@ -415,7 +423,8 @@ void ScreenshotOcrController::activateMode(Mode mode, bool textTranslation) {
                     overlay->screenshotSelectionBorderVisible(),
                 });
                 canvas->setInteractionEnabled(false);
-                canvas->setCanvasContentVisible(false);
+                // Keep the screenshot visible while OCR is active; the
+                // recognition window overlays the original image (PixPin-style).
                 overlay->setScreenshotSelection(m_context.selection.normalizedSelection(), false,
                                                 m_context.selection.cornerRadius());
                 if (!m_context.selection.rectangular())

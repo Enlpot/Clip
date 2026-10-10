@@ -1785,7 +1785,11 @@ void ScreenshotCanvasRenderer::paintBackground(QPainter& painter,
             }
         }
     }
+    // BackgroundOnly leaves the screenshot untouched (PixPin-style): the
+    // recognition text layer is a translucent overlay owned by the recognition
+    // window, so the OCR filtered image must not be painted over the original.
     if (!originalOnly && m_ocrVisible && m_ocrPresentation != nullptr &&
+        m_ocrPresentationMode == OcrPresentationMode::BackgroundAndText &&
         !m_ocrFilteredImage.isNull()) {
         const QRectF canvasRect = m_ocrFilteredCanvasRect.isValid()
                                       ? m_ocrFilteredCanvasRect

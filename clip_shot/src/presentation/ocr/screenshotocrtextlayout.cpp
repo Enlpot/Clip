@@ -739,7 +739,7 @@ QRectF ScreenshotOcrTextLayout::boundingRect() const {
 void ScreenshotOcrTextLayout::paint(QPainter* painter, const QColor& selectionBackground,
                                     const QColor& selectionForeground, PaintMode mode) const {
     const bool selectionOnly = mode == PaintMode::SelectionOnly;
-    if (painter == nullptr || m_text.isEmpty() || (selectionOnly && m_selection.empty())) {
+    if (painter == nullptr || m_text.isEmpty()) {
         return;
     }
 
@@ -750,6 +750,13 @@ void ScreenshotOcrTextLayout::paint(QPainter* painter, const QColor& selectionBa
     // that may have chosen an opaque contrasting color during text layout.
     const QColor textColor = selectionOnly ? QColor(Qt::transparent) : m_textColor;
     const QColor selectedTextColor = selectionOnly ? QColor(Qt::transparent) : selectionForeground;
+    // PixPin-style selection overlays tint every recognized line faintly so
+    // regions stay visible over the original image; the active selection uses
+    // the stronger highlight.
+    QColor lineTint = selectionBackground;
+    if (selectionOnly) {
+        lineTint.setAlphaF(std::min<qreal>(0.14F, lineTint.alphaF()));
+    }
     painter->setPen(textColor);
 
     if (m_direction == ScreenshotOcrTextDirection::Vertical) {
@@ -760,11 +767,9 @@ void ScreenshotOcrTextLayout::paint(QPainter* painter, const QColor& selectionBa
             const VerticalGlyph& glyph = m_verticalGlyphs.at(index);
             const int glyphEnd = glyph.textStart + glyph.textLength;
             const bool selected = selectionStart < glyphEnd && selectionEnd > glyph.textStart;
-            if (selected) {
-                painter->fillRect(QRectF(0.0, static_cast<qreal>(index) * m_verticalCellAdvance,
-                                         m_bounds.width(), m_verticalCellAdvance),
-                                  selectionBackground);
-            }
+            painter->fillRect(QRectF(0.0, static_cast<qreal>(index) * m_verticalCellAdvance,
+                                     m_bounds.width(), m_verticalCellAdvance),
+                              selected ? selectionBackground : lineTint);
         }
 
         if (selectionOnly) {
@@ -807,6 +812,13 @@ void ScreenshotOcrTextLayout::paint(QPainter* painter, const QColor& selectionBa
             textFormat.length = row.textLength;
             textFormat.format.setForeground(QBrush(textColor));
             formats.push_back(textFormat);
+            if (selectionOnly) {
+                QTextLayout::FormatRange tint;
+                tint.start = 0;
+                tint.length = row.textLength;
+                tint.format.setBackground(QBrush(lineTint));
+                formats.push_back(tint);
+            }
             const int start = std::max(row.textStart, m_selection.start);
             const int end =
                 std::min(row.textStart + row.textLength, m_selection.start + m_selection.length);
@@ -839,6 +851,13 @@ void ScreenshotOcrTextLayout::paint(QPainter* painter, const QColor& selectionBa
     textFormat.length = static_cast<int>(m_text.size());
     textFormat.format.setForeground(QBrush(textColor));
     formats.push_back(textFormat);
+    if (selectionOnly) {
+        QTextLayout::FormatRange tint;
+        tint.start = 0;
+        tint.length = static_cast<int>(m_text.size());
+        tint.format.setBackground(QBrush(lineTint));
+        formats.push_back(tint);
+    }
     if (!m_selection.empty()) {
         QTextLayout::FormatRange range;
         range.start = qBound(0, m_selection.start, static_cast<int>(m_text.size()));

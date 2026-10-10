@@ -654,6 +654,8 @@ class ScreenshotPinnedWindow final : public QWidget {
     bool m_ocrSupported = false;
     bool m_formattedTextAvailable = false;
     bool m_ocrMode = false;
+    bool m_ocrAppFilterActive = false;
+    bool cursorInsideWindowGeometry() const;
     bool m_hiddenTextSelection = false;
     bool m_initialRecognitionVisible = false;
     bool m_initialTranslationVisible = false;
