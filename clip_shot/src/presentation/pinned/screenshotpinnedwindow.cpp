@@ -4908,6 +4908,14 @@ void ScreenshotPinnedWindow::configureRecognitionSession() {
             });
     connect(m_recognitionSession.get(),
             &ScreenshotRecognitionSessionController::recognitionResultsChanged, this, [this]() {
+                if (!m_automaticRecognitionActivated && m_automaticTextRecognition &&
+                    m_recognitionSession != nullptr && !m_recognitionSession->active() &&
+                    !m_closing && !m_thumbnailMode && m_recognitionSession->hasTextResult()) {
+                    m_automaticRecognitionActivated = true;
+                    activateRecognitionMode(
+                        static_cast<int>(ScreenshotRecognitionSessionController::Mode::Text),
+                        false);
+                }
                 synchronizeHiddenTextSelection();
                 refreshContextMenu();
                 updateRecognitionToolbarState();

@@ -659,6 +659,7 @@ class ScreenshotPinnedWindow final : public QWidget {
     bool m_initialTranslationVisible = false;
     bool m_translateAfterRecognition = false;
     bool m_automaticTextRecognition = !clip_shot::app::edition::isMini;
+    bool m_automaticRecognitionActivated = false;
     bool m_automationRecognition = false;
     bool m_editingEnabled = true;
     bool m_thumbnailMode = false;
