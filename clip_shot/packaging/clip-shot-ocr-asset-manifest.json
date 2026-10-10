@@ -6,9 +6,9 @@
     "platform": "windows-x64",
     "archive": {
       "name": "clip-ocr-runtime-1.0.10-windows-x64.zip",
-      "size": 15988806,
-      "sha256": "429ab6e8180c2781bc863218c470c931b6016d25cac3fe3b76536a4d3d77d020",
-      "url": "https://www.modelscope.cn/models/mgchao/ClipShotOCR/resolve/master/runtime/1.0.10/windows-x64/clip-ocr-runtime-1.0.10-windows-x64.zip"
+      "size": 15768042,
+      "sha256": "7f6b7a9e608c420957310ebdbc2036ad49e1e18c9b765f5d33f87d69dc5d4592",
+      "url": "https://raw.githubusercontent.com/Enlpot/Clip/main/clip_shot/packaging/clip-ocr-runtime-1.0.10-windows-x64.zip"
     },
     "files": [
       {

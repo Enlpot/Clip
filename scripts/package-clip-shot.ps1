@@ -798,7 +798,7 @@ $ocrDefaultModelId = "ppocrv6-small-463ea9f"
 $ocrModelRootUrl = "https://www.modelscope.cn/models/mgchao/ClipShotOCR/resolve/master"
 $ocrRuntimeFileName = "clip-ocr-process-$ocrRuntimeVersion-$ocrPlatform.exe"
 $ocrRuntimeArchiveName = "clip-ocr-runtime-$ocrRuntimeVersion-$ocrPlatform.zip"
-$ocrRuntimeUrl = "https://www.modelscope.cn/models/mgchao/ClipShotOCR/resolve/master/runtime/$ocrRuntimeVersion/$ocrPlatform/$ocrRuntimeArchiveName"
+$ocrRuntimeUrl = "https://raw.githubusercontent.com/Enlpot/Clip/main/clip_shot/packaging/$ocrRuntimeArchiveName"
 $ocrModels = @(
     [ordered]@{
         Type = "extra_small"
