@@ -150,6 +150,11 @@ function Save-RemoteFile {
         $response.EnsureSuccessStatusCode()
         $contentLength = $response.Content.Headers.ContentLength
         $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $destinationParent = [System.IO.Path]::GetDirectoryName($Destination)
+        if ($destinationParent -and
+            -not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
+            $null = New-Item -ItemType Directory -Path $destinationParent -Force
+        }
         $outputStream = [System.IO.File]::Open(
             $Destination,
             [System.IO.FileMode]::Create,
