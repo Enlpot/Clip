@@ -4,6 +4,30 @@ option(CLIP_ENABLE_CLANG_TIDY "Run clang-tidy while compiling C++ targets." OFF)
 option(CLIP_APPS_ENABLE_RELEASE_SIZE_OPTIMIZATION
     "Prefer smaller code in explicitly selected cold Clip Release modules." OFF)
 
+function(clip_msvc_arm64_requires_native_codegen output)
+    # MSVC 19.51 ARM64 LTCG emitted GS-cookie epilogues without restoring LR.
+    # Keep optimized native objects until the final-image/native regressions
+    # verify a repaired backend. Static dependencies must follow the same policy.
+    # Standalone libraries may not initialize the workspace architecture cache.
+    # Prefer compiler metadata, which describes the target even for cross builds;
+    # CMAKE_SYSTEM_PROCESSOR may describe the host and is not a safe fallback.
+    set(_architecture "${CLIP_WINDOWS_ARCHITECTURE}")
+    if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
+        set(_architecture "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+    elseif(MSVC_CXX_ARCHITECTURE_ID)
+        set(_architecture "${MSVC_CXX_ARCHITECTURE_ID}")
+    elseif(CMAKE_GENERATOR_PLATFORM)
+        set(_architecture "${CMAKE_GENERATOR_PLATFORM}")
+    endif()
+    string(TOLOWER "${_architecture}" _architecture)
+    if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
+       _architecture MATCHES "^(arm64|aarch64)$")
+        set(${output} TRUE PARENT_SCOPE)
+    else()
+        set(${output} FALSE PARENT_SCOPE)
+    endif()
+endfunction()
+
 function(clip_enable_unity_build target)
     if(NOT TARGET "${target}")
         message(FATAL_ERROR "clip_enable_unity_build target does not exist: ${target}")
@@ -94,6 +118,14 @@ function(clip_apply_release_options target)
     if(MSVC AND CLIP_APPS_BUILD_CLIP_SHOT)
         target_compile_options("${target}" PRIVATE $<$<CONFIG:Release>:/Z7>)
         target_link_options("${target}" PRIVATE $<$<CONFIG:Release>:/DEBUG:FULL>)
+    endif()
+    clip_msvc_arm64_requires_native_codegen(_native_codegen)
+    if(_native_codegen)
+        set_target_properties("${target}" PROPERTIES
+            INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE
+            INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL FALSE)
+        target_compile_options("${target}" PRIVATE
+            $<$<OR:$<CONFIG:Release>,$<CONFIG:MinSizeRel>>:/GL->)
     endif()
     if(DEFINED CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION AND
        NOT CLIP_APPS_ENABLE_RELEASE_OPTIMIZATION)
