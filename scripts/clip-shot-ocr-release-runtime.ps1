@@ -96,8 +96,8 @@ function New-ClipOcrAssetManifest {
     )
     $platform = "windows-$Architecture"
     $template = Get-Content -LiteralPath $TemplatePath -Raw | ConvertFrom-Json
-    if ($template.schema -ne 2 -or $template.default_model -cne 'small' -or $template.models.Count -ne 7) {
-        throw 'The trusted model template must describe schema 2 and all seven models.'
+    if ($template.schema -ne 2 -or $template.default_model -cne 'small' -or $template.models.Count -ne 1) {
+        throw 'The trusted model template must describe schema 2 and the default small model only.'
     }
     $archivePathResolved = (Resolve-Path -LiteralPath $ArchivePath).Path
     $zip = [IO.Compression.ZipFile]::OpenRead($archivePathResolved)

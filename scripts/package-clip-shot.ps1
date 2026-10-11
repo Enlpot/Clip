@@ -795,24 +795,11 @@ $ocrRuntimeVersion = $pinnedRuntime.version
 $ocrPlatform = $windowsTarget.Platform
 $ocrDefaultModelType = "small"
 $ocrDefaultModelId = "ppocrv6-small-463ea9f"
-$ocrModelRootUrl = "https://www.modelscope.cn/models/mgchao/ClipShotOCR/resolve/master"
+$ocrModelRootUrl = "https://raw.githubusercontent.com/Enlpot/Clip/main/clip_shot/packaging"
 $ocrRuntimeFileName = "clip-ocr-process-$ocrRuntimeVersion-$ocrPlatform.exe"
 $ocrRuntimeArchiveName = "clip-ocr-runtime-$ocrRuntimeVersion-$ocrPlatform.zip"
 $ocrRuntimeUrl = "https://raw.githubusercontent.com/Enlpot/Clip/main/clip_shot/packaging/$ocrRuntimeArchiveName"
 $ocrModels = @(
-    [ordered]@{
-        Type = "extra_small"
-        Id = "ppocrv6-tiny-cd609a1"
-        Directory = "PP-OCRv6/tiny"
-        Detector = "PP-OCRv6_det_tiny.onnx"
-        Recognizer = "PP-OCRv6_rec_tiny.onnx"
-        Dictionary = "ppocrv6_tiny_dict.txt"
-        Files = @(
-            [ordered]@{ Name = "PP-OCRv6_det_tiny.onnx"; Bytes = [long]1829618; Sha256 = "f42c0fbd294d95eac1a550e131b277dac97462c8025fa4b6c3cec1b7894bd3d5" },
-            [ordered]@{ Name = "PP-OCRv6_rec_tiny.onnx"; Bytes = [long]4489813; Sha256 = "e16e242de5937ad92609223f19bc2aff3727ee40b095f996907c24749bad251b" },
-            [ordered]@{ Name = "ppocrv6_tiny_dict.txt"; Bytes = [long]27156; Sha256 = "c5cbe34ef40c29c4df07ed012bf96569cb69a2d2a01a07027e9f13cb832bd9cd" }
-        )
-    },
     [ordered]@{
         Type = "small"
         Id = "ppocrv6-small-463ea9f"
@@ -824,71 +811,6 @@ $ocrModels = @(
             [ordered]@{ Name = "PP-OCRv6_det_small.onnx"; Bytes = [long]9929594; Sha256 = "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f" },
             [ordered]@{ Name = "PP-OCRv6_rec_small.onnx"; Bytes = [long]21234383; Sha256 = "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884" },
             [ordered]@{ Name = "ppocrv6_dict.txt"; Bytes = [long]74947; Sha256 = "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d" }
-        )
-    },
-    [ordered]@{
-        Type = "medium"
-        Id = "ppocrv6-medium-f5063c6"
-        Directory = "PP-OCRv6/medium"
-        Detector = "PP-OCRv6_det_medium.onnx"
-        Recognizer = "PP-OCRv6_rec_medium.onnx"
-        Dictionary = "ppocrv6_dict.txt"
-        Files = @(
-            [ordered]@{ Name = "PP-OCRv6_det_medium.onnx"; Bytes = [long]62119454; Sha256 = "92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2" },
-            [ordered]@{ Name = "PP-OCRv6_rec_medium.onnx"; Bytes = [long]76629984; Sha256 = "eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b" },
-            [ordered]@{ Name = "ppocrv6_dict.txt"; Bytes = [long]74947; Sha256 = "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d" }
-        )
-    },
-    [ordered]@{
-        Type = "small_v5"
-        Id = "ppocrv5-small-7b2a75a"
-        Directory = "PP-OCRv5/mobile"
-        Detector = "ch_PP-OCRv5_det_mobile.onnx"
-        Recognizer = "ch_PP-OCRv5_rec_mobile.onnx"
-        Dictionary = "ppocrv5_dict.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv5_det_mobile.onnx"; Bytes = [long]4819576; Sha256 = "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae" },
-            [ordered]@{ Name = "ch_PP-OCRv5_rec_mobile.onnx"; Bytes = [long]16631306; Sha256 = "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5" },
-            [ordered]@{ Name = "ppocrv5_dict.txt"; Bytes = [long]74012; Sha256 = "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b" }
-        )
-    },
-    [ordered]@{
-        Type = "medium_v5"
-        Id = "ppocrv5-medium-7b2a75a"
-        Directory = "PP-OCRv5/server"
-        Detector = "ch_PP-OCRv5_det_server.onnx"
-        Recognizer = "ch_PP-OCRv5_rec_server.onnx"
-        Dictionary = "ppocrv5_dict.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv5_det_server.onnx"; Bytes = [long]88118768; Sha256 = "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad" },
-            [ordered]@{ Name = "ch_PP-OCRv5_rec_server.onnx"; Bytes = [long]84577022; Sha256 = "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a" },
-            [ordered]@{ Name = "ppocrv5_dict.txt"; Bytes = [long]74012; Sha256 = "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b" }
-        )
-    },
-    [ordered]@{
-        Type = "small_v4"
-        Id = "ppocrv4-small-7b2a75a"
-        Directory = "PP-OCRv4/mobile"
-        Detector = "ch_PP-OCRv4_det_mobile.onnx"
-        Recognizer = "ch_PP-OCRv4_rec_mobile.onnx"
-        Dictionary = "ppocr_keys_v1.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv4_det_mobile.onnx"; Bytes = [long]4745517; Sha256 = "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9" },
-            [ordered]@{ Name = "ch_PP-OCRv4_rec_mobile.onnx"; Bytes = [long]10857958; Sha256 = "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b" },
-            [ordered]@{ Name = "ppocr_keys_v1.txt"; Bytes = [long]26249; Sha256 = "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7" }
-        )
-    },
-    [ordered]@{
-        Type = "medium_v4"
-        Id = "ppocrv4-medium-7b2a75a"
-        Directory = "PP-OCRv4/server"
-        Detector = "ch_PP-OCRv4_det_server.onnx"
-        Recognizer = "ch_PP-OCRv4_rec_server.onnx"
-        Dictionary = "ppocr_keys_v1.txt"
-        Files = @(
-            [ordered]@{ Name = "ch_PP-OCRv4_det_server.onnx"; Bytes = [long]113352104; Sha256 = "cfa39a3f298f6d3fc71789834d15da36d11a6c59b489fc16ea4733728012f786" },
-            [ordered]@{ Name = "ch_PP-OCRv4_rec_server.onnx"; Bytes = [long]90530732; Sha256 = "6a2676219be9907c7fc9cf61ebaa843bf2898777def567925b78886fcd90c07a" },
-            [ordered]@{ Name = "ppocr_keys_v1.txt"; Bytes = [long]26249; Sha256 = "28b2362ad4ab2dc38769aa72feb535e3a9ddb3fd2a7585a05920e6393b1dc7f7" }
         )
     }
 )
