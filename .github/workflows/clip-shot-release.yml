@@ -62,6 +62,7 @@ jobs:
             clip_draw_engine_qt -> ../build/${{ matrix.preset }}/cargo
             clip_rust_ffi -> ../build/${{ matrix.preset }}/cargo
           cache-on-failure: true
+          add-job-id-key: false
 
       - name: Install static project dependencies
         shell: pwsh
