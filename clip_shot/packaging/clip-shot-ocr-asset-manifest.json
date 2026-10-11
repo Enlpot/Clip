@@ -6,15 +6,15 @@
     "platform": "windows-x64",
     "archive": {
       "name": "clip-ocr-runtime-1.0.10-windows-x64.zip",
-      "size": 15768042,
-      "sha256": "7f6b7a9e608c420957310ebdbc2036ad49e1e18c9b765f5d33f87d69dc5d4592",
+      "size": 15767828,
+      "sha256": "b0d7be4fa43a35d2e3b9370515c6d6ed4821ebfd8f32ed38449c65a1c02e3599",
       "url": "https://raw.githubusercontent.com/Enlpot/Clip/main/clip_shot/packaging/clip-ocr-runtime-1.0.10-windows-x64.zip"
     },
     "files": [
       {
         "name": "clip-ocr-process-1.0.10-windows-x64.exe",
-        "size": 16868352,
-        "sha256": "793ad6cb3a684bcef743e88600bfca048c1b14a3f30ca1c16e6942a9205c4876"
+        "size": 16860160,
+        "sha256": "60d67f284d72f6dbe20b4f11678e4a48a395654bd0a0315100119464b95e049f"
       },
       {
         "name": "DirectML.dll",
