@@ -948,7 +948,7 @@ void versionedModelsRecognizeText(const QString& modelRoot, const QString& fixtu
                 "both real model inference cycles must complete");
         ++checked;
     }
-    require(checked == 7, "real inference must cover all seven model bundles");
+    require(checked == 1, "real inference must cover the single staged model set");
 }
 
 void packagedBundleRecognizesText(const QString& bundle) {

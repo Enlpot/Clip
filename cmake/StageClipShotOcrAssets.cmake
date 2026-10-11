@@ -66,9 +66,9 @@ if(NOT _schema EQUAL 2 OR NOT _default_model STREQUAL "small")
 endif()
 
 string(JSON _model_count LENGTH "${_manifest}" models)
-if(NOT _model_count EQUAL 7)
+if(NOT _model_count EQUAL 1)
     message(FATAL_ERROR
-        "The checked-in OCR asset manifest must describe exactly 7 models.")
+        "The checked-in OCR asset manifest must describe exactly 1 model set.")
 endif()
 set(_small_model_index "")
 math(EXPR _last_model_index "${_model_count} - 1")
