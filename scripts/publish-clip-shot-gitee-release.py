@@ -437,6 +437,8 @@ if __name__ == "__main__":
     parser.add_argument("--mini-auditor", type=Path)
     parser.add_argument("--check-auth", action="store_true")
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--prepare", action="store_true",
+                        help="Prepare the local release manifest without publishing")
     arguments = parser.parse_args()
     try:
         if arguments.check_auth:
@@ -448,17 +450,23 @@ if __name__ == "__main__":
             assets = local_assets(release)
             verify_local_release(release, assets, arguments.auditor, arguments.mini_auditor,
                                  require_complete=not arguments.verify_only)
-            token = ""
-            if arguments.verify_only:
-                try:
-                    token = load_token()
-                except ValueError:
-                    pass  # Public verification remains available without credentials.
+            if arguments.prepare:
+                # Prepare the shared audited manifest for the GitHub publication;
+                # actual Gitee publication is a later, separately authorized step.
+                arguments.manifest.write_text(json.dumps(release, ensure_ascii=False, indent=2) + "\n",
+                                              encoding="utf-8")
             else:
-                token = load_token()
-            if token:
-                check_auth(token)
-            publish(release, assets, token, os.environ.get("GITEE_USERNAME", "mg-chao"),
-                    arguments.verify_only)
+                token = ""
+                if arguments.verify_only:
+                    try:
+                        token = load_token()
+                    except ValueError:
+                        pass  # Public verification remains available without credentials.
+                else:
+                    token = load_token()
+                if token:
+                    check_auth(token)
+                publish(release, assets, token, os.environ.get("GITEE_USERNAME", "mg-chao"),
+                        arguments.verify_only)
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Gitee publication failed: {error}\n")

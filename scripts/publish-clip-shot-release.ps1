@@ -261,7 +261,7 @@ if ($AuditOnly) {
         @{ schema = 1; tag = $tag; sourceCommit = $head; title = "Clip $Version"; nativeValidation = $nativeValidation;
             body = [IO.File]::ReadAllText($ReleaseNotesPath); assets = @($descriptors) } |
             ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $localManifestPath -Encoding utf8NoBOM
-        & python (Join-Path $PSScriptRoot 'publish-clip-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor
+        & python (Join-Path $PSScriptRoot 'publish-clip-shot-gitee-release.py') --manifest $localManifestPath --auditor $auditor --mini-auditor $miniAuditor --prepare
         if ($LASTEXITCODE -ne 0) { throw 'Local distribution preparation failed before publication.' }
         $localRelease = Get-Content -Raw -LiteralPath $localManifestPath | ConvertFrom-Json
         $githubAssets = @{}

@@ -204,9 +204,13 @@ $global:ClipGitHubTestEvents.Add('website')
         foreach ($asset in $manifest.assets) {
             Require ((Get-FileHash -LiteralPath $asset.path).Hash.ToLowerInvariant() -ceq $asset.sha256) 'Gitee files must match local audited bytes.'
         }
-        Require ($global:ClipGitHubTestEvents.Contains('edit')) 'Publish Gitee after GitHub has been verified and published.'
-        Require ($global:ClipGitHubTestRelease.body -ceq $manifest.body) 'GitHub notes must equal local Gitee notes.'
-        $global:ClipGitHubTestEvents.Add('gitee-publish')
+        if ($arguments -contains '--prepare') {
+            Require ($global:ClipGitHubTestEvents.Contains('audit') -and -not $global:ClipGitHubTestEvents.Contains('upload')) 'Prepare distribution assets after auditing and before uploads.'
+        } else {
+            Require ($global:ClipGitHubTestEvents.Contains('edit')) 'Publish Gitee after GitHub has been verified and published.'
+            Require ($global:ClipGitHubTestRelease.body -ceq $manifest.body) 'GitHub notes must equal local Gitee notes.'
+            $global:ClipGitHubTestEvents.Add('gitee-publish')
+        }
     }
     $global:ClipGitHubTestEvents.Clear()
     $global:ClipGitHubTestRelease = $null
