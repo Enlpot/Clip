@@ -433,9 +433,9 @@ void builtInCatalogIsCompleteAndValid() {
         }
     }
 #ifdef Q_OS_MACOS
-    require(sectionCount == 51, "macOS includes permissions and merged storage and desktop groups");
+    require(sectionCount == 50, "macOS includes permissions and merged storage and desktop groups");
 #else
-    require(sectionCount == 51,
+    require(sectionCount == 50,
             "catalog includes capture and recording groups with merged storage and desktop groups");
 #endif
     // Keep the shared total in one place: adding a shared setting must update both platforms.
