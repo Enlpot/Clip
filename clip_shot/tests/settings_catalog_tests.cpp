@@ -474,9 +474,9 @@ void builtInCatalogIsCompleteAndValid() {
                 itemIds.contains(QStringLiteral("screenshot-shortcut.upload_to_cloud")) &&
                 itemIds.contains(QStringLiteral("pin-to-screen-shortcut.upload_to_cloud")),
             "cloud upload must expose its configuration and shortcuts in both local scopes");
-    require(itemIds.size() == 250,
+    require(itemIds.size() == 248,
             qPrintable(QStringLiteral(
-                           "catalog must contain 250 shared settings on every platform; found %1")
+                           "catalog must contain 248 shared settings on every platform; found %1")
                            .arg(itemIds.size())));
     require(itemIds.contains(QStringLiteral("pin-to-screen.confirm-before-closing-window")) &&
                 itemIds.contains(QStringLiteral("pin-to-screen.confirm-before-destroying-window")),
