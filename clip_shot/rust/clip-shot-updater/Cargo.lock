@@ -109,6 +109,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "clip-shot-updater"
+version = "1.0.7"
+dependencies = [
+ "base64",
+ "bytes",
+ "fs2",
+ "futures-util",
+ "path-clean",
+ "proptest",
+ "rand 0.8.8",
+ "regex",
+ "reqwest",
+ "rsa",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "walkdir",
+ "windows",
+ "winres",
+ "zip",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1321,38 +1353,6 @@ name = "smallvec"
 version = "1.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
-
-[[package]]
-name = "clip-shot-updater"
-version = "1.0.7"
-dependencies = [
- "base64",
- "bytes",
- "fs2",
- "futures-util",
- "path-clean",
- "proptest",
- "rand 0.8.8",
- "regex",
- "reqwest",
- "rsa",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "walkdir",
- "windows",
- "winres",
- "zip",
-]
 
 [[package]]
 name = "socket2"

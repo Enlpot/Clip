@@ -27,7 +27,7 @@ jobs:
             installed-root: .tools/vcpkg/installed/static
     runs-on: ${{ matrix.runner }}
     env:
-      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
+      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}\vcpkg-binary-cache,readwrite
       CLIP_ARCHITECTURE: ${{ matrix.architecture }}
       CLIP_PRESET: ${{ matrix.preset }}
     steps:
@@ -63,6 +63,12 @@ jobs:
             clip_rust_ffi -> ../build/${{ matrix.preset }}/cargo
           cache-on-failure: true
           add-job-id-key: false
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-binary-cache
+          key: vcpkg-static-${{ matrix.architecture }}-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake') }}
 
       - name: Install static project dependencies
         shell: pwsh
@@ -193,7 +199,7 @@ jobs:
             clip-shot-diagnostics-crash-tests clip-shot-ocr-recognition-service-tests clip-shot-ocr-assets-tests
           if ($LASTEXITCODE -ne 0) { throw 'Native functional test build failed.' }
           ctest --test-dir build/${{ matrix.preset }}/clip_shot -C Release --output-on-failure --no-tests=error `
-            -R '^clip-shot-(clipboard-content|direct-capture-native|capture-worker|recording-post-processing|diagnostics-crash|ocr-(cpu-recognition-service|directml-recognition-service|managed-runtime|managed-directml-runtime|crash|assets))-tests$'
+            -R '^clip-shot-(clipboard-content|direct-capture-native|capture-worker|screen-recording-controller|diagnostics-crash|ocr-(cpu-recognition-service|directml-recognition-service|crash|assets))-tests$'
           if ($LASTEXITCODE -ne 0) { throw 'Native architecture functional tests failed.' }
 
       - name: Verify tag and locate package
@@ -215,7 +221,11 @@ jobs:
           $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
           $packages = @($names | ForEach-Object { Get-Item -LiteralPath "build/${{ matrix.preset }}/$_" -ErrorAction Stop })
           $packages += @(Get-ChildItem build/${{ matrix.preset }}/native-validation -Filter '*.native-validation.json' -File)
-          if (@($packages | Where-Object Name -like '*.native-validation.json').Count -ne 3) { throw 'Missing final package native validation evidence.' }
+          $requiredProofBases = @("clip-shot-$version-windows-${{ matrix.architecture }}-offline.exe.native-validation.json", "clip-shot-$version-windows-${{ matrix.architecture }}-portable.zip.native-validation.json")
+          $proofNames = @($packages | Where-Object Name -like '*.native-validation.json' | ForEach-Object { $_.Name })
+          foreach ($required in $requiredProofBases) {
+            if ($required -notin $proofNames) { throw "Missing native validation evidence: $required" }
+          }
           $assets = ($packages | ForEach-Object { $_.FullName }) -join "`n"
           "assets<<CLIP_ASSETS" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
           $assets | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
