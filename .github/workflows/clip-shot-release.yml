@@ -27,7 +27,7 @@ jobs:
             installed-root: .tools/vcpkg/installed/static
     runs-on: ${{ matrix.runner }}
     env:
-      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}\vcpkg-binary-cache,readwrite
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.tools\vcpkg-binary-cache,readwrite
       CLIP_ARCHITECTURE: ${{ matrix.architecture }}
       CLIP_PRESET: ${{ matrix.preset }}
     steps:
@@ -67,7 +67,7 @@ jobs:
       - name: Cache vcpkg binary packages
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\vcpkg-binary-cache
+          path: ${{ github.workspace }}\.tools\vcpkg-binary-cache
           key: vcpkg-static-${{ matrix.architecture }}-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake') }}
 
       - name: Install static project dependencies
