@@ -308,7 +308,8 @@ jobs:
               .match(/set\(CLIP_SHOT_VERSION "([^"]+)"\)/)[1];
             const assets = `${{ steps.package.outputs.assets }}`
               .split('\n').map(s => s.trim()).filter(Boolean)
-              .filter(a => !a.endsWith('.native-validation.json'));
+              .filter(a => !a.endsWith('.native-validation.json'))
+              .filter(a => !a.includes('ocr-runtime'));
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -325,7 +326,6 @@ jobs:
               '### 本版包含\n' +
               '- 离线安装器：`clip-shot-' + version + '-windows-x64-offline.exe`（含 sha256 校验与 manifest）\n' +
               '- 便携版：`clip-shot-' + version + '-windows-x64-portable.zip`（含 sha256 校验与 manifest）\n' +
-              '- OCR 识别运行时：`clip-ocr-runtime-*`\n' +
               '- 全部产物均已通过 CI 原生架构验证（native-validation）\n\n' +
               '### 使用提示\n' +
               '- 安装器或便携版解压后即可使用，OCR 文字识别开箱即用。';
