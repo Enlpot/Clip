@@ -320,18 +320,15 @@ jobs:
               if (err.status !== 404) throw err;
             }
 
-            const notes = `## Clip ${version}（Windows x64）
-
-基于 snow-apps 更名并持续维护的版本，仅支持 Windows x64。
-
-### 本版包含
-- 离线安装器：\`clip-shot-${version}-windows-x64-offline.exe\`（含 sha256 校验与 manifest）
-- 便携版：\`clip-shot-${version}-windows-x64-portable.zip\`（含 sha256 校验与 manifest）
-- OCR 识别运行时：\`clip-ocr-runtime-*\`
-- 全部产物均已通过 CI 原生架构验证（native-validation）
-
-### 使用提示
-- 安装器或便携版解压后即可使用，OCR 文字识别开箱即用。`;
+            const notes = '## Clip ' + version + '（Windows x64）\n\n' +
+              '基于 snow-apps 更名并持续维护的版本，仅支持 Windows x64。\n\n' +
+              '### 本版包含\n' +
+              '- 离线安装器：`clip-shot-' + version + '-windows-x64-offline.exe`（含 sha256 校验与 manifest）\n' +
+              '- 便携版：`clip-shot-' + version + '-windows-x64-portable.zip`（含 sha256 校验与 manifest）\n' +
+              '- OCR 识别运行时：`clip-ocr-runtime-*`\n' +
+              '- 全部产物均已通过 CI 原生架构验证（native-validation）\n\n' +
+              '### 使用提示\n' +
+              '- 安装器或便携版解压后即可使用，OCR 文字识别开箱即用。';
             const release = await github.rest.repos.createRelease({
               owner, repo,
               tag_name: tag,
