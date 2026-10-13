@@ -53,7 +53,7 @@ jobs:
         run: |
           $additions = @()
           foreach ($candidate in @('C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin', 'C:\Program Files\Git\cmd')) {
-            if (Test-Path -LiteralPath (Join-Path $candidate 'bash.exe') -or (Test-Path -LiteralPath (Join-Path $candidate 'git.exe'))) {
+            if ((Test-Path -LiteralPath (Join-Path $candidate 'bash.exe')) -or (Test-Path -LiteralPath (Join-Path $candidate 'git.exe'))) {
               $additions += $candidate
             }
           }
