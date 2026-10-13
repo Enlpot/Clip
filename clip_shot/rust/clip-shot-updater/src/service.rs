@@ -3192,7 +3192,7 @@ mod tests {
             clock: Arc::new(FakeClock::new(fixed_time(), Vec::new())),
             network: Arc::new(network.clone()),
             github_api_url: Url::parse(github::API).unwrap(),
-            gitee_api_url: Url::parse("https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases")
+            gitee_api_url: Url::parse("https://gitee.com/api/v5/repos/Enlpot/Clip/releases")
                 .unwrap(),
             system_proxy: false,
             installed_version: "1.0.0".to_owned(),
@@ -3257,7 +3257,7 @@ mod tests {
             (github_list, vec![reply(StatusCode::OK, &releases)]),
             (github_manifest, vec![reply(StatusCode::OK, signed)]),
             (
-                "https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases?per_page=100&page=1"
+                "https://gitee.com/api/v5/repos/Enlpot/Clip/releases?per_page=100&page=1"
                     .to_owned(),
                 vec![FakeReply::Pending],
             ),
@@ -3296,7 +3296,7 @@ mod tests {
             ),
             (github_manifest, vec![reply(StatusCode::OK, signed)]),
             (
-                "https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases?per_page=100&page=1"
+                "https://gitee.com/api/v5/repos/Enlpot/Clip/releases?per_page=100&page=1"
                     .to_owned(),
                 vec![reply(StatusCode::SERVICE_UNAVAILABLE, b"")],
             ),
@@ -3360,7 +3360,7 @@ mod tests {
             let version = rejected["version"].as_str().unwrap();
             let tag = format!("v{version}_clip-shot");
             let manifest = format!(
-                "https://gitee.com/mg-chao/clip-apps/releases/download/{tag}/{feed}",
+                "https://gitee.com/Enlpot/Clip/releases/download/{tag}/{feed}",
                 feed = crate::edition::FEED_NAME
             );
             let mut files = github_fixture(version, &[crate::edition::FEED_NAME])["assets"].clone();
@@ -3376,8 +3376,8 @@ mod tests {
             let network = FakeNetwork::routed([
                 (format!("{}?per_page=100&page=1", github::API), vec![reply(StatusCode::OK, &serde_json::to_vec(&json!([github_fixture("2.0.0", &[crate::edition::FEED_NAME])] )).unwrap())]),
                 (format!("{}/releases/download/v2.0.0_clip-shot/{feed}", github::REPOSITORY, feed = crate::edition::FEED_NAME), vec![reply(StatusCode::OK, &signed)]),
-                ("https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases?per_page=100&page=1".to_owned(), vec![reply(StatusCode::OK, &serde_json::to_vec(&json!([{"id":123,"tag_name":tag}])).unwrap())]),
-                ("https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases/123/attach_files?per_page=100".to_owned(), vec![reply(StatusCode::OK, &serde_json::to_vec(&files).unwrap())]),
+                ("https://gitee.com/api/v5/repos/Enlpot/Clip/releases?per_page=100&page=1".to_owned(), vec![reply(StatusCode::OK, &serde_json::to_vec(&json!([{"id":123,"tag_name":tag}])).unwrap())]),
+                ("https://gitee.com/api/v5/repos/Enlpot/Clip/releases/123/attach_files?per_page=100".to_owned(), vec![reply(StatusCode::OK, &serde_json::to_vec(&files).unwrap())]),
                 (manifest.clone(), vec![reply(StatusCode::OK, &rejected_signed)]),
             ]);
             let mut inputs = metadata_inputs(&network);
@@ -3416,11 +3416,11 @@ mod tests {
     async fn first_valid_signed_release_wins_the_race() {
         let (signed, keys) = signed_fixture();
         let github_list = format!("{}?per_page=100&page=1", github::API);
-        let gitee_api = "https://gitee.com/api/v5/repos/mg-chao/clip-apps/releases";
+        let gitee_api = "https://gitee.com/api/v5/repos/Enlpot/Clip/releases";
         let gitee_list = format!("{gitee_api}?per_page=100&page=1");
         let gitee_assets = format!("{gitee_api}/123/attach_files?per_page=100");
         let gitee_manifest = format!(
-            "https://gitee.com/mg-chao/clip-apps/releases/download/v2.0.0_clip-shot/{}",
+            "https://gitee.com/Enlpot/Clip/releases/download/v2.0.0_clip-shot/{}",
             crate::edition::FEED_NAME
         );
         let release = serde_json::to_vec(
@@ -3456,7 +3456,7 @@ mod tests {
             ),
         ];
         let assets = serde_json::to_vec(&names.iter().map(|name| json!({"name":name,
-            "browser_download_url":format!("https://gitee.com/mg-chao/clip-apps/releases/download/v2.0.0_clip-shot/{name}")})).collect::<Vec<_>>()).unwrap();
+            "browser_download_url":format!("https://gitee.com/Enlpot/Clip/releases/download/v2.0.0_clip-shot/{name}")})).collect::<Vec<_>>()).unwrap();
         for gitee_wins in [true, false] {
             let github_release = serde_json::to_vec(&json!([github_fixture(
                 "2.0.0",
@@ -3622,7 +3622,7 @@ mod tests {
             crate::edition::PLATFORM
         );
         let gitee_url = format!(
-            "https://gitee.com/mg-chao/clip-apps/releases/download/v2.0.0_clip-shot/{asset}"
+            "https://gitee.com/Enlpot/Clip/releases/download/v2.0.0_clip-shot/{asset}"
         );
         let gitee_release = serde_json::to_vec(&json!([
             {"id":456,"tag_name":"v3.0.0_clip-shot"},
@@ -3710,7 +3710,7 @@ mod tests {
             release.update_package("portable").unwrap().sha256.clone();
         service.persisted.source = Some(ReleaseSource::GitHub);
         service.persisted.partial_url =
-            "https://github.com/mg-chao/clip-apps/releases/download/v2.0.0_clip-shot/package.zip"
+            "https://github.com/Enlpot/Clip/releases/download/v2.0.0_clip-shot/package.zip"
                 .to_owned();
         write_persisted(&service.options, &service.persisted).unwrap();
         service.persisted = read_persisted(&cache_path(&service.options, "state.json"));
