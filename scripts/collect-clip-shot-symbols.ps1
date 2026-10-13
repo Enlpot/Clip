@@ -120,9 +120,13 @@ foreach ($binary in Get-ChildItem -LiteralPath (Join-Path $installRoot "bin") -F
                 }
             }
             if (Test-Path -LiteralPath $pdb -PathType Leaf) {
-                Assert-PdbIdentity -Path $pdb -Signature $record.signature -Age $record.age
-                Copy-Item -LiteralPath $pdb -Destination $destination
-                $record.pdb = "$($binary.BaseName)/$([System.IO.Path]::GetFileName($pdb))"
+                try {
+                    Assert-PdbIdentity -Path $pdb -Signature $record.signature -Age $record.age
+                    Copy-Item -LiteralPath $pdb -Destination $destination
+                    $record.pdb = "$($binary.BaseName)/$([System.IO.Path]::GetFileName($pdb))"
+                } catch {
+                    Write-Warning "Skipping mismatched PDB for $($binary.Name): $($_.Exception.Message)"
+                }
             }
             break
         }
