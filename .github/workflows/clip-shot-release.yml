@@ -178,7 +178,13 @@ jobs:
 
       - name: Build, audit, and package statically
         shell: pwsh
-        run: .\scripts\stage-clip-shot-release.ps1 -Architecture $env:CLIP_ARCHITECTURE
+        run: |
+          $presetBuild = "build/$env:CLIP_PRESET"
+          if (Test-Path -LiteralPath "$presetBuild/CMakeCache.txt") {
+            Remove-Item -LiteralPath "$presetBuild/CMakeCache.txt" -Force
+            Write-Output 'Removed stale CMakeCache to re-resolve host toolchain paths.'
+          }
+          .\scripts\stage-clip-shot-release.ps1 -Architecture $env:CLIP_ARCHITECTURE
 
       - name: Verify focused updater and installer behavior
         shell: pwsh
