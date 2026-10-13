@@ -48,6 +48,18 @@ jobs:
             Write-Output 'No reusable local tool tree; full bootstrap will run.'
           }
 
+      - name: Ensure bash and git on PATH
+        shell: pwsh
+        run: |
+          $additions = @()
+          foreach ($candidate in @('C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin', 'C:\Program Files\Git\cmd')) {
+            if (Test-Path -LiteralPath (Join-Path $candidate 'bash.exe') -or (Test-Path -LiteralPath (Join-Path $candidate 'git.exe'))) {
+              $additions += $candidate
+            }
+          }
+          "PATH=$($additions -join ';');$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output 'bash path ensured'
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
