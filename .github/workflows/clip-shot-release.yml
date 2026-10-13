@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - architecture: x64
-            runner: windows-2025-vs2026
+            runner: clip-win-x64
             preset: clip-shot-msvc-release
             rust-target: x86_64-pc-windows-msvc
             qt-kit: msvc2026_64-static-system-codecs
@@ -35,6 +35,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: false
+
+      - name: Reuse local vcpkg and Qt tool tree
+        shell: pwsh
+        run: |
+          $local = if ($env:CLIP_LOCAL_TOOLS) { $env:CLIP_LOCAL_TOOLS } else { 'D:\WinDevelop\Clip\.tools' }
+          if (Test-Path -LiteralPath (Join-Path $local 'vcpkg\vcpkg.exe')) {
+            New-Item -ItemType Junction -Path (Join-Path $env:GITHUB_WORKSPACE '.tools') -Target $local -Force
+            Write-Output "Reused local tool tree: $local"
+          } else {
+            Write-Output 'No reusable local tool tree; full bootstrap will run.'
+          }
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -91,16 +103,25 @@ jobs:
         shell: pwsh
         run: |
           . scripts/clip-build-environment.ps1
-          $prefix = Join-Path $env:RUNNER_TOOL_CACHE "clip-qt\$script:ClipQtVersion\${{ matrix.qt-kit }}"
-          $dependencies = Join-Path $env:GITHUB_WORKSPACE "${{ matrix.installed-root }}/$env:CLIP_ARCHITECTURE-windows-static"
-          & "$env:GITHUB_WORKSPACE\scripts\build-static-qt.ps1" -Architecture $env:CLIP_ARCHITECTURE -InstallPrefix $prefix -DependencyPrefix $dependencies -DevelopmentModules
-          if ($LASTEXITCODE -ne 0) { throw "Static Qt bootstrap failed." }
-          $qtDir = Join-Path $prefix "lib\cmake\Qt6"
-          if (-not (Test-Path -LiteralPath (Join-Path $qtDir "Qt6Config.cmake") -PathType Leaf)) {
-            throw "Qt $script:ClipQtVersion static CMake package was not found at $qtDir"
+          $localQt = Join-Path $env:GITHUB_WORKSPACE ".tools\qt\$script:ClipQtVersion\static-$env:CLIP_ARCHITECTURE"
+          $localConfig = Join-Path $localQt "lib\cmake\Qt6\Qt6Config.cmake"
+          if (Test-Path -LiteralPath $localConfig -PathType Leaf) {
+            $qtDir = Join-Path $localQt "lib\cmake\Qt6"
+            "CLIP_QT_STATIC_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "Qt6_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Output "Reused local static Qt: $qtDir"
+          } else {
+            $prefix = Join-Path $env:RUNNER_TOOL_CACHE "clip-qt\$script:ClipQtVersion\${{ matrix.qt-kit }}"
+            $dependencies = Join-Path $env:GITHUB_WORKSPACE "${{ matrix.installed-root }}/$env:CLIP_ARCHITECTURE-windows-static"
+            & "$env:GITHUB_WORKSPACE\scripts\build-static-qt.ps1" -Architecture $env:CLIP_ARCHITECTURE -InstallPrefix $prefix -DependencyPrefix $dependencies -DevelopmentModules
+            if ($LASTEXITCODE -ne 0) { throw "Static Qt bootstrap failed." }
+            $qtDir = Join-Path $prefix "lib\cmake\Qt6"
+            if (-not (Test-Path -LiteralPath (Join-Path $qtDir "Qt6Config.cmake") -PathType Leaf)) {
+              throw "Qt $script:ClipQtVersion static CMake package was not found at $qtDir"
+            }
+            "CLIP_QT_STATIC_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "Qt6_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
-          "CLIP_QT_STATIC_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "Qt6_DIR=$qtDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Verify native Qt timezone behavior
         shell: pwsh
