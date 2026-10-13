@@ -51,7 +51,9 @@ jobs:
           foreach ($modelDir in @('artifacts\qr-models-wechat', 'artifacts\ocr-models-ppocrv6-small-463ea9f')) {
             $src = Join-Path $repoParent $modelDir
             if (Test-Path -LiteralPath $src) {
-              New-Item -ItemType Junction -Path (Join-Path $env:GITHUB_WORKSPACE $modelDir) -Target $src -Force
+              $dst = Join-Path $env:GITHUB_WORKSPACE $modelDir
+              New-Item -ItemType Directory -Path (Split-Path $dst -Parent) -Force | Out-Null
+              New-Item -ItemType Junction -Path $dst -Target $src -Force
               Write-Output "Reused local models: $src"
             }
           }
