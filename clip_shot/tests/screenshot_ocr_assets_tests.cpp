@@ -333,6 +333,59 @@ void validOfflineAssetsAreSelectedWithoutNetwork() {
     require(downloads == 0, "valid offline OCR assets must not use the network");
 }
 
+void singleModelOfflineManifestIsReady() {
+    QTemporaryDir offline;
+    QTemporaryDir cache;
+    require(offline.isValid() && cache.isValid(), "temporary OCR roots should be available");
+    writeAssetManifest(offline.path(), true);
+    // Production manifests now ship only the default small model set, so a
+    // manifest describing exactly one model must validate and become ready
+    // offline without touching the network.
+    const QString manifestPath =
+        QDir(offline.path()).filePath(QStringLiteral("asset-manifest.json"));
+    QFile manifestFile(manifestPath);
+    require(manifestFile.open(QIODevice::ReadOnly), "fixture manifest should be readable");
+    QJsonDocument document = QJsonDocument::fromJson(manifestFile.readAll());
+    manifestFile.close();
+    require(document.isObject(), "fixture manifest should be a JSON object");
+    QJsonObject object = document.object();
+    QJsonArray models = object.value(QStringLiteral("models")).toArray();
+    for (int index = models.size() - 1; index >= 0; --index) {
+        if (models.at(index).toObject().value(QStringLiteral("type")).toString() !=
+            QStringLiteral("small"))
+            models.removeAt(index);
+    }
+    object.insert(QStringLiteral("models"), models);
+    require(manifestFile.open(QIODevice::WriteOnly | QIODevice::Truncate),
+            "fixture manifest should be writable");
+    require(manifestFile.write(QJsonDocument(object).toJson(QJsonDocument::Compact)) > 0,
+            "fixture manifest rewrite should complete");
+    manifestFile.close();
+    int downloads = 0;
+    bool ready = false;
+    bool failed = false;
+    ScreenshotOcrAssets::Options options;
+    options.offlineRoot = offline.path();
+    options.bundledRuntimeRoot = offline.path();
+    options.cacheRoot = cache.path();
+    options.downloadOverride = [&](const QString&, const QString&, QString*) {
+        ++downloads;
+        return false;
+    };
+    ScreenshotOcrAssets assets(options);
+    QObject::connect(&assets, &ScreenshotOcrAssets::ready, &assets,
+                     [&](const ScreenshotOcrResolvedAssets& result) {
+                         ready = result.offline && result.valid();
+                     });
+    QObject::connect(&assets, &ScreenshotOcrAssets::failed, &assets,
+                     [&](const QString&) { failed = true; });
+    assets.prepare();
+    require(waitUntil([&]() { return ready || failed; }, 5'000),
+            "single-model OCR asset validation should complete");
+    require(ready && !failed, "a single-model offline payload should be selected");
+    require(downloads == 0, "single-model offline assets must not use the network");
+}
+
 void incompleteOfflineAssetsFallBackToOnlineAcquisition() {
     QTemporaryDir offline;
     QTemporaryDir cache;
@@ -573,11 +626,6 @@ void invalidSchemaTwoManifestsAreRejectedBeforeDownloading() {
 #endif
     rejectMutation([](QJsonObject* manifest) {
         manifest->insert(QStringLiteral("default_model"), QStringLiteral("medium"));
-    });
-    rejectMutation([](QJsonObject* manifest) {
-        QJsonArray models = manifest->value(QStringLiteral("models")).toArray();
-        models.removeAt(2);
-        manifest->insert(QStringLiteral("models"), models);
     });
     rejectMutation([](QJsonObject* manifest) {
         QJsonArray models = manifest->value(QStringLiteral("models")).toArray();
@@ -1104,6 +1152,7 @@ int main(int argc, char** argv) {
         return application.exec();
     }
     validOfflineAssetsAreSelectedWithoutNetwork();
+    singleModelOfflineManifestIsReady();
     incompleteOfflineAssetsFallBackToOnlineAcquisition();
     everyModelMapsToItsOwnFilesAndCachesAreRetained();
     selectedModelFailureNeverFallsBackToSmallAndCanRetry();

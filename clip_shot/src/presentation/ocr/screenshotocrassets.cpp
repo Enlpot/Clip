@@ -338,7 +338,7 @@ std::optional<Descriptor> loadDescriptor(const QString& root, QString* error) {
         return std::nullopt;
     }
     const QJsonArray models = rootObject.value(QStringLiteral("models")).toArray();
-    if (models.size() != 7) {
+    if (models.isEmpty()) {
         if (error != nullptr)
             *error = QStringLiteral("incomplete OCR asset manifest");
         return std::nullopt;
@@ -381,7 +381,7 @@ std::optional<Descriptor> loadDescriptor(const QString& root, QString* error) {
         modelIds.insert(model.id);
         result.models.push_back(std::move(model));
     }
-    if (modelTypes.size() != 7) {
+    if (modelTypes.size() != models.size()) {
         if (error != nullptr)
             *error = QStringLiteral("incomplete OCR asset manifest");
         return std::nullopt;
