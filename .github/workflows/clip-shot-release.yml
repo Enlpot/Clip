@@ -116,7 +116,7 @@ jobs:
 
       - name: Install static project dependencies
         shell: pwsh
-        run: .\scripts\bootstrap.ps1 -Architecture $env:CLIP_ARCHITECTURE -VcpkgVariants Static -SkipQtValidation
+        run: .\scripts\bootstrap.ps1 -Architecture $env:CLIP_ARCHITECTURE -VcpkgVariants Static -SkipQtValidation -SkipRustupInstall
 
       - name: Resolve repository Qt toolchain
         id: qt-toolchain

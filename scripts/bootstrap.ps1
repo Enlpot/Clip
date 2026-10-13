@@ -9,7 +9,8 @@ param(
     [switch]$Reset,
     [switch]$SkipVcpkgInstall,
     [switch]$SkipDependencyInstall,
-    [switch]$SkipQtValidation
+    [switch]$SkipQtValidation,
+    [switch]$SkipRustupInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,7 +75,7 @@ if (-not $SkipQtValidation) {
 $git = Require-Command "git"
 $cmake = Require-Command "cmake"
 $cargo = Require-Command "cargo"
-$rustup = Require-Command "rustup"
+$rustup = if ($SkipRustupInstall) { $null } else { Require-Command "rustup" }
 
 # vcpkg's app-local packaging invokes dumpbin to discover DLL dependencies of
 # host tools. Without the MSVC bin directory, it can install unusable tools and
@@ -224,19 +225,22 @@ if (-not $SkipDependencyInstall) {
     }
 }
 
-Invoke-Checked -Command $rustup.Source -Arguments @(
-    "toolchain", "install", $rustToolchain,
-    "--profile", "minimal",
-    "--component", "rustfmt",
-    "--component", "clippy",
-    "--target", $rustTarget
-) -WorkingDirectory $repoRoot
+if (-not $SkipRustupInstall) {
+    Invoke-Checked -Command $rustup.Source -Arguments @(
+        "toolchain", "install", $rustToolchain,
+        "--profile", "minimal",
+        "--component", "rustfmt",
+        "--component", "clippy",
+        "--target", $rustTarget
+    ) -WorkingDirectory $repoRoot
+}
 
+$cargoToolchainSelector = if ($SkipRustupInstall) { @() } else { @("+$rustToolchain") }
 $null = Invoke-Checked -Command $cargo.Source -Arguments @(
-    "+$rustToolchain", "metadata", "--format-version", "1", "--no-deps"
+    $cargoToolchainSelector + "metadata", "--format-version", "1", "--no-deps"
 ) -WorkingDirectory (Join-Path $repoRoot "clip-crates")
 $null = Invoke-Checked -Command $cargo.Source -Arguments @(
-    "+$rustToolchain", "metadata", "--format-version", "1", "--no-deps"
+    $cargoToolchainSelector + "metadata", "--format-version", "1", "--no-deps"
 ) -WorkingDirectory (Join-Path $repoRoot "clip_draw_engine_qt")
 
 $libclangDirectory = Join-Path $toolsRoot "llvm\bin"
