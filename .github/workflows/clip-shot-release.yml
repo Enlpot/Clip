@@ -78,6 +78,10 @@ jobs:
               $additions += $ninjaRoot
             }
           }
+          $rustToolchainBin = 'C:\Users\bendi\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin'
+          if (Test-Path -LiteralPath (Join-Path $rustToolchainBin 'cargo.exe')) {
+            $additions += $rustToolchainBin
+          }
           if ($additions.Count -gt 0) {
             "PATH=$($additions -join ';');$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
