@@ -40,9 +40,17 @@ jobs:
       - name: Reuse local vcpkg and Qt tool tree
         shell: pwsh
         run: |
+          function New-ReuseJunction {
+            param([string]$Dst, [string]$Src)
+            if (Test-Path -LiteralPath $Dst) {
+              Remove-Item -LiteralPath $Dst -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path (Split-Path $Dst -Parent) -Force | Out-Null
+            New-Item -ItemType Junction -Path $Dst -Target $Src -Force | Out-Null
+          }
           $local = if ($env:CLIP_LOCAL_TOOLS) { $env:CLIP_LOCAL_TOOLS } else { 'D:\WinDevelop\Clip\.tools' }
           if (Test-Path -LiteralPath (Join-Path $local 'vcpkg\vcpkg.exe')) {
-            New-Item -ItemType Junction -Path (Join-Path $env:GITHUB_WORKSPACE '.tools') -Target $local -Force
+            New-ReuseJunction -Dst (Join-Path $env:GITHUB_WORKSPACE '.tools') -Src $local
             Write-Output "Reused local tool tree: $local"
           } else {
             Write-Output 'No reusable local tool tree; full bootstrap will run.'
@@ -51,9 +59,7 @@ jobs:
           foreach ($modelDir in @('artifacts\qr-models-wechat', 'artifacts\ocr-models-ppocrv6-small-463ea9f')) {
             $src = Join-Path $repoParent $modelDir
             if (Test-Path -LiteralPath $src) {
-              $dst = Join-Path $env:GITHUB_WORKSPACE $modelDir
-              New-Item -ItemType Directory -Path (Split-Path $dst -Parent) -Force | Out-Null
-              New-Item -ItemType Junction -Path $dst -Target $src -Force
+              New-ReuseJunction -Dst (Join-Path $env:GITHUB_WORKSPACE $modelDir) -Src $src
               Write-Output "Reused local models: $src"
             }
           }
