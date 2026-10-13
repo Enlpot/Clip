@@ -274,9 +274,7 @@ jobs:
           $names += @("$base.exe", "$base.exe.sha256", "$base.manifest.json")
           $base = "clip-shot-$version-windows-${{ matrix.architecture }}-portable"
           $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
-          $descriptor = 'clip_shot/packaging/clip-shot-ocr-asset-manifest.json'
-          $runtime = (Get-Content -Raw $descriptor | ConvertFrom-Json).runtime.version
-          $base = "clip-ocr-runtime-$runtime-windows-$env:CLIP_ARCHITECTURE"
+          $base = "clip-shot-$version-windows-${{ matrix.architecture }}-offline-update"
           $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
           $packages = @($names | ForEach-Object { Get-Item -LiteralPath "build/${{ matrix.preset }}/$_" -ErrorAction Stop })
           $packages += @(Get-ChildItem build/${{ matrix.preset }}/native-validation -Filter '*.native-validation.json' -File)
@@ -297,6 +295,65 @@ jobs:
           path: ${{ steps.package.outputs.assets }}
           if-no-files-found: error
 
+      - name: Sign update feed
+        id: sign
+        shell: pwsh
+        env:
+          CLIP_RELEASE_SIGNING_KEY: ${{ secrets.CLIP_RELEASE_SIGNING_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = [regex]::Match((Get-Content -Raw CMakeLists.txt), 'set\(CLIP_SHOT_VERSION "([^"]+)"\)').Groups[1].Value
+          $build = "build/${{ matrix.preset }}"
+          function Get-PackageEntry {
+            param([string]$Base, [string]$Kind, [string]$Variant, [string]$Suffix)
+            $manifestBase = if ($Kind -eq 'update') { "$Base-update" } else { $Base }
+            $m = Get-Content -Raw (Join-Path $build "$manifestBase.manifest.json") | ConvertFrom-Json
+            if ($m.PackageVersion -cne $version -or $m.Variant -cne $Variant) { throw "manifest mismatch: $manifestBase" }
+            $desc = $m.NativeValidation.Artifacts[0]
+            $file = Join-Path $build "$Base$Suffix"
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -cne $desc.Sha256 -or (Get-Item -LiteralPath $file).Length -ne $desc.Bytes) { throw "package mismatch: $file" }
+            $entry = [ordered]@{ variant = $Variant; kind = $Kind; path = "setup/clip-shot_windows-x64-$Suffix"; size = $desc.Bytes; sha256 = $hash }
+            if ($Kind -ne 'installer') {
+              $entry.files = @($m.InstallFiles | ForEach-Object {
+                [ordered]@{ path = $_.Path.Replace('\', '/'); size = $_.Bytes; sha256 = $_.Sha256 }
+              })
+            }
+            return $entry
+          }
+          $packages = @()
+          $packages += Get-PackageEntry -Base "clip-shot-$version-windows-${{ matrix.architecture }}-offline" -Kind installer -Variant offline -Suffix '.exe'
+          $packages += Get-PackageEntry -Base "clip-shot-$version-windows-${{ matrix.architecture }}-offline" -Kind update -Variant offline -Suffix '-update.zip'
+          $packages += Get-PackageEntry -Base "clip-shot-$version-windows-${{ matrix.architecture }}-portable" -Kind portable -Variant portable -Suffix '.zip'
+          $payloadBytes = [Text.Encoding]::UTF8.GetBytes(([ordered]@{
+            schema = 1; product = 'clip-shot'; version = $version;
+            publishedAt = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ');
+            platform = 'windows-${{ matrix.architecture }}'; packages = $packages
+          } | ConvertTo-Json -Depth 12 -Compress))
+          $rsa = [Security.Cryptography.RSA]::Create()
+          try {
+            $rsa.ImportFromPem($env:CLIP_RELEASE_SIGNING_KEY)
+            $public = $rsa.ExportParameters($false)
+            $modulus = [Convert]::ToBase64String($public.Modulus)
+            $exponent = [Convert]::ToBase64String($public.Exponent)
+            $keys = (Get-Content -Raw 'clip_shot/resources/update-trusted-keys.json' | ConvertFrom-Json).keys
+            $key = @($keys | Where-Object { $_.modulus -ceq $modulus -and $_.exponent -ceq $exponent })
+            if ($rsa.KeySize -ne 3072 -or $key.Count -ne 1) { throw 'signing key does not match embedded public key' }
+            $signature = $rsa.SignData($payloadBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pss)
+            if (-not $rsa.VerifyData($payloadBytes, $signature, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pss)) { throw 'signature self-verification failed' }
+            $envelope = [ordered]@{ schema = 1; keyId = $key[0].id; payload = [Convert]::ToBase64String($payloadBytes); signature = [Convert]::ToBase64String($signature) } | ConvertTo-Json -Compress
+            $feedPath = Join-Path $build 'latest-version.json'
+            [IO.File]::WriteAllText($feedPath, $envelope, [Text.UTF8Encoding]::new($false))
+            "feed=$feedPath" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } finally { $rsa.Dispose() }
+          $auditor = Join-Path $build 'clip_shot/Release/clip-shot-updater.exe'
+          $err = Join-Path $env:TEMP 'clip-feed-sign-err.log'
+          $p = Start-Process -FilePath $auditor -ArgumentList @('--verify-release', '--platform', 'windows-${{ matrix.architecture }}', '--manifest', "`"$feedPath`"") -WindowStyle Hidden -PassThru -RedirectStandardError $err -Wait
+          if ($p.ExitCode -ne 0) {
+            $detail = if (Test-Path $err) { (Get-Content $err -TotalCount 20) -join ' ' } else { '' }
+            throw "compiled updater rejected feed: $detail"
+          }
+
       - name: Publish GitHub Release
         uses: actions/github-script@v7
         with:
@@ -306,10 +363,13 @@ jobs:
             const tag = context.ref.replace('refs/tags/', '');
             const version = fs.readFileSync('CMakeLists.txt', 'utf8')
               .match(/set\(CLIP_SHOT_VERSION "([^"]+)"\)/)[1];
-            const assets = `${{ steps.package.outputs.assets }}`
-              .split('\n').map(s => s.trim()).filter(Boolean)
-              .filter(a => !a.endsWith('.native-validation.json'))
-              .filter(a => !a.includes('ocr-runtime'));
+            const assets = [
+              ...`${{ steps.package.outputs.assets }}`
+                .split('\n').map(s => s.trim()).filter(Boolean)
+                .filter(a => !a.endsWith('.native-validation.json'))
+                .filter(a => !a.includes('ocr-runtime')),
+              `${{ steps.sign.outputs.feed }}`,
+            ].filter(Boolean);
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -326,6 +386,7 @@ jobs:
               '### 本版包含\n' +
               '- 离线安装器：`clip-shot-' + version + '-windows-x64-offline.exe`（含 sha256 校验与 manifest）\n' +
               '- 便携版：`clip-shot-' + version + '-windows-x64-portable.zip`（含 sha256 校验与 manifest）\n' +
+              '- 更新包：`clip-shot-' + version + '-windows-x64-offline-update.zip` + 签名 feed（`latest-version.json`），内置自动更新可用\n' +
               '- 全部产物均已通过 CI 原生架构验证（native-validation）\n\n' +
               '### 使用提示\n' +
               '- 安装器或便携版解压后即可使用，OCR 文字识别开箱即用。';
