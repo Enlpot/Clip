@@ -48,7 +48,7 @@ jobs:
             Write-Output 'No reusable local tool tree; full bootstrap will run.'
           }
 
-      - name: Ensure bash and git on PATH
+      - name: Ensure build tools on PATH
         shell: pwsh
         run: |
           $additions = @()
@@ -57,8 +57,15 @@ jobs:
               $additions += $candidate
             }
           }
-          "PATH=$($additions -join ';');$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Output 'bash path ensured'
+          foreach ($ninjaRoot in @('C:\Users\bendi\AppData\Local\Programs\Ninja')) {
+            if (Test-Path -LiteralPath (Join-Path $ninjaRoot 'ninja.exe')) {
+              $additions += $ninjaRoot
+            }
+          }
+          if ($additions.Count -gt 0) {
+            "PATH=$($additions -join ';');$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          Write-Output "PATH additions: $($additions -join ';')"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
