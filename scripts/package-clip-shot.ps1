@@ -1303,4 +1303,9 @@ Write-Output "OCR runtime upload artifact: $runtimeArchivePath"
 Write-Output "OCR runtime checksum: $runtimeArchiveChecksum"
 Write-Output "OCR runtime manifest: $runtimeReleaseManifest"
 
+# The Mini package family still ships an online NSIS installer; keep the NSIS
+# work directory available for package-clip-shot-mini.ps1.
+$nsisWorkDirectory = Join-Path $repoRoot "build\nsis-$Architecture"
+New-Item -ItemType Directory -Path $nsisWorkDirectory -Force | Out-Null
+
 . (Join-Path $PSScriptRoot "package-clip-shot-mini.ps1")
