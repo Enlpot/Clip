@@ -338,6 +338,9 @@ jobs:
 
       - name: Publish GitHub Release
         uses: actions/github-script@v7
+        env:
+          CLIP_ASSETS: ${{ steps.package.outputs.assets }}
+          CLIP_FEED: ${{ steps.sign.outputs.feed }}
         with:
           script: |
             const fs = require('fs');
@@ -345,13 +348,11 @@ jobs:
             const tag = context.ref.replace('refs/tags/', '');
             const version = fs.readFileSync('CMakeLists.txt', 'utf8')
               .match(/set\(CLIP_SHOT_VERSION "([^"]+)"\)/)[1];
-            const assets = [
-              ...`${{ steps.package.outputs.assets }}`
-                .split('\n').map(s => s.trim()).filter(Boolean)
-                .filter(a => !a.endsWith('.native-validation.json'))
-                .filter(a => !a.includes('ocr-runtime')),
-              `${{ steps.sign.outputs.feed }}`,
-            ].filter(Boolean);
+            const assets = (process.env.CLIP_ASSETS || '')
+              .split('\n').map(s => s.trim()).filter(Boolean)
+              .filter(a => !a.endsWith('.native-validation.json'))
+              .filter(a => !a.includes('ocr-runtime'));
+            if (process.env.CLIP_FEED) assets.push(process.env.CLIP_FEED);
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
