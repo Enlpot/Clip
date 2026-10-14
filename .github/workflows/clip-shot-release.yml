@@ -167,15 +167,6 @@ jobs:
           ctest --test-dir build/qt-timezone-size -R '^clip-qt-timezone-tests$' --output-on-failure
           if ($LASTEXITCODE -ne 0) { throw "Qt timezone behavior tests failed." }
 
-      - name: Provision NSIS installer toolchain
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "${env:ProgramFiles(x86)}/NSIS/makensis.exe") -and
-              -not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis --yes --no-progress
-            if ($LASTEXITCODE -ne 0) { throw 'NSIS provisioning failed.' }
-          }
-
       - name: Build, audit, and package statically
         shell: pwsh
         run: |
@@ -186,7 +177,7 @@ jobs:
           }
           .\scripts\stage-clip-shot-release.ps1 -Architecture $env:CLIP_ARCHITECTURE
 
-      - name: Verify focused updater and installer behavior
+      - name: Verify focused updater behavior
         shell: pwsh
         run: |
           . scripts/clip-build-environment.ps1
@@ -219,16 +210,13 @@ jobs:
           cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --test service_protocol
           if ($LASTEXITCODE -ne 0) { throw 'Updater architecture and service protocol tests failed.' }
           cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --test uninstall
-          if ($LASTEXITCODE -ne 0) { throw 'Updater uninstall and installer bootstrap tests failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Updater uninstall tests failed.' }
           cargo test --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml --features mini --test uninstall
           if ($LASTEXITCODE -ne 0) { throw 'Mini updater uninstall and installer bootstrap tests failed.' }
           & scripts/test-clip-shot-ocr-release-runtime.ps1
           & scripts/test-clip-shot-release-symbols.ps1 -Architecture $env:CLIP_ARCHITECTURE -ReleaseHelperPath build/${{ matrix.preset }}/clip_shot/Release/clip-shot-updater.exe
           & scripts/test-clip-shot-release-symbols.ps1 -Architecture $env:CLIP_ARCHITECTURE -Edition Mini -ReleaseHelperPath build/${{ matrix.preset }}/clip_shot_mini/Release/clip-shot-mini-updater.exe
-          & scripts/test-clip-shot-installer.ps1 -Architecture $env:CLIP_ARCHITECTURE
-          & scripts/test-clip-shot-installer-upgrade.ps1 -Architecture $env:CLIP_ARCHITECTURE -HelperPath build/${{ matrix.preset }}/clip_shot/Release/clip-shot-updater.exe
           & scripts/test-clip-shot-installer-upgrade.ps1 -Architecture $env:CLIP_ARCHITECTURE -Edition Mini -HelperPath build/${{ matrix.preset }}/clip_shot_mini/Release/clip-shot-mini-updater.exe
-          & scripts/test-clip-shot-installer-i18n.ps1
           & scripts/test-clip-shot-installer-i18n.ps1 -Edition Mini
           & scripts/test-clip-shot-mini-release.ps1
           cmake --preset $env:CLIP_PRESET -DCLIP_SHOT_BUILD_UPDATE_TESTS=ON
@@ -270,15 +258,11 @@ jobs:
             throw "Unexpected release tag: $env:GITHUB_REF_NAME"
           }
           $names = @()
-          $base = "clip-shot-$version-windows-${{ matrix.architecture }}-offline"
-          $names += @("$base.exe", "$base.exe.sha256", "$base.manifest.json")
           $base = "clip-shot-$version-windows-${{ matrix.architecture }}-portable"
-          $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
-          $base = "clip-shot-$version-windows-${{ matrix.architecture }}-offline-update"
           $names += @("$base.zip", "$base.zip.sha256", "$base.manifest.json")
           $packages = @($names | ForEach-Object { Get-Item -LiteralPath "build/${{ matrix.preset }}/$_" -ErrorAction Stop })
           $packages += @(Get-ChildItem build/${{ matrix.preset }}/native-validation -Filter '*.native-validation.json' -File)
-          $requiredProofBases = @("clip-shot-$version-windows-${{ matrix.architecture }}-offline.exe.native-validation.json", "clip-shot-$version-windows-${{ matrix.architecture }}-portable.zip.native-validation.json")
+          $requiredProofBases = @("clip-shot-$version-windows-${{ matrix.architecture }}-portable.zip.native-validation.json")
           $proofNames = @($packages | Where-Object Name -like '*.native-validation.json' | ForEach-Object { $_.Name })
           foreach ($required in $requiredProofBases) {
             if ($required -notin $proofNames) { throw "Missing native validation evidence: $required" }
@@ -322,8 +306,6 @@ jobs:
             return $entry
           }
           $packages = @()
-          $packages += Get-PackageEntry -Base "clip-shot-$version-windows-${{ matrix.architecture }}-offline" -Kind installer -Variant offline -Suffix '.exe'
-          $packages += Get-PackageEntry -Base "clip-shot-$version-windows-${{ matrix.architecture }}-offline" -Kind update -Variant offline -Suffix '-update.zip'
           $packages += Get-PackageEntry -Base "clip-shot-$version-windows-${{ matrix.architecture }}-portable" -Kind portable -Variant portable -Suffix '.zip'
           $payloadBytes = [Text.Encoding]::UTF8.GetBytes(([ordered]@{
             schema = 1; product = 'clip-shot'; version = $version;
@@ -384,12 +366,11 @@ jobs:
             const notes = '## Clip ' + version + '（Windows x64）\n\n' +
               '基于 snow-apps 更名并持续维护的版本，仅支持 Windows x64。\n\n' +
               '### 本版包含\n' +
-              '- 离线安装器：`clip-shot-' + version + '-windows-x64-offline.exe`（含 sha256 校验与 manifest）\n' +
-              '- 便携版：`clip-shot-' + version + '-windows-x64-portable.zip`（含 sha256 校验与 manifest）\n' +
-              '- 更新包：`clip-shot-' + version + '-windows-x64-offline-update.zip` + 签名 feed（`latest-version.json`），内置自动更新可用\n' +
+              '- 便携版：`clip-shot-' + version + '-windows-x64-portable.zip`（含 sha256 校验与 manifest），解压即用，根目录含 `Clip.vbs` 启动器\n' +
+              '- OCR 文字识别开箱即用；自动更新可用（签名 feed `latest-version.json`）\n' +
               '- 全部产物均已通过 CI 原生架构验证（native-validation）\n\n' +
               '### 使用提示\n' +
-              '- 安装器或便携版解压后即可使用，OCR 文字识别开箱即用。';
+              '- 解压到任意目录后双击根目录 `Clip.vbs`（或 `bin\\clip_shot.exe`）即可使用；整个目录可随意移动，设置与数据保留在 `bin\\portable`。';
             const release = await github.rest.repos.createRelease({
               owner, repo,
               tag_name: tag,

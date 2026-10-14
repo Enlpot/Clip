@@ -334,10 +334,11 @@ pub fn verify_release_for_platform(
                 "The release does not contain all required Windows packages",
             )
         })?;
+    let required_packages = if crate::edition::MINI { 3 } else { 1 };
     require(
-        packages.len() == 3,
+        packages.len() == required_packages,
         "incomplete_windows_release",
-        "The release does not contain all required Windows packages",
+        "The release does not contain the required Windows packages",
     )?;
     let mut parsed = Vec::with_capacity(packages.len());
     let mut paths = HashSet::new();
@@ -352,10 +353,11 @@ pub fn verify_release_for_platform(
         let size = positive_size(package.get("size"), false)?;
         let sha256 = hash_value(package.get("sha256"))?;
         let portable = variant == "portable" && kind == "portable";
+        let installed = crate::edition::MINI
+            && variant == "online"
+            && matches!(kind.as_str(), "installer" | "update");
         require(
-            portable
-                || (variant == if crate::edition::MINI { "online" } else { "offline" }
-                    && matches!(kind.as_str(), "installer" | "update")),
+            portable || installed,
             "unknown_package_variant",
             "Unknown update package variant",
         )?;
@@ -452,32 +454,16 @@ pub(crate) mod tests {
             "version": "2.0.0",
             "futureField": {"is": "ignored"},
             "packages": [
-                {"variant":"online", "kind":"installer", "path":"setup/clip-shot_windows-x64-online.exe", "size":1, "sha256":"1".repeat(64)},
-                {"variant":"online", "kind":"update", "path":"setup/clip-shot_windows-x64-online-update.zip", "size":1, "sha256":"2".repeat(64), "files":files, "future":true},
-                {"variant":"offline", "kind":"installer", "path":"setup/clip-shot_windows-x64-offline.exe", "size":1, "sha256":"3".repeat(64)},
-                {"variant":"offline", "kind":"update", "path":"setup/clip-shot_windows-x64-offline-update.zip", "size":1, "sha256":"4".repeat(64), "files":inventory()},
                 {"variant":"portable", "kind":"portable", "path":"setup/clip-shot_windows-x64-portable.zip", "size":1, "sha256":"5".repeat(64), "files":inventory()}
             ]
         });
         if crate::edition::MINI {
             payload["product"] = json!(crate::edition::PRODUCT);
-            payload["packages"]
-                .as_array_mut()
-                .unwrap()
-                .retain(|p| p["variant"] != "offline");
-            for package in payload["packages"].as_array_mut().unwrap() {
-                package["path"] = json!(
-                    package["path"]
-                        .as_str()
-                        .unwrap()
-                        .replace("setup/clip-shot_", "setup/clip-shot-mini_")
-                );
-            }
-        } else {
-            payload["packages"]
-                .as_array_mut()
-                .unwrap()
-                .retain(|p| p["variant"] != "online");
+            payload["packages"] = json!([
+                {"variant":"online", "kind":"installer", "path":"setup/clip-shot-mini_windows-x64-online.exe", "size":1, "sha256":"1".repeat(64)},
+                {"variant":"online", "kind":"update", "path":"setup/clip-shot-mini_windows-x64-online-update.zip", "size":1, "sha256":"2".repeat(64), "files":files, "future":true},
+                {"variant":"portable", "kind":"portable", "path":"setup/clip-shot-mini_windows-x64-portable.zip", "size":1, "sha256":"5".repeat(64), "files":inventory()}
+            ]);
         }
         payload["platform"] = json!(crate::edition::PLATFORM);
         for package in payload["packages"].as_array_mut().unwrap() {
@@ -628,7 +614,10 @@ pub(crate) mod tests {
         let envelope = sign_payload(&payload, &private, 32);
         let release = verify_release(&envelope, Some(&trusted)).unwrap();
         assert_eq!(release.version, "2.0.0");
-        assert_eq!(release.packages.len(), 3);
+        assert_eq!(
+            release.packages.len(),
+            if crate::edition::MINI { 3 } else { 1 }
+        );
 
         let mut other_product = payload.clone();
         other_product["product"] = json!(if crate::edition::MINI {

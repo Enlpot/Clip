@@ -60,7 +60,7 @@ function Wait-CanaryFile([string]$Path) {
         Start-Sleep -Milliseconds 100
     }
 }
-$variants = if ($testElevation) { @('offline') } else { @('portable', 'online', 'offline') }
+$variants = @('portable')
 $modes = switch ($ElevationAction) {
     'Cancel' { @('elevation-cancel') }
     'Approve' { @('recover', 'recover-helper-change') }

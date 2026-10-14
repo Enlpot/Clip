@@ -131,7 +131,7 @@ $global:ClipGitHubTestEvents.Add('website')
     Copy-Item -LiteralPath (Join-Path $packaging 'clip-shot-ocr-asset-manifest.json') -Destination (Join-Path $packaging 'clip-shot-ocr-asset-manifest-arm64.json')
     foreach ($architecture in @('x64', 'arm64')) {
     foreach ($prefix in @('clip-shot', 'clip-shot-mini')) {
-    $variants = if ($prefix -eq 'clip-shot-mini') { @('online','portable') } else { @('online','offline','portable') }
+    $variants = if ($prefix -eq 'clip-shot-mini') { @('online','portable') } else { @('portable') }
     foreach ($variant in $variants) {
         $kinds = if ($variant -eq 'portable') { @('portable') } else { @('installer','update') }
         foreach ($kind in $kinds) {
@@ -175,7 +175,7 @@ $global:ClipGitHubTestEvents.Add('website')
     $global:ClipGitHubTestEvents.Clear()
     & (Join-Path $fixtureScripts 'publish-clip-shot-release.ps1') -BuildDirectory $build -Arm64BuildDirectory $build -SigningKeyPath $keyPath -SkipBuild -SkipGitee
     Require ($global:ClipGitHubTestEvents[0] -eq 'audit' -and $global:ClipGitHubTestEvents[-1] -eq 'edit') 'GitHub-only publication audits before publishing.'
-    Require ($global:ClipGitHubTestBytes.ContainsKey('latest-version.json') -and $global:ClipGitHubTestBytes.ContainsKey('latest-version-windows-arm64.json') -and $global:ClipGitHubTestBytes.Count -eq 52) 'Publish all sixteen packages, sidecars, audit manifests, and four signed feeds.'
+    Require ($global:ClipGitHubTestBytes.ContainsKey('latest-version.json') -and $global:ClipGitHubTestBytes.ContainsKey('latest-version-windows-arm64.json') -and $global:ClipGitHubTestBytes.Count -eq 28) 'Publish the portable packages, sidecars, and four signed feeds.'
     $miniEnvelope = [Text.Encoding]::UTF8.GetString($global:ClipGitHubTestBytes['latest-version-mini.json']) | ConvertFrom-Json
     $miniPayload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($miniEnvelope.payload)) | ConvertFrom-Json
     Require ($miniPayload.product -ceq 'clip-shot-mini' -and $miniPayload.packages.Count -eq 3) 'Mini signs its three packages with a product identity.'
@@ -200,7 +200,7 @@ $global:ClipGitHubTestEvents.Add('website')
         }
         $manifest = Get-Content -Raw -LiteralPath $arguments[[array]::IndexOf($arguments, '--manifest') + 1] | ConvertFrom-Json
         Require ($manifest.body -ceq $global:ClipGitHubTestNotes) 'Both destinations use identical local notes.'
-        Require ($manifest.sourceCommit -ceq ('a' * 40) -and $manifest.assets.Count -eq 52 -and $manifest.nativeValidation.Count -eq 16) 'Preserve the complete audited source, native proof, and asset contract.'
+        Require ($manifest.sourceCommit -ceq ('a' * 40) -and $manifest.assets.Count -eq 28 -and $manifest.nativeValidation.Count -eq 8) 'Preserve the complete audited source, native proof, and asset contract.'
         foreach ($asset in $manifest.assets) {
             Require ((Get-FileHash -LiteralPath $asset.path).Hash.ToLowerInvariant() -ceq $asset.sha256) 'Gitee files must match local audited bytes.'
         }

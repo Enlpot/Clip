@@ -3165,22 +3165,18 @@ mod tests {
     fn github_fixture(version: &str, asset_names: &[&str]) -> Value {
         let mut names: Vec<String> = asset_names.iter().map(|name| (*name).to_owned()).collect();
         if asset_names.contains(&crate::edition::FEED_NAME) {
-            names.extend(
-                [
-                    "online.exe",
-                    "online-update.zip",
-                    "offline.exe",
-                    "offline-update.zip",
-                    "portable.zip",
-                ]
-                .map(|suffix| {
-                    format!(
-                        "{product}-{version}-{platform}-{suffix}",
-                        product = crate::edition::PRODUCT,
-                        platform = crate::edition::PLATFORM
-                    )
-                }),
-            );
+            let suffixes = if crate::edition::MINI {
+                vec!["online.exe", "online-update.zip", "portable.zip"]
+            } else {
+                vec!["portable.zip"]
+            };
+            names.extend(suffixes.into_iter().map(|suffix| {
+                format!(
+                    "{product}-{version}-{platform}-{suffix}",
+                    product = crate::edition::PRODUCT,
+                    platform = crate::edition::PLATFORM
+                )
+            }));
         }
         json!({"draft":false,"prerelease":false,"tag_name":format!("v{version}_clip-shot"),
             "assets":names.iter().map(|name| json!({"name":name,"browser_download_url":
@@ -3352,7 +3348,8 @@ mod tests {
         for mutation in [false, true] {
             let mut rejected = payload.clone();
             if mutation {
-                rejected["packages"][2]["sha256"] = json!("6".repeat(64));
+                rejected["packages"][if crate::edition::MINI { 2 } else { 0 }]["sha256"] =
+                    json!("6".repeat(64));
             } else {
                 rejected["version"] = json!("1.9.0");
             }
@@ -3426,34 +3423,24 @@ mod tests {
             &json!([{"id":123,"tag_name":"v2.0.0_clip-shot","prerelease":false}]),
         )
         .unwrap();
-        let names = [
-            crate::edition::FEED_NAME,
-            &format!(
+        let mut names = vec![crate::edition::FEED_NAME.to_owned()];
+        if crate::edition::MINI {
+            names.push(format!(
                 "{}-2.0.0-{}-online.exe",
                 crate::edition::PRODUCT,
                 crate::edition::PLATFORM
-            ),
-            &format!(
+            ));
+            names.push(format!(
                 "{}-2.0.0-{}-online-update.zip",
                 crate::edition::PRODUCT,
                 crate::edition::PLATFORM
-            ),
-            &format!(
-                "{}-2.0.0-{}-offline.exe",
-                crate::edition::PRODUCT,
-                crate::edition::PLATFORM
-            ),
-            &format!(
-                "{}-2.0.0-{}-offline-update.zip",
-                crate::edition::PRODUCT,
-                crate::edition::PLATFORM
-            ),
-            &format!(
-                "{}-2.0.0-{}-portable.zip",
-                crate::edition::PRODUCT,
-                crate::edition::PLATFORM
-            ),
-        ];
+            ));
+        }
+        names.push(format!(
+            "{}-2.0.0-{}-portable.zip",
+            crate::edition::PRODUCT,
+            crate::edition::PLATFORM
+        ));
         let assets = serde_json::to_vec(&names.iter().map(|name| json!({"name":name,
             "browser_download_url":format!("https://gitee.com/Enlpot/Clip/releases/download/v2.0.0_clip-shot/{name}")})).collect::<Vec<_>>()).unwrap();
         for gitee_wins in [true, false] {

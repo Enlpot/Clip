@@ -11,7 +11,7 @@ function Get-ClipShotEdition([ValidateSet('Full', 'Mini')][string]$Edition = 'Fu
     return [pscustomobject]@{ Edition = 'Full'; Product = 'clip-shot'; Name = 'Clip';
         Executable = 'clip_shot'; Registry = 'ClipShot'; Scoop = 'clipshot';
         Winget = 'mg-chao.clip-shot'; Feed = "latest-version$feedSuffix.json";
-        Variants = @('online', 'offline', 'portable'); Component = 'ClipShot'; Marker = '__data_directory' }
+        Variants = @('portable'); Component = 'ClipShot'; Marker = '__data_directory' }
 }
 
 function Get-ClipShotReleaseArchitectures($Release, [string]$Version) {

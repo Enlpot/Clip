@@ -184,7 +184,7 @@ $validated = @{}
 $installers = @()
 try {
     foreach ($product in @('clip-shot', 'clip-shot-mini')) {
-        $variants = if ($product -eq 'clip-shot-mini') { @('online', 'portable') } else { @('online', 'offline', 'portable') }
+        $variants = if ($product -eq 'clip-shot-mini') { @('online', 'portable') } else { @('portable') }
         foreach ($variant in $variants) {
             $base = "$product-$version-$($target.Platform)-$variant"
             $archiveBase = if ($variant -eq 'portable') { $base } else { "$base-update" }

@@ -10,7 +10,7 @@ project(clip_apps VERSION 0.2.0 LANGUAGES CXX)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClipWindowsArchitecture.cmake")
 clip_configure_windows_architecture()
 
-set(CLIP_SHOT_VERSION "1.2.5")
+set(CLIP_SHOT_VERSION "1.2.6")
 if(NOT CLIP_SHOT_VERSION MATCHES "^([0-9]+\\.[0-9]+\\.[0-9]+)(-[0-9A-Za-z.-]+)?$")
     message(FATAL_ERROR "CLIP_SHOT_VERSION must be a semantic version such as 0.8.0-dev")
 endif()

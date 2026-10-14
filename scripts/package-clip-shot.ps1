@@ -59,24 +59,6 @@ function Assert-ClipNativeStartup {
     }
 }
 
-$nsisCommand = Get-Command makensis -ErrorAction SilentlyContinue
-if (-not $nsisCommand) {
-    $nsisCandidates = @(
-        "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
-        "${env:ProgramFiles}\NSIS\makensis.exe"
-    )
-    $nsisPath = $nsisCandidates |
-        Where-Object { Test-Path -LiteralPath $_ } |
-        Select-Object -First 1
-    if ($nsisPath) {
-        $env:Path = "$(Split-Path -Parent $nsisPath);$env:Path"
-        $nsisCommand = Get-Command makensis -ErrorAction SilentlyContinue
-    }
-}
-if (-not $nsisCommand) {
-    throw "NSIS compiler 'makensis' was not found. Install NSIS before packaging Clip."
-}
-
 function Resolve-RepoPath {
     param([Parameter(Mandatory = $true)][string]$Path)
     if ([System.IO.Path]::IsPathRooted($Path)) {
@@ -1186,63 +1168,69 @@ if (-not $OcrRuntimeArchive) {
     $runtimeArchive.sha256 | Set-Content -LiteralPath $runtimePublishedMarker -Encoding ascii
 }
 
-$variantStages = [ordered]@{
-    online = Join-Path $artifactRoot "clip-shot-$packageVersion-online-stage"
-    offline = Join-Path $artifactRoot "clip-shot-$packageVersion-offline-stage"
-    portable = Join-Path $artifactRoot "clip-shot-$packageVersion-portable-stage"
-}
-$defaultOcrModel = @($ocrModels | Where-Object { $_.Type -eq $ocrDefaultModelType })[0]
-$defaultModelCache = Join-Path $artifactRoot "ocr-models-$($defaultOcrModel.Id)"
-foreach ($variant in $variantStages.Keys) {
-    $stage = $variantStages[$variant]
-    Reset-ReleaseDirectory -Path $stage
-    Copy-Item -Path (Join-Path $installDirectory "*") -Destination $stage -Recurse -Force
-    Remove-Item -LiteralPath (Join-Path $stage "bin\clip-ocr-process.exe") -Force
-    Remove-Item -LiteralPath (Join-Path $stage "bin\DirectML.dll") -Force
-    $assetRoot = Join-Path $stage "bin\assets\ocr"
-    Reset-ReleaseDirectory -Path $assetRoot
-    Copy-Item -LiteralPath $assetManifestSource -Destination (Join-Path $assetRoot "asset-manifest.json")
-    if ($variant -in @("offline", "portable")) {
-        $runtimeDestination = Join-Path $assetRoot "runtimes\$ocrRuntimeVersion\$ocrPlatform"
-        $modelDestination = Join-Path $assetRoot "models\$ocrDefaultModelId"
-        New-Item -ItemType Directory -Path $runtimeDestination, $modelDestination -Force | Out-Null
-        Copy-Item -Path (Join-Path $runtimeWork "*") -Destination $runtimeDestination -Force
-        foreach ($file in $defaultOcrModel.Files) {
-            Copy-Item -LiteralPath (Join-Path $defaultModelCache $file.Name) -Destination $modelDestination
-        }
-        [ordered]@{ schema = 1; component = $ocrRuntimeVersion } |
-            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $runtimeDestination ".complete.json") -Encoding utf8
-        [ordered]@{ schema = 1; component = $ocrDefaultModelId } |
-            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $modelDestination ".complete.json") -Encoding utf8
+function New-ClipPortableLauncher {
+    param([Parameter(Mandatory)][string]$StageRoot)
+    # A relative-path .lnk cannot be produced reliably on all runners (the
+    # ShellLink COM object on this environment does not expose IPersistFile),
+    # so the portable root ships a VBS launcher: it resolves its own directory
+    # at run time, so the whole folder stays movable and works from any
+    # extraction location without a black console window.
+    $launcherPath = Join-Path $StageRoot 'Clip.vbs'
+    $vbs = @'
+Set fso = CreateObject("Scripting.FileSystemObject")
+Set ws = CreateObject("WScript.Shell")
+dir = fso.GetParentFolderName(WScript.ScriptFullName)
+ws.Run """" & dir & "\bin\clip_shot.exe""", 1, False
+'@
+    Set-Content -LiteralPath $launcherPath -Value $vbs -Encoding ASCII
+    if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+        throw "Failed to create the portable root launcher: $launcherPath"
     }
-    if ($variant -eq "portable") {
-        "portable" | Set-Content -LiteralPath (Join-Path $stage "bin\__data_directory") `
-            -Encoding ascii -NoNewline
-    }
-    Assert-ClipArm64StackCookieSafety -Path $stage -BuildDirectory $buildDirectory -Architecture $Architecture
-    $owned = @(Get-ReleaseTreeFileManifest -Root $stage | ForEach-Object {
-        [ordered]@{ path = $_.Path.Replace('\', '/'); size = $_.Bytes; sha256 = $_.Sha256 }
-    })
-    [ordered]@{ schema = 1; platform = $ocrPlatform; version = $packageVersion; variant = $variant; files = $owned } |
-        ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $stage 'clip-shot-installation.json') -Encoding utf8NoBOM
 }
 
-$onlineAssetFiles = @(Get-ChildItem -LiteralPath (Join-Path $variantStages.online "bin\assets\ocr") -Recurse -File)
-if ($onlineAssetFiles.Count -ne 1 -or $onlineAssetFiles[0].Name -ne "asset-manifest.json") {
-    throw "The online installer stage must contain only the trusted OCR asset manifest."
+$portableStage = Join-Path $artifactRoot "clip-shot-$packageVersion-portable-stage"
+$defaultOcrModel = @($ocrModels | Where-Object { $_.Type -eq $ocrDefaultModelType })[0]
+$defaultModelCache = Join-Path $artifactRoot "ocr-models-$($defaultOcrModel.Id)"
+Reset-ReleaseDirectory -Path $portableStage
+Copy-Item -Path (Join-Path $installDirectory "*") -Destination $portableStage -Recurse -Force
+Remove-Item -LiteralPath (Join-Path $portableStage "bin\clip-ocr-process.exe") -Force
+Remove-Item -LiteralPath (Join-Path $portableStage "bin\DirectML.dll") -Force
+$assetRoot = Join-Path $portableStage "bin\assets\ocr"
+Reset-ReleaseDirectory -Path $assetRoot
+Copy-Item -LiteralPath $assetManifestSource -Destination (Join-Path $assetRoot "asset-manifest.json")
+$runtimeDestination = Join-Path $assetRoot "runtimes\$ocrRuntimeVersion\$ocrPlatform"
+$modelDestination = Join-Path $assetRoot "models\$ocrDefaultModelId"
+New-Item -ItemType Directory -Path $runtimeDestination, $modelDestination -Force | Out-Null
+Copy-Item -Path (Join-Path $runtimeWork "*") -Destination $runtimeDestination -Force
+foreach ($file in $defaultOcrModel.Files) {
+    Copy-Item -LiteralPath (Join-Path $defaultModelCache $file.Name) -Destination $modelDestination
 }
-$offlineAssetRoot = Join-Path $variantStages.offline "bin\assets\ocr"
-$expectedOfflineDirectories = @(
+[ordered]@{ schema = 1; component = $ocrRuntimeVersion } |
+    ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $runtimeDestination ".complete.json") -Encoding utf8
+[ordered]@{ schema = 1; component = $ocrDefaultModelId } |
+    ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $modelDestination ".complete.json") -Encoding utf8
+"portable" | Set-Content -LiteralPath (Join-Path $portableStage "bin\__data_directory") `
+    -Encoding ascii -NoNewline
+New-ClipPortableLauncher -StageRoot $portableStage
+Assert-ClipArm64StackCookieSafety -Path $portableStage -BuildDirectory $buildDirectory -Architecture $Architecture
+$owned = @(Get-ReleaseTreeFileManifest -Root $portableStage | ForEach-Object {
+    [ordered]@{ path = $_.Path.Replace('\', '/'); size = $_.Bytes; sha256 = $_.Sha256 }
+})
+[ordered]@{ schema = 1; platform = $ocrPlatform; version = $packageVersion; variant = 'portable'; files = $owned } |
+    ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $portableStage 'clip-shot-installation.json') -Encoding utf8NoBOM
+
+$portableOcrRoot = Join-Path $portableStage "bin\assets\ocr"
+$expectedPortableDirectories = @(
     "models",
     "models\$ocrDefaultModelId",
     "runtimes",
     "runtimes\$ocrRuntimeVersion",
     "runtimes\$ocrRuntimeVersion\$ocrPlatform"
 ) | Sort-Object
-$actualOfflineDirectories = @(Get-ChildItem -LiteralPath $offlineAssetRoot -Recurse -Directory |
-    ForEach-Object { [System.IO.Path]::GetRelativePath($offlineAssetRoot, $_.FullName) } |
+$actualPortableDirectories = @(Get-ChildItem -LiteralPath $portableOcrRoot -Recurse -Directory |
+    ForEach-Object { [System.IO.Path]::GetRelativePath($portableOcrRoot, $_.FullName) } |
     Sort-Object)
-$expectedOfflineFiles = @(
+$expectedPortableFiles = @(
     "asset-manifest.json",
     "models\$ocrDefaultModelId\.complete.json",
     "models\$ocrDefaultModelId\$($defaultOcrModel.Detector)",
@@ -1253,144 +1241,32 @@ $expectedOfflineFiles = @(
     "runtimes\$ocrRuntimeVersion\$ocrPlatform\runtime-manifest.json",
     "runtimes\$ocrRuntimeVersion\$ocrPlatform\$ocrRuntimeFileName"
 ) | Sort-Object
-$actualOfflineFiles = @(Get-ChildItem -LiteralPath $offlineAssetRoot -Recurse -File |
-    ForEach-Object { [System.IO.Path]::GetRelativePath($offlineAssetRoot, $_.FullName) } |
+$actualPortableFiles = @(Get-ChildItem -LiteralPath $portableOcrRoot -Recurse -File |
+    ForEach-Object { [System.IO.Path]::GetRelativePath($portableOcrRoot, $_.FullName) } |
     Sort-Object)
-if (@(Compare-Object $expectedOfflineDirectories $actualOfflineDirectories).Count -ne 0 -or
-    @(Compare-Object $expectedOfflineFiles $actualOfflineFiles).Count -ne 0) {
-    throw "The offline installer must contain exactly runtime $ocrRuntimeVersion and the Small OCR model."
+if (@(Compare-Object $expectedPortableDirectories $actualPortableDirectories).Count -ne 0 -or
+    @(Compare-Object $expectedPortableFiles $actualPortableFiles).Count -ne 0) {
+    throw "The portable package must contain exactly runtime $ocrRuntimeVersion and the Small OCR model."
 }
-$portableProcess = Join-Path $variantStages.portable "bin\assets\ocr\runtimes\$ocrRuntimeVersion\$ocrPlatform\$ocrRuntimeFileName"
-if (-not (Test-Path -LiteralPath $portableProcess -PathType Leaf)) {
-    throw "The portable package stage is missing its versioned OCR runtime: $portableProcess"
-}
-$offlineOcrManifest = Get-ReleaseTreeFileManifest `
-    -Root (Join-Path $variantStages.offline "bin\assets\ocr")
-$portableOcrManifest = Get-ReleaseTreeFileManifest `
-    -Root (Join-Path $variantStages.portable "bin\assets\ocr")
-if (($offlineOcrManifest | ConvertTo-Json -Depth 4 -Compress) -cne
-    ($portableOcrManifest | ConvertTo-Json -Depth 4 -Compress)) {
-    throw "The portable package OCR resources do not match the offline installer resources."
-}
-$portableDataMarker = Join-Path $variantStages.portable "bin\__data_directory"
+$portableDataMarker = Join-Path $portableStage "bin\__data_directory"
 if (-not (Test-Path -LiteralPath $portableDataMarker -PathType Leaf) -or
     (Get-Content -LiteralPath $portableDataMarker -Raw) -cne "portable") {
     throw "The portable package stage is missing its portable data-directory marker."
 }
 
 $producedPackages = @()
-Assert-ClipNativeStartup -Stage $variantStages.online -Executable clip_shot -Updater clip-shot-updater -Version $packageVersion
+Assert-ClipNativeStartup -Stage $portableStage -Executable clip_shot -Updater clip-shot-updater -Version $packageVersion
 $nativeProbesPassed = $nativeTarget
-foreach ($variant in @('online', 'offline')) {
-    $updateName = "clip-shot-$packageVersion-$ocrPlatform-$variant-update"
-    $updatePath = Join-Path $buildDirectory "$updateName.zip"
-    New-DeterministicZip -SourceDirectory $variantStages[$variant] -Destination $updatePath
-    $files = Get-ReleaseTreeFileManifest -Root $variantStages[$variant]
-    Assert-ZipMatchesFileManifest -ArchivePath $updatePath -FileManifest $files
-    $hash = (Get-FileHash -LiteralPath $updatePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$hash  $updateName.zip" | Set-Content -LiteralPath "$updatePath.sha256" -Encoding ascii
-    [ordered]@{ SchemaVersion = 3; PackageVersion = $packageVersion; Variant = $variant;
-        Architecture = $Architecture; Platform = $ocrPlatform; Preset = $releasePreset;
-        NativeValidationRequired = (-not $nativeTarget); NativeValidation = (New-ClipNativeValidation $updatePath);
-        InstallFiles = $files; Archive = [ordered]@{ Path = "$updateName.zip";
-            Bytes = (Get-Item -LiteralPath $updatePath).Length; Sha256 = $hash } } |
-        ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $buildDirectory "$updateName.manifest.json") -Encoding utf8NoBOM
-}
-# NSIS still uses MAX_PATH for payload input, including long third-party license names.
-$nsisWorkDirectory = Join-Path $repoRoot "build\nsis-$Architecture"
-New-Item -ItemType Directory -Path $nsisWorkDirectory -Force | Out-Null
-foreach ($variant in @("online", "offline")) {
-    $packageBaseName = "clip-shot-$packageVersion-$ocrPlatform-$variant"
-    $variantConfig = Join-Path $buildDirectory "CPackConfig-$variant.cmake"
-    $baseConfigPath = $cpackConfig.Replace('\', '/')
-    $stagePath = $variantStages[$variant].Replace('\', '/')
-    $packageDirectory = $nsisWorkDirectory.Replace('\', '/')
-    @"
-include("$baseConfigPath")
-set(CPACK_INSTALL_CMAKE_PROJECTS "")
-set(CPACK_INSTALLED_DIRECTORIES "$stagePath;/")
-set(CPACK_PACKAGE_DIRECTORY "$packageDirectory")
-set(CPACK_PACKAGE_FILE_NAME "$packageBaseName")
-string(REPLACE "clip-shot-$packageVersion-$ocrPlatform.exe" "$packageBaseName.exe" CPACK_NSIS_DEFINES "`${CPACK_NSIS_DEFINES}")
-"@ | Set-Content -LiteralPath $variantConfig -Encoding utf8
-    $packagePath = Join-Path $buildDirectory "$packageBaseName.exe"
-    if (Test-Path -LiteralPath $packagePath) { Remove-Item -LiteralPath $packagePath -Force }
-    if (Test-Path -LiteralPath "$packagePath.sha256") { Remove-Item -LiteralPath "$packagePath.sha256" -Force }
-    Push-Location $buildDirectory
-    try { & cpack --config $variantConfig -G NSIS -C Release }
-    finally { Pop-Location }
-    if ($LASTEXITCODE -eq 0) {
-        foreach ($suffix in @(".exe", ".exe.sha256")) {
-            Move-Item -LiteralPath (Join-Path $nsisWorkDirectory "$packageBaseName$suffix") `
-                -Destination (Join-Path $buildDirectory "$packageBaseName$suffix") -Force
-        }
-    }
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
-        throw "NSIS $variant packaging failed."
-    }
-    $installerVersionInfo = (Get-Item -LiteralPath $packagePath).VersionInfo
-    $expectedInstallerMetadata = @{
-        CompanyName = "Clip Apps"
-        FileDescription = "Clip installer"
-        FileVersion = "$packageVersionNumeric.0"
-        InternalName = "clip-shot-installer"
-        LegalCopyright = "Copyright (C) 2025-2026 mg-chao"
-        OriginalFilename = "$packageBaseName.exe"
-        ProductName = "Clip"
-        ProductVersion = $packageVersion
-    }
-    foreach ($property in $expectedInstallerMetadata.Keys) {
-        if ($installerVersionInfo.$property -ne $expectedInstallerMetadata[$property]) {
-            throw "Clip $variant installer metadata '$property' is '$($installerVersionInfo.$property)'; expected '$($expectedInstallerMetadata[$property])'."
-        }
-    }
-    $checksumPath = "$packagePath.sha256"
-    $installerHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf) -or
-        (Get-Content -LiteralPath $checksumPath -Raw) -notmatch [regex]::Escape($installerHash)) {
-        throw "The generated installer checksum does not match $packageBaseName.exe."
-    }
-    $stageFileManifest = Get-ReleaseTreeFileManifest -Root $variantStages[$variant]
-    $manifestPath = Join-Path $buildDirectory "$packageBaseName.manifest.json"
-    [ordered]@{
-        SchemaVersion = 2
-        PackageVersion = $packageVersion
-        Variant = $variant
-        Preset = $releasePreset
-        Architecture = $Architecture
-        Platform = $ocrPlatform
-        NativeValidationRequired = (-not $nativeTarget)
-        NativeValidation = (New-ClipNativeValidation $packagePath)
-        StaticCrt = $true
-        StaticQt = $true
-        StaticImageCodecBackend = $true
-        OcrRuntimeVersion = $ocrRuntimeVersion
-        OcrDefaultModelType = $ocrDefaultModelType
-        OcrDefaultModelId = $ocrDefaultModelId
-        Qt = $qtStamp
-        InstallTreeBytes = [long](($stageFileManifest | Measure-Object -Property Bytes -Sum).Sum)
-        InstallFiles = $stageFileManifest
-        Installer = [ordered]@{
-            Path = (Split-Path -Leaf $packagePath)
-            Bytes = (Get-Item -LiteralPath $packagePath).Length
-            Sha256 = $installerHash
-        }
-    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
-    $producedPackages += $packagePath
-    Write-Output "Clip $variant installer: $packagePath"
-    Write-Output "Clip $variant installer checksum: $checksumPath"
-    Write-Output "Clip $variant release manifest: $manifestPath"
-}
 
 $portableBaseName = "clip-shot-$packageVersion-$ocrPlatform-portable"
 $portableArchivePath = Join-Path $buildDirectory "$portableBaseName.zip"
-New-DeterministicZip -SourceDirectory $variantStages.portable -Destination $portableArchivePath
+New-DeterministicZip -SourceDirectory $portableStage -Destination $portableArchivePath
 $portableArchiveHash =
     (Get-FileHash -LiteralPath $portableArchivePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $portableChecksumPath = "$portableArchivePath.sha256"
 "$portableArchiveHash  $portableBaseName.zip" |
     Set-Content -LiteralPath $portableChecksumPath -Encoding ascii
-$portableStageFileManifest = Get-ReleaseTreeFileManifest -Root $variantStages.portable
+$portableStageFileManifest = Get-ReleaseTreeFileManifest -Root $portableStage
 Assert-ZipMatchesFileManifest -ArchivePath $portableArchivePath `
     -FileManifest $portableStageFileManifest
 $portableManifestPath = Join-Path $buildDirectory "$portableBaseName.manifest.json"

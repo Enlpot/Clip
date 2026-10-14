@@ -205,7 +205,8 @@ fn is_payload_relative(relative: &str) -> bool {
     safe_relative_path(relative)
         && (relative.starts_with("bin/")
             || relative.starts_with(crate::edition::SHARE_PREFIX)
-            || relative == INSTALLATION_RECORD)
+            || relative == INSTALLATION_RECORD
+            || relative.eq_ignore_ascii_case("Clip.vbs"))
         && !relative.eq_ignore_ascii_case(crate::edition::MARKER_PATH)
 }
 
@@ -1967,6 +1968,19 @@ mod tests {
                 .unwrap_err()
                 .code,
             "selected_data_collision"
+        );
+    }
+
+    #[test]
+    fn validate_target_path_accepts_the_portable_root_launcher() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("ClipShot");
+        fs::create_dir_all(root.join("bin")).unwrap();
+        validate_target_path(&root, "Clip.vbs").unwrap();
+        validate_target_path(&root, "bin/clip_shot.exe").unwrap();
+        assert_eq!(
+            validate_target_path(&root, "README.txt").unwrap_err().code,
+            "target_outside_payload"
         );
     }
 
