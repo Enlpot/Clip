@@ -189,7 +189,8 @@ pub fn parse_file_inventory(value: Option<&Value>) -> Result<Vec<UpdateFile>> {
                 && seen.insert(lower.clone())
                 && (path.starts_with("bin/")
                     || path.starts_with(crate::edition::SHARE_PREFIX)
-                    || path == crate::edition::INSTALLATION_RECORD)
+                    || path == crate::edition::INSTALLATION_RECORD
+                    || path.eq_ignore_ascii_case("Clip.vbs"))
                 && !lower.starts_with("bin/portable/"),
             "unsafe_update_inventory",
             "Unsafe update file inventory",
@@ -442,6 +443,7 @@ pub(crate) mod tests {
             file(crate::edition::APP_PATH),
             file(crate::edition::UPDATER_PATH),
             file(crate::edition::INSTALLATION_RECORD),
+            file("Clip.vbs"),
         ]
     }
 
