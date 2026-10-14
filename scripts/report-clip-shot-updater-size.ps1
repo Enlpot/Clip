@@ -85,6 +85,13 @@ if ($dumpbin) {
     }
 }
 
+# Fetch dependencies first so the locked offline tree below always resolves.
+# The updater crate is not covered by the CI Rust cache workspaces, so a fresh
+# runner can lack the registry entries that `cargo tree --offline` needs; the
+# fetch is idempotent and a no-op once the registry cache is complete.
+$null = & cargo fetch --locked --manifest-path $manifestPath 2>&1
+if ($LASTEXITCODE -ne 0) { throw 'cargo fetch failed while preparing the updater size report.' }
+
 $cargoTree = @(& cargo tree --locked --offline --manifest-path $manifestPath `
     --target $target.RustTarget --edges normal,build --prefix depth --format '{p} {f}' 2>&1)
 if ($LASTEXITCODE -ne 0) { throw 'cargo tree failed while creating the updater size report.' }
