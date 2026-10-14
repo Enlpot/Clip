@@ -3352,8 +3352,7 @@ mod tests {
         for mutation in [false, true] {
             let mut rejected = payload.clone();
             if mutation {
-                rejected["packages"][if crate::edition::MINI { 2 } else { 4 }]["sha256"] =
-                    json!("6".repeat(64));
+                rejected["packages"][2]["sha256"] = json!("6".repeat(64));
             } else {
                 rejected["version"] = json!("1.9.0");
             }

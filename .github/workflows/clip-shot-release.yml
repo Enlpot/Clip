@@ -313,7 +313,7 @@ jobs:
             $file = Join-Path $build "$Base$Suffix"
             $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($hash -cne $desc.Sha256 -or (Get-Item -LiteralPath $file).Length -ne $desc.Bytes) { throw "package mismatch: $file" }
-            $entry = [ordered]@{ variant = $Variant; kind = $Kind; path = "setup/clip-shot_windows-x64-$Suffix"; size = $desc.Bytes; sha256 = $hash }
+            $entry = [ordered]@{ variant = $Variant; kind = $Kind; path = "setup/clip-shot_windows-x64-$Variant$Suffix"; size = $desc.Bytes; sha256 = $hash }
             if ($Kind -ne 'installer') {
               $entry.files = @($m.InstallFiles | ForEach-Object {
                 [ordered]@{ path = $_.Path.Replace('\', '/'); size = $_.Bytes; sha256 = $_.Sha256 }

@@ -335,7 +335,7 @@ pub fn verify_release_for_platform(
             )
         })?;
     require(
-        packages.len() == if crate::edition::MINI { 3 } else { 5 },
+        packages.len() == 3,
         "incomplete_windows_release",
         "The release does not contain all required Windows packages",
     )?;
@@ -354,7 +354,7 @@ pub fn verify_release_for_platform(
         let portable = variant == "portable" && kind == "portable";
         require(
             portable
-                || ((variant == "online" || (!crate::edition::MINI && variant == "offline"))
+                || (variant == if crate::edition::MINI { "online" } else { "offline" }
                     && matches!(kind.as_str(), "installer" | "update")),
             "unknown_package_variant",
             "Unknown update package variant",
@@ -473,6 +473,11 @@ pub(crate) mod tests {
                         .replace("setup/clip-shot_", "setup/clip-shot-mini_")
                 );
             }
+        } else {
+            payload["packages"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|p| p["variant"] != "online");
         }
         payload["platform"] = json!(crate::edition::PLATFORM);
         for package in payload["packages"].as_array_mut().unwrap() {
@@ -623,10 +628,7 @@ pub(crate) mod tests {
         let envelope = sign_payload(&payload, &private, 32);
         let release = verify_release(&envelope, Some(&trusted)).unwrap();
         assert_eq!(release.version, "2.0.0");
-        assert_eq!(
-            release.packages.len(),
-            if crate::edition::MINI { 3 } else { 5 }
-        );
+        assert_eq!(release.packages.len(), 3);
 
         let mut other_product = payload.clone();
         other_product["product"] = json!(if crate::edition::MINI {
@@ -721,8 +723,13 @@ pub(crate) mod tests {
         );
 
         let mut payload = valid_payload();
-        payload["packages"][if crate::edition::MINI { 2 } else { 4 }]["variant"] =
-            Value::String("online".to_owned());
+        payload["packages"][if crate::edition::MINI { 2 } else { 0 }]["variant"] =
+            Value::String(if crate::edition::MINI {
+                "offline"
+            } else {
+                "online"
+            }
+            .to_owned());
         assert!(verify_release(&sign_payload(&payload, &private, 32), Some(&trusted)).is_err());
     }
 
