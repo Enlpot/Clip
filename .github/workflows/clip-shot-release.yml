@@ -57,10 +57,10 @@ jobs:
           toolchain: 1.97.1
           target: x86_64-pc-windows-msvc
 
-      - name: Install Ninja build tool
+      - name: Install Ninja and NSIS build tools
         shell: pwsh
         run: |
-          choco install ninja -y --no-progress | Out-Null
+          choco install ninja nsis -y --no-progress | Out-Null
           $ninjaPath = 'C:\ProgramData\chocolatey\bin'
           if (-not (Test-Path -LiteralPath (Join-Path $ninjaPath 'ninja.exe'))) { throw 'ninja.exe not found after install' }
           "PATH=$ninjaPath;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
