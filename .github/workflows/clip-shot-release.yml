@@ -20,7 +20,7 @@ jobs:
       matrix:
         include:
           - architecture: x64
-            runner: clip-win-x64
+            runner: windows-latest
             preset: clip-shot-msvc-release
             rust-target: x86_64-pc-windows-msvc
             qt-kit: msvc2026_64-static-system-codecs
@@ -37,33 +37,6 @@ jobs:
           fetch-depth: 0
           clean: false
 
-      - name: Reuse local vcpkg and Qt tool tree
-        shell: pwsh
-        run: |
-          function New-ReuseJunction {
-            param([string]$Dst, [string]$Src)
-            if (Test-Path -LiteralPath $Dst) {
-              Remove-Item -LiteralPath $Dst -Recurse -Force
-            }
-            New-Item -ItemType Directory -Path (Split-Path $Dst -Parent) -Force | Out-Null
-            New-Item -ItemType Junction -Path $Dst -Target $Src -Force | Out-Null
-          }
-          $local = if ($env:CLIP_LOCAL_TOOLS) { $env:CLIP_LOCAL_TOOLS } else { 'D:\WinDevelop\Clip\.tools' }
-          if (Test-Path -LiteralPath (Join-Path $local 'vcpkg\vcpkg.exe')) {
-            New-ReuseJunction -Dst (Join-Path $env:GITHUB_WORKSPACE '.tools') -Src $local
-            Write-Output "Reused local tool tree: $local"
-          } else {
-            Write-Output 'No reusable local tool tree; full bootstrap will run.'
-          }
-          $repoParent = Split-Path $local -Parent
-          foreach ($modelDir in @('artifacts\qr-models-wechat', 'artifacts\ocr-models-ppocrv6-small-463ea9f')) {
-            $src = Join-Path $repoParent $modelDir
-            if (Test-Path -LiteralPath $src) {
-              New-ReuseJunction -Dst (Join-Path $env:GITHUB_WORKSPACE $modelDir) -Src $src
-              Write-Output "Reused local models: $src"
-            }
-          }
-
       - name: Ensure build tools on PATH
         shell: pwsh
         run: |
@@ -73,19 +46,24 @@ jobs:
               $additions += $candidate
             }
           }
-          foreach ($ninjaRoot in @('C:\Users\bendi\AppData\Local\Programs\Ninja')) {
-            if (Test-Path -LiteralPath (Join-Path $ninjaRoot 'ninja.exe')) {
-              $additions += $ninjaRoot
-            }
-          }
-          $rustToolchainBin = 'C:\Users\bendi\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin'
-          if (Test-Path -LiteralPath (Join-Path $rustToolchainBin 'cargo.exe')) {
-            $additions += $rustToolchainBin
-          }
           if ($additions.Count -gt 0) {
             "PATH=$($additions -join ';');$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           Write-Output "PATH additions: $($additions -join ';')"
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.97.1
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Ninja build tool
+        shell: pwsh
+        run: |
+          choco install ninja -y --no-progress | Out-Null
+          $ninjaPath = 'C:\ProgramData\chocolatey\bin'
+          if (-not (Test-Path -LiteralPath (Join-Path $ninjaPath 'ninja.exe'))) { throw 'ninja.exe not found after install' }
+          "PATH=$ninjaPath;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install Python build helper
         shell: pwsh
