@@ -595,7 +595,13 @@ if (-not (Test-Path -LiteralPath $sourceDirectory -PathType Container)) {
     $extractedSourceDirectory = Join-Path $sourceParent "qt-everywhere-src-$QtVersion"
     New-Item -ItemType Directory -Force -Path $sourceParent | Out-Null
     if (-not (Test-Path -LiteralPath $extractedSourceDirectory -PathType Container)) {
-        Invoke-Checked -Command "tar" -Arguments @("-xf", $archivePath, "-C", $sourceParent)
+        # Prefer the Windows native tar (bsdtar) over Git Bash's GNU tar, which
+        # misparses Windows drive-letter paths as remote hosts (e.g. "Cannot
+        # connect to D: resolve failed") when the archive and target use
+        # D:\a\_temp\... paths on hosted runners.
+        $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+        if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { $tar = 'tar' }
+        Invoke-Checked -Command $tar -Arguments @("-xf", $archivePath, "-C", $sourceParent)
     }
     if ($sourceDirectory -ne $extractedSourceDirectory -and
         (Test-Path -LiteralPath $extractedSourceDirectory -PathType Container)) {
