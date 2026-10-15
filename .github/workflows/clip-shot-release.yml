@@ -91,10 +91,18 @@ jobs:
         with:
           path: ${{ github.workspace }}\.tools\vcpkg-binary-cache
           key: vcpkg-static-${{ matrix.architecture }}-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake') }}
+          save-always: true
 
       - name: Install static project dependencies
         shell: pwsh
         run: .\scripts\bootstrap.ps1 -Architecture $env:CLIP_ARCHITECTURE -VcpkgVariants Static -SkipQtValidation -SkipRustupInstall
+
+      - name: Fetch Rust dependency sources for license collection
+        shell: pwsh
+        run: |
+          cargo fetch --locked --manifest-path clip-crates/crates/clip-ocr-process/Cargo.toml
+          cargo fetch --locked --manifest-path clip_shot/rust/clip-shot-updater/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'cargo fetch for license collection failed.' }
 
       - name: Resolve repository Qt toolchain
         id: qt-toolchain
@@ -108,6 +116,7 @@ jobs:
         with:
           path: ${{ runner.tool_cache }}\clip-qt\${{ steps.qt-toolchain.outputs.version }}\${{ matrix.qt-kit }}
           key: clip-qt-static-system-codecs-v6-development-${{ steps.qt-toolchain.outputs.version }}-msvc2026-${{ matrix.architecture }}-${{ runner.os }}-${{ hashFiles('scripts/qt-toolchain.json', 'scripts/build-static-qt.ps1', 'scripts/clip-build-environment.ps1', 'scripts/static-qt-features.json', 'scripts/qtbase-timezone-without-cldr.patch', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+          save-always: true
 
       - name: Prepare Qt LTS static kit
         shell: pwsh
