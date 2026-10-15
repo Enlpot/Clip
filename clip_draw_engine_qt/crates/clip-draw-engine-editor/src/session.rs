@@ -409,6 +409,11 @@ impl EditorSession {
         self.editor.sync_after_document_change(document, snapshot);
     }
 
+    /// Selects the elements created by an applied creation transaction.
+    pub fn select_created_elements(&mut self, document: &DocumentModel, created: &[ElementId]) {
+        self.editor.select_created_elements(document, created);
+    }
+
     pub fn set_shape_style_patch(
         &mut self,
         document: &DocumentModel,

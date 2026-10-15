@@ -280,6 +280,37 @@ impl Editor {
         self.bump_overlay_state_revision();
     }
 
+    /// Selects the elements created by an applied creation transaction. Only
+    /// freehand/drawing annotations (rectangles, arrows, lines, free draw,
+    /// highlights, and distance pairs) are selected; text, serial numbers,
+    /// filters, spotlights, background-restore, and auto-filter elements keep
+    /// their own creation/editing flows.
+    pub fn select_created_elements(&mut self, document: &DocumentModel, created: &[ElementId]) {
+        let ids = created
+            .iter()
+            .copied()
+            .filter(|id| {
+                document.element(*id).is_ok_and(|element| {
+                    matches!(
+                        element.data.kind(),
+                        ElementKind::Rectangle
+                            | ElementKind::Arrow
+                            | ElementKind::Line
+                            | ElementKind::FreeDraw
+                            | ElementKind::RectangleHighlight
+                            | ElementKind::PenHighlight
+                            | ElementKind::Distance
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        if ids.is_empty() {
+            return;
+        }
+        let primary = ids.first().copied();
+        self.set_selection_state_with_document(Some(document), ids, primary);
+    }
+
     pub fn set_surface_size(&mut self, width: u32, height: u32) -> Result<(), ErrorCode> {
         let next = SurfaceSize { width, height };
         if self.view.surface != next {

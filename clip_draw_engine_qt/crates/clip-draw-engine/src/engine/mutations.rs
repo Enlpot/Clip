@@ -101,6 +101,12 @@ impl Engine {
             Vec::new()
         };
         let apply_result = self.model.apply_transaction(transaction)?;
+        // Creation transactions leave the newly added elements selected so the
+        // user can immediately restyle, move, or delete the annotation.
+        if !apply_result.changes.created.is_empty() {
+            self.editor
+                .select_created_elements(&self.model, &apply_result.changes.created);
+        }
         // Deletion (including canvas reset) must update the creation value before
         // refreshing viewports, just as undo and redo do. Keep explicit defaults.
         if !apply_result.changes.removed.is_empty() {
@@ -139,7 +145,11 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clip_draw_engine_document::{ElementMeta, SerialNumberData, SerialNumberType, Transaction};
+    use clip_draw_engine_core::{ColorRgba8, Point};
+    use clip_draw_engine_core::arrow::{ArrowType, StrokeStyle};
+    use clip_draw_engine_document::{
+        ArrowData, ElementMeta, SerialNumberData, SerialNumberType, Transaction,
+    };
 
     fn engine_with_serial_numbers(numbers: &[i64], next: i64) -> Engine {
         let mut config = EngineConfig::default();
@@ -367,5 +377,111 @@ mod tests {
             engine.model.serial_number(id).unwrap().serial_number_type,
             SerialNumberType::Circle
         );
+    }
+
+    fn creation_arrow() -> ArrowData {
+        ArrowData::from_global_points(
+            &[Point::new(0.0, 0.0), Point::new(120.0, 40.0)],
+            ColorRgba8::default(),
+            2.0,
+            StrokeStyle::Solid,
+            ArrowType::Straight,
+            None,
+            Some(clip_draw_engine_core::arrow::Arrowhead::Arrow),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn creation_transaction_selects_created_elements() {
+        let mut engine = Engine::default();
+        let viewport = engine.create_viewport(ViewportConfig::default()).unwrap();
+        let id = ElementId {
+            index: 0,
+            generation: 1,
+        };
+        let mut transaction = Transaction::new("create arrow");
+        transaction.insert_arrow(id, ElementMeta::default(), creation_arrow());
+        engine
+            .commit_transaction(
+                viewport,
+                ApplyTransactionCommand {
+                    transaction,
+                    history_undo_snapshot: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.editor.selected_ids(), vec![id]);
+    }
+
+    #[test]
+    fn update_transaction_preserves_created_selection() {
+        let mut engine = Engine::default();
+        let viewport = engine.create_viewport(ViewportConfig::default()).unwrap();
+        let id = ElementId {
+            index: 0,
+            generation: 1,
+        };
+        let arrow = creation_arrow();
+        let mut create = Transaction::new("create arrow");
+        create.insert_arrow(id, ElementMeta::default(), arrow.clone());
+        engine
+            .commit_transaction(
+                viewport,
+                ApplyTransactionCommand {
+                    transaction: create,
+                    history_undo_snapshot: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.editor.selected_ids(), vec![id]);
+
+        let mut restyle = Transaction::new("restyle arrow");
+        restyle.update_arrow(id, arrow);
+        engine
+            .commit_transaction(
+                viewport,
+                ApplyTransactionCommand {
+                    transaction: restyle,
+                    history_undo_snapshot: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.editor.selected_ids(), vec![id]);
+    }
+
+    #[test]
+    fn delete_transaction_clears_created_selection() {
+        let mut engine = Engine::default();
+        let viewport = engine.create_viewport(ViewportConfig::default()).unwrap();
+        let id = ElementId {
+            index: 0,
+            generation: 1,
+        };
+        let mut create = Transaction::new("create arrow");
+        create.insert_arrow(id, ElementMeta::default(), creation_arrow());
+        engine
+            .commit_transaction(
+                viewport,
+                ApplyTransactionCommand {
+                    transaction: create,
+                    history_undo_snapshot: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(engine.editor.selected_ids(), vec![id]);
+
+        let mut remove = Transaction::new("delete arrow");
+        remove.remove_element(id);
+        engine
+            .commit_transaction(
+                viewport,
+                ApplyTransactionCommand {
+                    transaction: remove,
+                    history_undo_snapshot: None,
+                },
+            )
+            .unwrap();
+        assert!(engine.editor.selected_ids().is_empty());
     }
 }

@@ -66,6 +66,12 @@ fn create_element(
     from: (f64, f64),
     to: (f64, f64),
 ) -> ElementId {
+    // Start from a clean slate: with "select after create" the previous
+    // element stays selected, and an empty-canvas press would otherwise
+    // deselect it first instead of starting a new creation.
+    engine
+        .reset_editing_state_with_viewport_changes(viewport)
+        .unwrap();
     engine.set_viewport_active_tool(viewport, tool).unwrap();
     drag(engine, viewport, from, to);
     *engine.model.paint_order().last().unwrap()
