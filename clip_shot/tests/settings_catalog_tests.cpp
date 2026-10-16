@@ -433,9 +433,9 @@ void builtInCatalogIsCompleteAndValid() {
         }
     }
 #ifdef Q_OS_MACOS
-    require(sectionCount == 50, "macOS includes permissions and merged storage and desktop groups");
+    require(sectionCount == 51, "macOS includes permissions and merged storage and desktop groups");
 #else
-    require(sectionCount == 50,
+    require(sectionCount == 51,
             "catalog includes capture and recording groups with merged storage and desktop groups");
 #endif
     // Keep the shared total in one place: adding a shared setting must update both platforms.
@@ -474,9 +474,9 @@ void builtInCatalogIsCompleteAndValid() {
                 itemIds.contains(QStringLiteral("screenshot-shortcut.upload_to_cloud")) &&
                 itemIds.contains(QStringLiteral("pin-to-screen-shortcut.upload_to_cloud")),
             "cloud upload must expose its configuration and shortcuts in both local scopes");
-    require(itemIds.size() == 248,
+    require(itemIds.size() == 249,
             qPrintable(QStringLiteral(
-                           "catalog must contain 248 shared settings on every platform; found %1")
+                           "catalog must contain 249 shared settings on every platform; found %1")
                            .arg(itemIds.size())));
     require(itemIds.contains(QStringLiteral("pin-to-screen.confirm-before-closing-window")) &&
                 itemIds.contains(QStringLiteral("pin-to-screen.confirm-before-destroying-window")),
