@@ -1097,6 +1097,8 @@ set(PROJECT_HEADERS
     include/clip_shot/presentation/screenshotrecognitionsessioncontroller.h
     include/clip_shot/presentation/screenshotpinnededitcontroller.h
     include/clip_shot/presentation/screenshotpinnedwindow.h
+    include/clip_shot/presentation/pinsnapengine.h
+    include/clip_shot/presentation/pinsnapguidelayer.h
     include/clip_shot/presentation/screenshotpresentationservices.h
     include/clip_shot/presentation/screenshotshortcuthints.h
     include/clip_shot/presentation/screenshotsmartselectiontransition.h
@@ -1269,6 +1271,8 @@ set(PROJECT_CXX_SOURCES
     src/presentation/globalcanvas/globalcanvasplatform.cpp
     src/presentation/pinned/screenshotpinnedresizegeometry.cpp
     src/presentation/pinned/screenshotpinnedrestoregeometry.cpp
+    src/presentation/pinned/pinsnapengine.cpp
+    src/presentation/pinned/pinsnapguidelayer.cpp
     src/presentation/pinned/screenshotpinnedhidetotopcontroller.cpp
     src/presentation/pinned/screenshotpinnedwindow.cpp
     src/presentation/pinned/screenshotpintoperfinstrumentation.cpp
@@ -3719,6 +3723,22 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(
         NAME clip-shot-pinned-resize-geometry-tests
         COMMAND clip-shot-pinned-resize-geometry-tests
+    )
+
+    add_executable(clip-shot-pinned-snap-engine-tests
+        tests/pinned_snap_engine_tests.cpp
+        src/presentation/pinned/pinsnapengine.cpp
+    )
+    target_include_directories(clip-shot-pinned-snap-engine-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/presentation/pinned"
+    )
+    target_link_libraries(clip-shot-pinned-snap-engine-tests PRIVATE
+        Qt6::Core
+    )
+    add_test(
+        NAME clip-shot-pinned-snap-engine-tests
+        COMMAND clip-shot-pinned-snap-engine-tests
     )
 
     add_executable(clip-shot-pinned-native-geometry-controller-tests

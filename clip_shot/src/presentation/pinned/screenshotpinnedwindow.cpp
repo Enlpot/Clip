@@ -416,6 +416,12 @@ const QColor kDefaultPinnedLockedBorderColor(250, 173, 20, 255);
 const QColor kDefaultPinnedBorderActiveColor(105, 177, 255, 255);
 constexpr auto kPinnedBorderColorProperty = "borderColor";
 
+// Pinned window drag snap: trigger threshold 10px, hysteresis band 3px
+// (once snapped, it takes 13px to release, avoiding edge jitter).
+constexpr double kSnapDistance = 10.0;
+constexpr double kSnapAlignTolerance = 5.0;
+constexpr double kSnapHysteresis = 3.0;
+
 bool styleHasTransparentShape(const ScreenshotResultStyle& style, const QSize& contentSize) {
     if (!style.region) {
         return false;
@@ -815,6 +821,11 @@ class PinnedOpacityEditor final : public QWidget {
 };
 
 using clip_shot::presentation::OverlayControlButton;
+using clip_shot::presentation::PinsnapCandidate;
+using clip_shot::presentation::PinsnapEngine;
+using clip_shot::presentation::PinsnapGuideLayer;
+using clip_shot::presentation::PinsnapOptions;
+using clip_shot::presentation::PinsnapResult;
 
 class ScreenshotPinnedCanvasWidget final : public ClipCanvasWidget {
   public:
@@ -906,7 +917,8 @@ ScreenshotPinnedWindow::ScreenshotPinnedWindow(QWidget* parent)
           ClipCanvasRuntimeConfig{clip_shot::presentation::screenshotCanvasToolStyleDefaults()}),
       m_shortcutManager(std::make_unique<clip_shot::presentation::WindowShortcutManager>()),
       m_physicalCursor(std::make_unique<clip_shot::platform::PhysicalCursor>()), m_exportArtifact(),
-      m_nativeGeometryController(std::make_unique<ScreenshotPinnedNativeGeometryController>()) {
+      m_nativeGeometryController(std::make_unique<ScreenshotPinnedNativeGeometryController>()),
+      m_snapOptions{kSnapDistance, kSnapAlignTolerance} {
     clip_shot::presentation::installWindowCloseShortcut(this, [this] { requestUserClose(); });
     m_platform->setResizeInteractionState(&m_systemSizingActive);
     m_platform->environmentChanged = [this](bool layoutChanged) {
@@ -8002,6 +8014,10 @@ void ScreenshotPinnedWindow::finishWindowMove() {
     m_platform->setSystemMoveActive(false);
     const bool wasActive = m_windowDragActive;
     m_windowDragActive = false;
+    // Drag finished: release snap state and hide the guide layer.
+    m_snapActive = false;
+    m_snapTargetId.clear();
+    hideSnapGuides();
     if (wasActive) {
         if (hideToTopActive() &&
             m_hideToTop->state() == ScreenshotPinnedHideToTopController::State::Entering &&
@@ -8011,6 +8027,70 @@ void ScreenshotPinnedWindow::finishWindowMove() {
         updateWindowDragCursor(mapFromGlobal(QCursor::pos()));
         endAuxiliaryWindowInteraction();
     }
+}
+
+bool ScreenshotPinnedWindow::adjustMoveForSnap(QRect& target) {
+    if (m_closing || m_lockedMode || !m_presented || m_groupManager == nullptr) {
+        hideSnapGuides();
+        return false;
+    }
+
+    QVector<PinsnapCandidate> candidates;
+    candidates.reserve(8);
+    for (ScreenshotPinnedWindow* other : m_groupManager->liveWindows()) {
+        if (other == nullptr || other == this) {
+            continue;
+        }
+        PinsnapCandidate candidate;
+        candidate.id = other->persistenceId();
+        candidate.bounds = other->currentNativeGeometry();
+        if (candidate.bounds.isValid() && !candidate.bounds.isEmpty()) {
+            candidates.append(candidate);
+        }
+    }
+    if (candidates.isEmpty()) {
+        hideSnapGuides();
+        return false;
+    }
+
+    const QRect moving = target;
+    std::optional<PinsnapResult> snap;
+    // Hysteresis: when already snapped, prefer keeping the current target
+    // (loosened threshold); leaving needs to exceed trigger distance + band.
+    if (m_snapActive && !m_snapTargetId.isEmpty()) {
+        PinsnapOptions keepOptions = m_snapOptions;
+        keepOptions.snapDistance += kSnapHysteresis;
+        snap = PinsnapEngine::resolve(moving, candidates, keepOptions, m_snapTargetId);
+    }
+    if (!snap.has_value()) {
+        snap = PinsnapEngine::resolve(moving, candidates, m_snapOptions);
+    }
+    if (snap.has_value() && snap->snapped != moving) {
+        target = snap->snapped;
+        m_snapActive = true;
+        m_snapTargetId = snap->targetId;
+        if (auto* layer = ensureSnapGuideLayer()) {
+            layer->showGuides(snap->guides, screen());
+        }
+        return true;
+    }
+    m_snapActive = false;
+    m_snapTargetId.clear();
+    hideSnapGuides();
+    return false;
+}
+
+void ScreenshotPinnedWindow::hideSnapGuides() {
+    if (m_snapGuideLayer != nullptr) {
+        m_snapGuideLayer->clearGuides();
+    }
+}
+
+PinsnapGuideLayer* ScreenshotPinnedWindow::ensureSnapGuideLayer() {
+    if (m_snapGuideLayer == nullptr) {
+        m_snapGuideLayer = std::make_unique<PinsnapGuideLayer>();
+    }
+    return m_snapGuideLayer.get();
 }
 
 bool ScreenshotPinnedWindow::windowDragEnabled() const {

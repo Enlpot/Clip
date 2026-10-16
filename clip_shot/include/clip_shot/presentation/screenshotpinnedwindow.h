@@ -12,6 +12,8 @@
 #include "clip_shot/presentation/screenshotrecognitionresults.h"
 #include "clip_shot/presentation/screenshotrecognitionfileexport.h"
 #include "clip_shot/presentation/screenshotresultcompositor.h"
+#include "clip_shot/presentation/pinsnapengine.h"
+#include "clip_shot/presentation/pinsnapguidelayer.h"
 #include "clip_shot/storage/pinnedwindowtypes.h"
 #include "clip_shot/storage/pinnedwindowplacement.h"
 
@@ -452,6 +454,11 @@ class ScreenshotPinnedWindow final : public QWidget {
     bool windowDragEligible() const;
     bool windowDragEligibleAt(const QPoint& position) const;
     bool windowDragEnabledAt(const QPoint& position) const;
+    // Apply snap correction to the target geometry while dragging; returns
+    // true when snapped this move (target has been rewritten).
+    bool adjustMoveForSnap(QRect& target);
+    void hideSnapGuides();
+    clip_shot::presentation::PinsnapGuideLayer* ensureSnapGuideLayer();
     bool handleDoubleClick(const QPoint& position);
     bool handleMiddleClick(const QPoint& position);
     void updateWindowDragCursor(const QPoint& position);
@@ -692,6 +699,11 @@ class ScreenshotPinnedWindow final : public QWidget {
     QMetaObject::Connection m_clickThroughScreenGeometryConnection;
     QMetaObject::Connection m_clickThroughScreenDpiConnection;
     std::unique_ptr<ScreenshotPinnedControlsPresence> m_pointerPresence;
+    // Pinned window drag snap state.
+    std::unique_ptr<clip_shot::presentation::PinsnapGuideLayer> m_snapGuideLayer;
+    bool m_snapActive = false;
+    QString m_snapTargetId;
+    clip_shot::presentation::PinsnapOptions m_snapOptions;
     bool m_nonClientPointerInside = false;
     bool m_nonClientTrackingPending = false;
     bool m_windowActive = false;

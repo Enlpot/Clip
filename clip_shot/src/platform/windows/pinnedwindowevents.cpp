@@ -625,12 +625,15 @@ bool PinnedWindowWindowsEvents::handle(ScreenshotPinnedWindow& window, const QBy
             auto* proposedNativeRect = pointerFromLParam<RECT>(nativeMessage->lParam);
             POINT cursor{};
             if (proposedNativeRect != nullptr && GetCursorPos(&cursor) != FALSE) {
-                const QRect target = window.m_nativeGeometryController->updateMove(
+                QRect target = window.m_nativeGeometryController->updateMove(
                     qRectFromNativeRect(*proposedNativeRect), QPoint(cursor.x, cursor.y));
                 if (target.isValid() && !target.isEmpty()) {
                     if (target != window.m_nativeGeometryController->committedGeometry()) {
                         window.exitHideToTop();
                     }
+                    // Drag snap: adjust the target geometry near other pinned
+                    // windows and show the guide layer.
+                    static_cast<void>(window.adjustMoveForSnap(target));
                     writeNativeRect(target, proposedNativeRect);
                     if (result != nullptr) {
                         *result = TRUE;
