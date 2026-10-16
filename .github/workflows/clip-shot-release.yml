@@ -91,6 +91,8 @@ jobs:
         with:
           path: ${{ github.workspace }}\.tools\vcpkg-binary-cache
           key: vcpkg-static-${{ matrix.architecture }}-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'cmake/vcpkg-overlay-ports/**', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake') }}
+          restore-keys: |
+            vcpkg-static-${{ matrix.architecture }}-${{ runner.os }}-
           save-always: true
 
       - name: Install static project dependencies
@@ -116,6 +118,9 @@ jobs:
         with:
           path: ${{ runner.tool_cache }}\clip-qt\${{ steps.qt-toolchain.outputs.version }}\${{ matrix.qt-kit }}
           key: clip-qt-static-system-codecs-v6-development-${{ steps.qt-toolchain.outputs.version }}-msvc2026-${{ matrix.architecture }}-${{ runner.os }}-${{ hashFiles('scripts/qt-toolchain.json', 'scripts/build-static-qt.ps1', 'scripts/clip-build-environment.ps1', 'scripts/static-qt-features.json', 'scripts/qtbase-timezone-without-cldr.patch', 'scripts/bootstrap.ps1', 'vcpkg.json', 'cmake/vcpkg-overlay-triplets/*-windows-static.cmake', 'cmake/vcpkg-overlay-ports/zlib/**') }}
+          restore-keys: |
+            clip-qt-static-system-codecs-v6-development-${{ steps.qt-toolchain.outputs.version }}-msvc2026-${{ matrix.architecture }}-${{ runner.os }}-
+            clip-qt-static-system-codecs-v6-development-${{ steps.qt-toolchain.outputs.version }}-
           save-always: true
 
       - name: Prepare Qt LTS static kit
