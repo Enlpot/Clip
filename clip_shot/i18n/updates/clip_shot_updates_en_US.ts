@@ -535,11 +535,4 @@
             <translation>Waiting for %1 to close</translation>
         </message>
     </context>
-    <context>
-        <name>UpdateService</name>
-        <message>
-            <source>Could not check for updates. Please try again.</source>
-            <translation>Could not check for updates. Please try again.</translation>
-        </message>
-    </context>
 </TS>

@@ -66,6 +66,18 @@ so every moment on screen can be expressed clearly and shared easily.</translati
             <translation>Checking for updates…</translation>
         </message>
         <message>
+            <source>Clip</source>
+            <translation>Clip</translation>
+        </message>
+        <message>
+            <source>Clip logo</source>
+            <translation>Clip logo</translation>
+        </message>
+        <message>
+            <source>Clip · Make expression clearer</source>
+            <translation>Clip · Make expression clearer</translation>
+        </message>
+        <message>
             <source>Copied</source>
             <translation>Copied</translation>
         </message>
@@ -206,18 +218,6 @@ so every moment on screen can be expressed clearly and shared easily.</translati
             <translation>Screenshot selection, annotation tools, and recognized text</translation>
         </message>
         <message>
-            <source>Clip</source>
-            <translation>Clip</translation>
-        </message>
-        <message>
-            <source>Clip logo</source>
-            <translation>Clip logo</translation>
-        </message>
-        <message>
-            <source>Clip · Make expression clearer</source>
-            <translation>Clip · Make expression clearer</translation>
-        </message>
-        <message>
             <source>Text recognition</source>
             <translation>Text recognition</translation>
         </message>
@@ -283,6 +283,129 @@ so every moment on screen can be expressed clearly and shared easily.</translati
         <message>
             <source>Your settings could not be saved. Please retry before restarting.</source>
             <translation>Your settings could not be saved. Please retry before restarting.</translation>
+        </message>
+    </context>
+    <context>
+        <name>ClipShotApiClient</name>
+        <message>
+            <source>Image conversion failed</source>
+            <translation>Image conversion failed</translation>
+        </message>
+        <message>
+            <source>Image conversion is incomplete. Try a smaller area.</source>
+            <translation>Image conversion is incomplete. Try a smaller area.</translation>
+        </message>
+        <message>
+            <source>Image conversion stream ended unexpectedly</source>
+            <translation>Image conversion stream ended unexpectedly</translation>
+        </message>
+        <message>
+            <source>Image conversion timed out. Try a smaller area.</source>
+            <translation>Image conversion timed out. Try a smaller area.</translation>
+        </message>
+        <message>
+            <source>Invalid LaTeX recognition response</source>
+            <translation>Invalid LaTeX recognition response</translation>
+        </message>
+        <message>
+            <source>Invalid model stream response</source>
+            <translation>Invalid model stream response</translation>
+        </message>
+        <message>
+            <source>Invalid table recognition response</source>
+            <translation>Invalid table recognition response</translation>
+        </message>
+        <message>
+            <source>Invalid translation service response</source>
+            <translation>Invalid translation service response</translation>
+        </message>
+        <message>
+            <source>Invalid translation stream response</source>
+            <translation>Invalid translation stream response</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition failed</source>
+            <translation>LaTeX recognition failed</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition request timed out</source>
+            <translation>LaTeX recognition request timed out</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition response is too large</source>
+            <translation>LaTeX recognition response is too large</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition returned no formula</source>
+            <translation>LaTeX recognition returned no formula</translation>
+        </message>
+        <message>
+            <source>No translation services are available</source>
+            <translation>No translation services are available</translation>
+        </message>
+        <message>
+            <source>Table recognition failed</source>
+            <translation>Table recognition failed</translation>
+        </message>
+        <message>
+            <source>Table recognition request timed out</source>
+            <translation>Table recognition request timed out</translation>
+        </message>
+        <message>
+            <source>Table recognition response is too large</source>
+            <translation>Table recognition response is too large</translation>
+        </message>
+        <message>
+            <source>Table recognition returned no table</source>
+            <translation>Table recognition returned no table</translation>
+        </message>
+        <message>
+            <source>The image could not be prepared for conversion</source>
+            <translation>The image could not be prepared for conversion</translation>
+        </message>
+        <message>
+            <source>The image is too large to convert. Select a smaller area.</source>
+            <translation>The image is too large to convert. Select a smaller area.</translation>
+        </message>
+        <message>
+            <source>The model response is too large</source>
+            <translation>The model response is too large</translation>
+        </message>
+        <message>
+            <source>The model returned no content</source>
+            <translation>The model returned no content</translation>
+        </message>
+        <message>
+            <source>The text is too large to translate.</source>
+            <translation>The text is too large to translate.</translation>
+        </message>
+        <message>
+            <source>The translation response is too large.</source>
+            <translation>The translation response is too large.</translation>
+        </message>
+        <message>
+            <source>This service does not support the selected language combination.</source>
+            <translation>This service does not support the selected language combination.</translation>
+        </message>
+        <message>
+            <source>Translation failed</source>
+            <translation>Translation failed</translation>
+        </message>
+        <message>
+            <source>Translation request timed out.</source>
+            <translation>Translation request timed out.</translation>
+        </message>
+        <message>
+            <source>Translation service request failed (HTTP %1, code %2).</source>
+            <translation>Translation service request failed (HTTP %1, code %2).</translation>
+        </message>
+        <message>
+            <source>Translation service response is too large</source>
+            <translation>Translation service response is too large</translation>
+        </message>
+        <message>
+            <source>Translation stream ended unexpectedly</source>
+            <translation>Translation stream ended unexpectedly</translation>
         </message>
     </context>
     <context>
@@ -447,7 +570,7 @@ so every moment on screen can be expressed clearly and shared easily.</translati
             <translation>Grant the required permission to continue</translation>
         </message>
     </context>
-        <context>
+    <context>
         <name>QObject</name>
         <message>
             <source>%1 cannot be registered as a global shortcut, try another key</source>
@@ -490,6 +613,18 @@ so every moment on screen can be expressed clearly and shared easily.</translati
             <translation>Add key config</translation>
         </message>
         <message>
+            <source>Could not create the local directory for %1</source>
+            <translation>Could not create the local directory for %1</translation>
+        </message>
+        <message>
+            <source>Could not list the WebDAV directory: %1</source>
+            <translation>Could not list the WebDAV directory: %1</translation>
+        </message>
+        <message>
+            <source>Download failed for %1: %2</source>
+            <translation>Download failed for %1: %2</translation>
+        </message>
+        <message>
             <source>Global shortcuts are not supported on this platform</source>
             <translation>Global shortcuts are not supported on this platform</translation>
         </message>
@@ -516,6 +651,22 @@ so every moment on screen can be expressed clearly and shared easily.</translati
         <message>
             <source>Please press a key</source>
             <translation>Please press a key</translation>
+        </message>
+        <message>
+            <source>Remote deletion failed for %1: %2</source>
+            <translation>Remote deletion failed for %1: %2</translation>
+        </message>
+        <message>
+            <source>Scanning local files and the remote WebDAV server...</source>
+            <translation>Scanning local files and the remote WebDAV server...</translation>
+        </message>
+        <message>
+            <source>Sync completed but the local sync state could not be saved. The next sync will re-verify all files.</source>
+            <translation>Sync completed but the local sync state could not be saved. The next sync will re-verify all files.</translation>
+        </message>
+        <message>
+            <source>Syncing: %1 upload(s), %2 download(s), %3 deletion(s)</source>
+            <translation>Syncing: %1 upload(s), %2 download(s), %3 deletion(s)</translation>
         </message>
         <message>
             <source>This key cannot be registered as a global shortcut, try another key</source>
@@ -557,6 +708,26 @@ so every moment on screen can be expressed clearly and shared easily.</translati
             <source>Unsupported key</source>
             <translation>Unsupported key</translation>
         </message>
+        <message>
+            <source>Upload failed for %1: %2</source>
+            <translation>Upload failed for %1: %2</translation>
+        </message>
+        <message>
+            <source>WebDAV password is not set. Save the account credentials before syncing.</source>
+            <translation>WebDAV password is not set. Save the account credentials before syncing.</translation>
+        </message>
+        <message>
+            <source>WebDAV sync finished successfully</source>
+            <translation>WebDAV sync finished successfully</translation>
+        </message>
+        <message>
+            <source>WebDAV sync is not configured. Provide a valid server URL and account before syncing.</source>
+            <translation>WebDAV sync is not configured. Provide a valid server URL and account before syncing.</translation>
+        </message>
+        <message>
+            <source>WebDAV sync is unavailable because the storage directory could not be resolved</source>
+            <translation>WebDAV sync is unavailable because the storage directory could not be resolved</translation>
+        </message>
     </context>
     <context>
         <name>SectionHeaderWidget</name>
@@ -594,129 +765,6 @@ so every moment on screen can be expressed clearly and shared easily.</translati
         <message>
             <source>Search Function</source>
             <translation>Search Function</translation>
-        </message>
-    </context>
-    <context>
-        <name>ClipShotApiClient</name>
-        <message>
-            <source>Image conversion failed</source>
-            <translation>Image conversion failed</translation>
-        </message>
-        <message>
-            <source>Image conversion is incomplete. Try a smaller area.</source>
-            <translation>Image conversion is incomplete. Try a smaller area.</translation>
-        </message>
-        <message>
-            <source>Image conversion stream ended unexpectedly</source>
-            <translation>Image conversion stream ended unexpectedly</translation>
-        </message>
-        <message>
-            <source>Image conversion timed out. Try a smaller area.</source>
-            <translation>Image conversion timed out. Try a smaller area.</translation>
-        </message>
-        <message>
-            <source>Invalid LaTeX recognition response</source>
-            <translation>Invalid LaTeX recognition response</translation>
-        </message>
-        <message>
-            <source>Invalid model stream response</source>
-            <translation>Invalid model stream response</translation>
-        </message>
-        <message>
-            <source>Invalid table recognition response</source>
-            <translation>Invalid table recognition response</translation>
-        </message>
-        <message>
-            <source>Invalid translation service response</source>
-            <translation>Invalid translation service response</translation>
-        </message>
-        <message>
-            <source>Invalid translation stream response</source>
-            <translation>Invalid translation stream response</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition failed</source>
-            <translation>LaTeX recognition failed</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition request timed out</source>
-            <translation>LaTeX recognition request timed out</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition response is too large</source>
-            <translation>LaTeX recognition response is too large</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition returned no formula</source>
-            <translation>LaTeX recognition returned no formula</translation>
-        </message>
-        <message>
-            <source>No translation services are available</source>
-            <translation>No translation services are available</translation>
-        </message>
-        <message>
-            <source>Table recognition failed</source>
-            <translation>Table recognition failed</translation>
-        </message>
-        <message>
-            <source>Table recognition request timed out</source>
-            <translation>Table recognition request timed out</translation>
-        </message>
-        <message>
-            <source>Table recognition response is too large</source>
-            <translation>Table recognition response is too large</translation>
-        </message>
-        <message>
-            <source>Table recognition returned no table</source>
-            <translation>Table recognition returned no table</translation>
-        </message>
-        <message>
-            <source>The image could not be prepared for conversion</source>
-            <translation>The image could not be prepared for conversion</translation>
-        </message>
-        <message>
-            <source>The image is too large to convert. Select a smaller area.</source>
-            <translation>The image is too large to convert. Select a smaller area.</translation>
-        </message>
-        <message>
-            <source>The model response is too large</source>
-            <translation>The model response is too large</translation>
-        </message>
-        <message>
-            <source>The model returned no content</source>
-            <translation>The model returned no content</translation>
-        </message>
-        <message>
-            <source>The text is too large to translate.</source>
-            <translation>The text is too large to translate.</translation>
-        </message>
-        <message>
-            <source>The translation response is too large.</source>
-            <translation>The translation response is too large.</translation>
-        </message>
-        <message>
-            <source>This service does not support the selected language combination.</source>
-            <translation>This service does not support the selected language combination.</translation>
-        </message>
-        <message>
-            <source>Translation failed</source>
-            <translation>Translation failed</translation>
-        </message>
-        <message>
-            <source>Translation request timed out.</source>
-            <translation>Translation request timed out.</translation>
-        </message>
-        <message>
-            <source>Translation service request failed (HTTP %1, code %2).</source>
-            <translation>Translation service request failed (HTTP %1, code %2).</translation>
-        </message>
-        <message>
-            <source>Translation service response is too large</source>
-            <translation>Translation service response is too large</translation>
-        </message>
-        <message>
-            <source>Translation stream ended unexpectedly</source>
-            <translation>Translation stream ended unexpectedly</translation>
         </message>
     </context>
     <context>
@@ -780,6 +828,14 @@ so every moment on screen can be expressed clearly and shared easily.</translati
             <translation>Cancel</translation>
         </message>
         <message>
+            <source>Clip %1 is available. Open About for update options.</source>
+            <translation>Clip %1 is available. Open About for update options.</translation>
+        </message>
+        <message>
+            <source>Clip will close and restart to install the update. Continue?</source>
+            <translation>Clip will close and restart to install the update. Continue?</translation>
+        </message>
+        <message>
             <source>Could not pin selected files</source>
             <translation>Could not pin selected files</translation>
         </message>
@@ -802,14 +858,6 @@ so every moment on screen can be expressed clearly and shared easily.</translati
         <message>
             <source>Restart failed</source>
             <translation>Restart failed</translation>
-        </message>
-        <message>
-            <source>Clip %1 is available. Open About for update options.</source>
-            <translation>Clip %1 is available. Open About for update options.</translation>
-        </message>
-        <message>
-            <source>Clip will close and restart to install the update. Continue?</source>
-            <translation>Clip will close and restart to install the update. Continue?</translation>
         </message>
         <message>
             <source>Your settings could not be saved. Please retry before updating.</source>

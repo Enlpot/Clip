@@ -1,4 +1,5 @@
 #include "clip_shot/presentation/components/clouduploadsettingswidget.h"
+#include "clip_shot/presentation/components/webdavsyncsettingswidget.h"
 #include "clip_shot/presentation/components/settingscustomwidget.h"
 #include "clip_shot/presentation/components/formfields.h"
 #include "clip_shot/app/edition.h"
@@ -1288,6 +1289,12 @@ SettingsCustomWidget* createSettingsCustomWidget(
     switch (renderer) {
     case SettingsCustomRenderer::CloudUploadConfigurations:
         return new CloudUploadSettingsWidget(runtimeSession, parent);
+    case SettingsCustomRenderer::WebDavSyncConfigurations:
+#if !CLIP_SHOT_EDITION_MINI
+        return new clip_shot::presentation::WebDavSyncSettingsWidget(runtimeSession, parent);
+#else
+        return nullptr;
+#endif
     case SettingsCustomRenderer::PermissionScreenRecording:
     case SettingsCustomRenderer::PermissionAccessibility:
     case SettingsCustomRenderer::PermissionInputMonitoring:

@@ -535,11 +535,4 @@
             <translation>正在等待 %1 關閉</translation>
         </message>
     </context>
-    <context>
-        <name>UpdateService</name>
-        <message>
-            <source>Could not check for updates. Please try again.</source>
-            <translation>無法檢查更新，請重試。</translation>
-        </message>
-    </context>
 </TS>

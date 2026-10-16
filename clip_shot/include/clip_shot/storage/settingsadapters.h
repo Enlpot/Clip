@@ -3,6 +3,7 @@
 
 #include "clip_shot/app/edition.h"
 #include "clip_shot/clouduploadconfiguration.h"
+#include "clip_shot/webdavsyncsettings.h"
 #if CLIP_SHOT_ENABLE_API_CONFIGURATION
 #include "clip_shot/customaimodelconfiguration.h"
 #include "clip_shot/texttranslationconfiguration.h"
@@ -27,6 +28,11 @@ class CloudUploadConfigurationSettings final {
   public:
     [[nodiscard]] CloudUploadSettings settings() const;
     bool setSettings(const CloudUploadSettings& values) const;
+};
+class WebDavSyncConfigurationSettings final {
+  public:
+    [[nodiscard]] WebDavSyncSettings settings() const;
+    bool setSettings(const WebDavSyncSettings& values) const;
 };
 #if CLIP_SHOT_ENABLE_EXTENDED_FEATURES
 class ExtendedFeaturesSettings final {

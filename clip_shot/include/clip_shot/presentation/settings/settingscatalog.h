@@ -377,6 +377,7 @@ enum class SettingsCustomRenderer {
     PinnedToolbarEditor,
     FloatingToolbarEditor,
     TrayMenuOptions,
+    WebDavSyncConfigurations,
 };
 
 struct SettingsGlobalMouseActionDefinition {

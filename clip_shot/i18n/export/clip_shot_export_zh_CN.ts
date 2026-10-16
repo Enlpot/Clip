@@ -147,10 +147,6 @@
             <translation>系统打印接口不可用</translation>
         </message>
         <message>
-            <source>The native print operation failed</source>
-            <translation>系统打印操作失败</translation>
-        </message>
-        <message>
             <source>Windows printing failed (%1)</source>
             <translation>Windows 打印失败（%1）</translation>
         </message>

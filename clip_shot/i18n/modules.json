@@ -39,6 +39,7 @@
     "StorageDirectoryChange",
     "StorageStatusSettingsWidget",
     "TextTranslationSettingsWidget",
+    "clip_shot::presentation::WebDavSyncSettingsWidget",
     "clip_shot::presentation::GlobalMouseManager",
     "clip_shot::storage::ApplicationStorage",
     "clip_shot::storage::ConfigurationArchive",

@@ -155,6 +155,8 @@ class SettingsRuntimeSession final : public QObject {
 #endif
     [[nodiscard]] CloudUploadSettings cloudUploadSettings() const;
     bool applyCloudUploadSettings(const CloudUploadSettings& values);
+    [[nodiscard]] WebDavSyncSettings webDavSyncSettings() const;
+    bool applyWebDavSyncSettings(const WebDavSyncSettings& values);
     bool
     importConfigurationSnapshot(const QMap<QString, QJsonValue>& values, int schemaVersion,
                                 std::shared_future<storage::StorageResult>* completion = nullptr) {

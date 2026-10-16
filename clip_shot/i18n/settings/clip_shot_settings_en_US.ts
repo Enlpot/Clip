@@ -659,57 +659,6 @@
         </message>
     </context>
     <context>
-        <name>LoginItemService</name>
-        <message>
-            <source>%1 needs a valid code signature to use launch at login. Reinstall the signed app.</source>
-            <translation>%1 needs a valid code signature to use launch at login. Reinstall the signed app.</translation>
-        </message>
-        <message>
-            <source>A launch-at-login change is already in progress.</source>
-            <translation>A launch-at-login change is already in progress.</translation>
-        </message>
-        <message>
-            <source>Approval required. Allow Clip in System Settings &gt; General &gt; Login Items.</source>
-            <translation>Approval required. Allow Clip in System Settings &gt; General &gt; Login Items.</translation>
-        </message>
-        <message>
-            <source>Could not change launch at login: %1</source>
-            <translation>Could not change launch at login: %1</translation>
-        </message>
-        <message>
-            <source>Could not save launch-at-login initialization. Registration was not changed.</source>
-            <translation>Could not save launch-at-login initialization. Registration was not changed.</translation>
-        </message>
-        <message>
-            <source>Could not save the launch-at-login preference. The displayed macOS status is still current.</source>
-            <translation>Could not save the launch-at-login preference. The displayed macOS status is still current.</translation>
-        </message>
-        <message>
-            <source>Move the signed %1 app to /Applications or ~/Applications to use launch at login.</source>
-            <translation>Move the signed %1 app to /Applications or ~/Applications to use launch at login.</translation>
-        </message>
-        <message>
-            <source>Move the signed Clip app to /Applications or ~/Applications to use launch at login.</source>
-            <translation>Move the signed Clip app to /Applications or ~/Applications to use launch at login.</translation>
-        </message>
-        <message>
-            <source>Clip needs a valid code signature to use launch at login. Reinstall the signed app.</source>
-            <translation>Clip needs a valid code signature to use launch at login. Reinstall the signed app.</translation>
-        </message>
-        <message>
-            <source>macOS could not find %1's login item. Reinstall the app in Applications.</source>
-            <translation>macOS could not find %1's login item. Reinstall the app in Applications.</translation>
-        </message>
-        <message>
-            <source>macOS could not find Clip's login item. Reinstall the app in Applications.</source>
-            <translation>macOS could not find Clip's login item. Reinstall the app in Applications.</translation>
-        </message>
-        <message>
-            <source>macOS did not apply the launch-at-login change. Check Login Items in System Settings.</source>
-            <translation>macOS did not apply the launch-at-login change. Check Login Items in System Settings.</translation>
-        </message>
-    </context>
-    <context>
         <name>MainWindowSkin</name>
         <message>
             <source>Choose a PNG, JPG, or WebP image.</source>
@@ -893,7 +842,7 @@
             <translation>Trim recording</translation>
         </message>
     </context>
-        <context>
+    <context>
         <name>ScreenshotToolbarEditorSettingsWidget</name>
         <message>
             <source>Barcode recognition</source>
@@ -1145,7 +1094,7 @@
             <source>All screenshot history will be removed</source>
             <translation>All screenshot history will be removed</translation>
         </message>
-                <message>
+        <message>
             <source>Allow resizing the selection from its borders while non-move tools are active</source>
             <translation>Allow resizing the selection from its borders while non-move tools are active</translation>
         </message>
@@ -1682,6 +1631,14 @@
             <translation>Click-through</translation>
         </message>
         <message>
+            <source>Clip</source>
+            <translation>Clip</translation>
+        </message>
+        <message>
+            <source>Clip server</source>
+            <translation>Clip server</translation>
+        </message>
+        <message>
             <source>Clipboard</source>
             <translation>Clipboard</translation>
         </message>
@@ -1754,6 +1711,10 @@
             <translation>Configure the screenshot, pinned, and recording toolbars</translation>
         </message>
         <message>
+            <source>Configure the server, account, and what gets synced</source>
+            <translation>Configure the server, account, and what gets synced</translation>
+        </message>
+        <message>
             <source>Confirm before closing window</source>
             <translation>Confirm before closing window</translation>
         </message>
@@ -1764,10 +1725,6 @@
         <message>
             <source>Confirm before exiting screenshot via shortcut</source>
             <translation>Confirm before exiting screenshot via shortcut</translation>
-        </message>
-        <message>
-            <source>Connect AI clients to Clip</source>
-            <translation>Connect AI clients to Clip</translation>
         </message>
         <message>
             <source>Contain</source>
@@ -2073,7 +2030,7 @@
             <source>Edit selection</source>
             <translation>Edit selection</translation>
         </message>
-                <message>
+        <message>
             <source>Enable edit mode</source>
             <translation>Enable edit mode</translation>
         </message>
@@ -2553,7 +2510,7 @@
             <source>Low</source>
             <translation>Low</translation>
         </message>
-                        <message>
+        <message>
             <source>MSAA</source>
             <translation>MSAA</translation>
         </message>
@@ -3710,14 +3667,6 @@
             <translation>Smart selection</translation>
         </message>
         <message>
-            <source>Clip</source>
-            <translation>Clip</translation>
-        </message>
-        <message>
-            <source>Clip server</source>
-            <translation>Clip server</translation>
-        </message>
-        <message>
             <source>Snowflake</source>
             <translation>Snowflake</translation>
         </message>
@@ -3820,6 +3769,10 @@
         <message>
             <source>Switch Window Group</source>
             <translation>Switch Window Group</translation>
+        </message>
+        <message>
+            <source>Sync settings and pinned windows, optionally capture history, to a WebDAV server such as Nutstore or a NAS</source>
+            <translation>Sync settings and pinned windows, optionally capture history, to a WebDAV server such as Nutstore or a NAS</translation>
         </message>
         <message>
             <source>System</source>
@@ -4149,7 +4102,7 @@
             <source>Video, audio and animated-image recording preferences</source>
             <translation>Video, audio and animated-image recording preferences</translation>
         </message>
-                <message>
+        <message>
             <source>Vision Support</source>
             <translation>Vision Support</translation>
         </message>
@@ -4160,6 +4113,14 @@
         <message>
             <source>Watermark</source>
             <translation>Watermark</translation>
+        </message>
+        <message>
+            <source>WebDAV Sync</source>
+            <translation>WebDAV Sync</translation>
+        </message>
+        <message>
+            <source>WebDAV sync</source>
+            <translation>WebDAV sync</translation>
         </message>
         <message>
             <source>WebP</source>
@@ -4830,6 +4791,73 @@ Unavailable: %2</translation>
         <message>
             <source>Global mouse input is unavailable. Check permissions and retry.</source>
             <translation>Global mouse input is unavailable. Check permissions and retry.</translation>
+        </message>
+    </context>
+    <context>
+        <name>clip_shot::presentation::WebDavSyncSettingsWidget</name>
+        <message>
+            <source>Enable sync</source>
+            <translation>Enable sync</translation>
+        </message>
+        <message>
+            <source>Last sync succeeded</source>
+            <translation>Last sync succeeded</translation>
+        </message>
+        <message>
+            <source>Last sync: %1</source>
+            <translation>Last sync: %1</translation>
+        </message>
+        <message>
+            <source>Password</source>
+            <translation>Password</translation>
+        </message>
+        <message>
+            <source>Server URL</source>
+            <translation>Server URL</translation>
+        </message>
+        <message>
+            <source>Settings and pinned windows always sync. The password is stored only on this device and never uploaded.</source>
+            <translation>Settings and pinned windows always sync. The password is stored only on this device and never uploaded.</translation>
+        </message>
+        <message>
+            <source>Sync capture history</source>
+            <translation>Sync capture history</translation>
+        </message>
+        <message>
+            <source>Sync now</source>
+            <translation>Sync now</translation>
+        </message>
+        <message>
+            <source>Syncing...</source>
+            <translation>Syncing...</translation>
+        </message>
+        <message>
+            <source>Unable to save WebDAV sync settings. Check that configuration storage is writable and try again.</source>
+            <translation>Unable to save WebDAV sync settings. Check that configuration storage is writable and try again.</translation>
+        </message>
+        <message>
+            <source>Username</source>
+            <translation>Username</translation>
+        </message>
+        <message>
+            <source>WebDAV Sync</source>
+            <translation>WebDAV Sync</translation>
+        </message>
+        <message>
+            <source>WebDAV password</source>
+            <translation>WebDAV password</translation>
+        </message>
+        <message>
+            <source>WebDAV server URL</source>
+            <translation>WebDAV server URL</translation>
+        </message>
+        <message>
+            <source>WebDAV username</source>
+            <translation>WebDAV username</translation>
+        </message>
+        <message>
+            <source>https://dav.example.com/dav/</source>
+            <translation>https://dav.example.com/dav/</translation>
         </message>
     </context>
     <context>

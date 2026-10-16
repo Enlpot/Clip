@@ -942,6 +942,20 @@ if(CLIP_SHOT_BUILD_TESTS)
     add_test(NAME clip-shot-application-restart-tests COMMAND clip-shot-application-restart-tests)
     set_tests_properties(clip-shot-application-restart-tests PROPERTIES LABELS "unit" TIMEOUT 60
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+
+    add_executable(clip-shot-webdav-client-tests tests/webdavclient_tests.cpp)
+    target_include_directories(clip-shot-webdav-client-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(clip-shot-webdav-client-tests PRIVATE clip_shot_webdav)
+    add_test(NAME clip-shot-webdav-client-tests COMMAND clip-shot-webdav-client-tests)
+    set_tests_properties(clip-shot-webdav-client-tests PROPERTIES LABELS "unit" TIMEOUT 30)
+
+    add_executable(clip-shot-webdav-sync-engine-tests tests/webdavsyncengine_tests.cpp)
+    target_include_directories(clip-shot-webdav-sync-engine-tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(clip-shot-webdav-sync-engine-tests PRIVATE clip_shot_webdav_sync)
+    add_test(NAME clip-shot-webdav-sync-engine-tests COMMAND clip-shot-webdav-sync-engine-tests)
+    set_tests_properties(clip-shot-webdav-sync-engine-tests PROPERTIES LABELS "unit" TIMEOUT 30)
 endif()
 add_library(clip_shot_permissions STATIC
     include/clip_shot/presentation/apppermissionservice.h
@@ -956,6 +970,27 @@ add_library(clip_shot_cloud_upload STATIC
 target_include_directories(clip_shot_cloud_upload PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(clip_shot_cloud_upload PUBLIC clip_shot_storage Qt6::Network Qt6::Concurrent)
 
+add_library(clip_shot_webdav STATIC
+    include/clip_shot/network/webdavclient.h
+    src/network/webdavclient.cpp)
+target_include_directories(clip_shot_webdav PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(clip_shot_webdav PUBLIC Qt6::Core Qt6::Network)
+
+add_library(clip_shot_webdav_sync STATIC
+    include/clip_shot/storage/webdavsyncengine.h
+    src/storage/webdavsyncengine.cpp
+    include/clip_shot/webdavsyncsettings.h
+    src/storage/webdavcredentialstore.cpp)
+target_include_directories(clip_shot_webdav_sync PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(clip_shot_webdav_sync PUBLIC clip_shot_webdav Qt6::Core)
+
+add_library(clip_shot_webdav_service STATIC
+    include/clip_shot/presentation/websyncservice.h
+    src/presentation/services/websyncservice.cpp)
+target_include_directories(clip_shot_webdav_service PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(clip_shot_webdav_service PUBLIC clip_shot_webdav_sync
+    PRIVATE clip_shot_storage)
+
 add_library(clip_shot_settings STATIC ${CLIP_SHOT_SETTINGS_SOURCES}
     include/clip_shot/presentation/permissionguidecontroller.h
     include/clip_shot/presentation/components/permissionguidewidget.h
@@ -963,8 +998,11 @@ add_library(clip_shot_settings STATIC ${CLIP_SHOT_SETTINGS_SOURCES}
     src/presentation/components/permissionguidewidget.cpp)
 target_sources(clip_shot_settings PRIVATE
     include/clip_shot/presentation/components/clouduploadsettingswidget.h
-    src/presentation/components/clouduploadsettingswidget.cpp)
-target_link_libraries(clip_shot_settings PUBLIC clip_shot_permissions)
+    src/presentation/components/clouduploadsettingswidget.cpp
+    include/clip_shot/presentation/components/webdavsyncsettingswidget.h
+    src/presentation/components/webdavsyncsettingswidget.cpp)
+target_link_libraries(clip_shot_settings PUBLIC clip_shot_permissions
+    PRIVATE clip_shot_webdav_service)
 qt_add_resources(clip_shot_settings "clip_shot_about_assets"
     PREFIX "/clip_shot/about"
     BASE "resources/about"
@@ -1419,6 +1457,7 @@ if(MSVC)
 endif()
 
 target_link_libraries(clip_shot PRIVATE clip_shot_system_notification_controller)
+target_link_libraries(clip_shot PRIVATE clip_shot_webdav_service)
 
 if(EXISTS "${CLIP_SHOT_CAMERA_SHUTTER_AUDIO_SOURCE}")
     add_custom_command(TARGET clip_shot POST_BUILD

@@ -147,10 +147,6 @@
             <translation>系統列印介面無法使用</translation>
         </message>
         <message>
-            <source>The native print operation failed</source>
-            <translation>系統列印操作失敗</translation>
-        </message>
-        <message>
             <source>Windows printing failed (%1)</source>
             <translation>Windows 列印失敗（%1）</translation>
         </message>

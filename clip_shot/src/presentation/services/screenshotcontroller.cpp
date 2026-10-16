@@ -65,6 +65,9 @@
 #include "clip_shot/presentation/historypinplacement.h"
 #include "clip_shot/presentation/screenshotgeometry.h"
 #include "clip_shot/presentation/screenshothistoryservice.h"
+#if !CLIP_SHOT_EDITION_MINI
+#include "clip_shot/presentation/websyncservice.h"
+#endif
 #include "clip_shot/storage/applicationstorage.h"
 #include "clip_shot/storage/capturehistorytypes.h"
 #include "clip_shot/storage/settingsadapters.h"
@@ -943,6 +946,13 @@ void ScreenshotController::Impl::createHistoryService() {
         storage.captureHistory());
     QObject::connect(&storage, &clip_shot::storage::ApplicationStorage::captureHistoryChanged,
                      m_historyService.get(), &ScreenshotHistoryService::refreshMetadata);
+#if !CLIP_SHOT_EDITION_MINI
+    // A committed screenshot triggers a background WebDAV sync when enabled.
+    QObject::connect(m_historyService.get(), &ScreenshotHistoryService::entryCommitted,
+                     m_historyService.get(), [] {
+                         clip_shot::presentation::WebSyncService::instance().runSync(false);
+                     });
+#endif
 }
 
 ScreenshotOverlayWindow* ScreenshotController::Impl::overlayUnderCursor() const {

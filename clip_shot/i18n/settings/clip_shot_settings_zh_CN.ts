@@ -659,57 +659,6 @@
         </message>
     </context>
     <context>
-        <name>LoginItemService</name>
-        <message>
-            <source>%1 needs a valid code signature to use launch at login. Reinstall the signed app.</source>
-            <translation>%1 需要有效的代码签名才能在登录时启动。请重新安装已签名的应用。</translation>
-        </message>
-        <message>
-            <source>A launch-at-login change is already in progress.</source>
-            <translation>正在更改登录时启动设置。</translation>
-        </message>
-        <message>
-            <source>Approval required. Allow Clip in System Settings &gt; General &gt; Login Items.</source>
-            <translation>需要批准。请在“系统设置 &gt; 通用 &gt; 登录项”中允许 Clip。</translation>
-        </message>
-        <message>
-            <source>Could not change launch at login: %1</source>
-            <translation>无法更改登录时启动设置：%1</translation>
-        </message>
-        <message>
-            <source>Could not save launch-at-login initialization. Registration was not changed.</source>
-            <translation>无法保存登录时启动初始化状态。注册状态未更改。</translation>
-        </message>
-        <message>
-            <source>Could not save the launch-at-login preference. The displayed macOS status is still current.</source>
-            <translation>无法保存登录时启动偏好设置。显示的 macOS 状态仍为当前状态。</translation>
-        </message>
-        <message>
-            <source>Move the signed %1 app to /Applications or ~/Applications to use launch at login.</source>
-            <translation>请将已签名的 %1 应用移至 /Applications 或 ~/Applications，以便在登录时启动。</translation>
-        </message>
-        <message>
-            <source>Move the signed Clip app to /Applications or ~/Applications to use launch at login.</source>
-            <translation>请将已签名的 Clip 应用移至 /Applications 或 ~/Applications，以使用登录时启动功能。</translation>
-        </message>
-        <message>
-            <source>Clip needs a valid code signature to use launch at login. Reinstall the signed app.</source>
-            <translation>Clip 需要有效的代码签名才能使用登录时启动功能。请重新安装已签名的应用。</translation>
-        </message>
-        <message>
-            <source>macOS could not find %1's login item. Reinstall the app in Applications.</source>
-            <translation>macOS 找不到 %1 的登录项。请将应用重新安装到 Applications。</translation>
-        </message>
-        <message>
-            <source>macOS could not find Clip's login item. Reinstall the app in Applications.</source>
-            <translation>macOS 找不到 Clip 的登录项。请将应用重新安装到“应用程序”中。</translation>
-        </message>
-        <message>
-            <source>macOS did not apply the launch-at-login change. Check Login Items in System Settings.</source>
-            <translation>macOS 未应用登录时启动更改。请检查“系统设置”中的“登录项”。</translation>
-        </message>
-    </context>
-    <context>
         <name>MainWindowSkin</name>
         <message>
             <source>Choose a PNG, JPG, or WebP image.</source>
@@ -893,7 +842,7 @@
             <translation>裁剪录制内容</translation>
         </message>
     </context>
-        <context>
+    <context>
         <name>ScreenshotToolbarEditorSettingsWidget</name>
         <message>
             <source>Barcode recognition</source>
@@ -1145,7 +1094,7 @@
             <source>All screenshot history will be removed</source>
             <translation>所有截图历史都将被删除</translation>
         </message>
-                <message>
+        <message>
             <source>Allow resizing the selection from its borders while non-move tools are active</source>
             <translation>启用非移动工具时，允许从选区边缘调整选区大小</translation>
         </message>
@@ -1682,6 +1631,14 @@
             <translation>鼠标穿透</translation>
         </message>
         <message>
+            <source>Clip</source>
+            <translation>Clip</translation>
+        </message>
+        <message>
+            <source>Clip server</source>
+            <translation>Clip 服务器</translation>
+        </message>
+        <message>
             <source>Clipboard</source>
             <translation>剪贴板</translation>
         </message>
@@ -1754,6 +1711,10 @@
             <translation>配置截图、固定到屏幕和屏幕录制工具栏</translation>
         </message>
         <message>
+            <source>Configure the server, account, and what gets synced</source>
+            <translation>配置服务器、账号和同步内容</translation>
+        </message>
+        <message>
             <source>Confirm before closing window</source>
             <translation>关闭窗口前确认</translation>
         </message>
@@ -1764,10 +1725,6 @@
         <message>
             <source>Confirm before exiting screenshot via shortcut</source>
             <translation>使用快捷键退出截图前确认</translation>
-        </message>
-        <message>
-            <source>Connect AI clients to Clip</source>
-            <translation>将 AI 客户端连接到 Clip</translation>
         </message>
         <message>
             <source>Contain</source>
@@ -2073,7 +2030,7 @@
             <source>Edit selection</source>
             <translation>编辑选区</translation>
         </message>
-                <message>
+        <message>
             <source>Enable edit mode</source>
             <translation>启用编辑模式</translation>
         </message>
@@ -2553,7 +2510,7 @@
             <source>Low</source>
             <translation>低</translation>
         </message>
-                        <message>
+        <message>
             <source>MSAA</source>
             <translation>MSAA</translation>
         </message>
@@ -3710,14 +3667,6 @@
             <translation>智能选择</translation>
         </message>
         <message>
-            <source>Clip</source>
-            <translation>Clip</translation>
-        </message>
-        <message>
-            <source>Clip server</source>
-            <translation>Clip 服务器</translation>
-        </message>
-        <message>
             <source>Snowflake</source>
             <translation>雪花</translation>
         </message>
@@ -3820,6 +3769,10 @@
         <message>
             <source>Switch Window Group</source>
             <translation>切换窗口分组</translation>
+        </message>
+        <message>
+            <source>Sync settings and pinned windows, optionally capture history, to a WebDAV server such as Nutstore or a NAS</source>
+            <translation>将设置和贴图（可选含截图历史）同步到 WebDAV 服务器，如坚果云或 NAS</translation>
         </message>
         <message>
             <source>System</source>
@@ -4149,7 +4102,7 @@
             <source>Video, audio and animated-image recording preferences</source>
             <translation>视频、音频与动图录制偏好</translation>
         </message>
-                <message>
+        <message>
             <source>Vision Support</source>
             <translation>视觉支持</translation>
         </message>
@@ -4160,6 +4113,14 @@
         <message>
             <source>Watermark</source>
             <translation>水印</translation>
+        </message>
+        <message>
+            <source>WebDAV Sync</source>
+            <translation>WebDAV 同步</translation>
+        </message>
+        <message>
+            <source>WebDAV sync</source>
+            <translation>WebDAV 同步</translation>
         </message>
         <message>
             <source>WebP</source>
@@ -4830,6 +4791,73 @@ Unavailable: %2</source>
         <message>
             <source>Global mouse input is unavailable. Check permissions and retry.</source>
             <translation>全局鼠标输入不可用。请检查权限后重试。</translation>
+        </message>
+    </context>
+    <context>
+        <name>clip_shot::presentation::WebDavSyncSettingsWidget</name>
+        <message>
+            <source>Enable sync</source>
+            <translation>启用同步</translation>
+        </message>
+        <message>
+            <source>Last sync succeeded</source>
+            <translation>上次同步成功</translation>
+        </message>
+        <message>
+            <source>Last sync: %1</source>
+            <translation>上次同步：%1</translation>
+        </message>
+        <message>
+            <source>Password</source>
+            <translation>密码</translation>
+        </message>
+        <message>
+            <source>Server URL</source>
+            <translation>服务器地址</translation>
+        </message>
+        <message>
+            <source>Settings and pinned windows always sync. The password is stored only on this device and never uploaded.</source>
+            <translation>设置和贴图始终同步。密码仅保存在本设备上，绝不会上传。</translation>
+        </message>
+        <message>
+            <source>Sync capture history</source>
+            <translation>同步截图历史</translation>
+        </message>
+        <message>
+            <source>Sync now</source>
+            <translation>立即同步</translation>
+        </message>
+        <message>
+            <source>Syncing...</source>
+            <translation>正在同步…</translation>
+        </message>
+        <message>
+            <source>Unable to save WebDAV sync settings. Check that configuration storage is writable and try again.</source>
+            <translation>无法保存 WebDAV 同步设置。请检查配置存储是否可写后重试。</translation>
+        </message>
+        <message>
+            <source>Username</source>
+            <translation>用户名</translation>
+        </message>
+        <message>
+            <source>WebDAV Sync</source>
+            <translation>WebDAV 同步</translation>
+        </message>
+        <message>
+            <source>WebDAV password</source>
+            <translation>WebDAV 密码</translation>
+        </message>
+        <message>
+            <source>WebDAV server URL</source>
+            <translation>WebDAV 服务器地址</translation>
+        </message>
+        <message>
+            <source>WebDAV username</source>
+            <translation>WebDAV 用户名</translation>
+        </message>
+        <message>
+            <source>https://dav.example.com/dav/</source>
+            <translation>https://dav.example.com/dav/</translation>
         </message>
     </context>
     <context>

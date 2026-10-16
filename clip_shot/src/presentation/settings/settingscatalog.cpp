@@ -3553,6 +3553,23 @@ QVector<SettingsPageDefinition> builtInPages() {
                  SettingsSectionReset::Network,
                  {proxyItem()},
              },
+             {
+                 QStringLiteral("webdav-sync"),
+                 settingsText(QT_TRANSLATE_NOOP("SettingsCatalog", "WebDAV sync")),
+                 settingsText(QT_TRANSLATE_NOOP(
+                     "SettingsCatalog",
+                     "Sync settings and pinned windows, optionally capture history, "
+                     "to a WebDAV server such as Nutstore or a NAS")),
+                 SettingsSectionReset::None,
+                 {{QStringLiteral("webdav-sync.configuration"),
+                   settingsText(QT_TRANSLATE_NOOP("SettingsCatalog", "WebDAV Sync")),
+                   settingsText(QT_TRANSLATE_NOOP(
+                       "SettingsCatalog",
+                       "Configure the server, account, and what gets synced")),
+                   {},
+                   QStringLiteral("webdav_sync/configuration"),
+                   SettingsCustomDefinition{SettingsCustomRenderer::WebDavSyncConfigurations}}},
+             },
          },
          SettingsPageKind::GeneratedSettings,
          {{textToolsTitle(), {QStringLiteral("text-recognition-translation"), {}, {}}}},
@@ -5090,6 +5107,11 @@ QStringList SettingsCatalog::validationErrors() const {
                         rendererSupported = true;
                         expectedKey = QStringLiteral("tray/menu_options");
                         expectedKind = storage::ConfigurationValueKind::StringList;
+                        break;
+                    case SettingsCustomRenderer::WebDavSyncConfigurations:
+                        rendererSupported = true;
+                        expectedKey = QStringLiteral("webdav_sync/configuration");
+                        expectedKind = storage::ConfigurationValueKind::Structured;
                         break;
                     }
                     if (itemDefinition.configurationKey != expectedKey || !rendererSupported ||

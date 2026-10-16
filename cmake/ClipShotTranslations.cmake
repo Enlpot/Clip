@@ -109,6 +109,7 @@ function(clip_shot_add_translations target)
             clip_shot_print
             clip_shot_diagnostics
             clip_shot_updates
+            clip_shot_webdav_service
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/update/updateservice.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/windows/nativeprint.cpp"
         TS_FILES ${_clip_shot_update_ts}

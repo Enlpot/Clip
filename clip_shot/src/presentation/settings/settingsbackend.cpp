@@ -1935,6 +1935,12 @@ CloudUploadSettings BuiltInSettingsBackend::cloudUploadSettings() const {
 bool BuiltInSettingsBackend::applyCloudUploadSettings(const CloudUploadSettings& values) {
     return storage::CloudUploadConfigurationSettings().setSettings(values);
 }
+WebDavSyncSettings BuiltInSettingsBackend::webDavSyncSettings() const {
+    return storage::WebDavSyncConfigurationSettings().settings();
+}
+bool BuiltInSettingsBackend::applyWebDavSyncSettings(const WebDavSyncSettings& values) {
+    return storage::WebDavSyncConfigurationSettings().setSettings(values);
+}
 bool BuiltInSettingsBackend::importConfigurationSnapshot(
     const QMap<QString, QJsonValue>& values, int schemaVersion,
     std::shared_future<storage::StorageResult>* completion) {

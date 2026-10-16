@@ -304,6 +304,14 @@ bool CloudUploadConfigurationSettings::setSettings(const CloudUploadSettings& va
                             cloudUploadSettingsToJson(values));
 }
 
+WebDavSyncSettings WebDavSyncConfigurationSettings::settings() const {
+    return webDavSyncSettingsFromJson(cache().value(QStringLiteral("webdav_sync/configuration")));
+}
+bool WebDavSyncConfigurationSettings::setSettings(const WebDavSyncSettings& values) const {
+    return cache().setValue(QStringLiteral("webdav_sync/configuration"),
+                            webDavSyncSettingsToJson(values));
+}
+
 bool TextRecognitionSettings::saveRecognitionResultAsImage() const {
     return cache()
         .value(QStringLiteral("text_recognition/save_recognition_result_as_image"))

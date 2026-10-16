@@ -66,6 +66,18 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>正在檢查更新…</translation>
         </message>
         <message>
+            <source>Clip</source>
+            <translation>Clip</translation>
+        </message>
+        <message>
+            <source>Clip logo</source>
+            <translation>Clip 標誌</translation>
+        </message>
+        <message>
+            <source>Clip · Make expression clearer</source>
+            <translation>Clip · 讓表達更清晰</translation>
+        </message>
+        <message>
             <source>Copied</source>
             <translation>已複製</translation>
         </message>
@@ -206,18 +218,6 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>截圖選取範圍、標註工具與辨識文字</translation>
         </message>
         <message>
-            <source>Clip</source>
-            <translation>Clip</translation>
-        </message>
-        <message>
-            <source>Clip logo</source>
-            <translation>Clip 標誌</translation>
-        </message>
-        <message>
-            <source>Clip · Make expression clearer</source>
-            <translation>Clip · 讓表達更清晰</translation>
-        </message>
-        <message>
             <source>Text recognition</source>
             <translation>文字辨識</translation>
         </message>
@@ -283,6 +283,129 @@ so every moment on screen can be expressed clearly and shared easily.</source>
         <message>
             <source>Your settings could not be saved. Please retry before restarting.</source>
             <translation>無法儲存您的設定。請在重新啟動前重試。</translation>
+        </message>
+    </context>
+    <context>
+        <name>ClipShotApiClient</name>
+        <message>
+            <source>Image conversion failed</source>
+            <translation>影像轉換失敗</translation>
+        </message>
+        <message>
+            <source>Image conversion is incomplete. Try a smaller area.</source>
+            <translation>影像轉換不完整，請嘗試較小的區域。</translation>
+        </message>
+        <message>
+            <source>Image conversion stream ended unexpectedly</source>
+            <translation>影像轉換串流意外中斷</translation>
+        </message>
+        <message>
+            <source>Image conversion timed out. Try a smaller area.</source>
+            <translation>影像轉換逾時，請嘗試較小的區域。</translation>
+        </message>
+        <message>
+            <source>Invalid LaTeX recognition response</source>
+            <translation>無效的 LaTeX 辨識回應</translation>
+        </message>
+        <message>
+            <source>Invalid model stream response</source>
+            <translation>模型串流回應無效</translation>
+        </message>
+        <message>
+            <source>Invalid table recognition response</source>
+            <translation>表格辨識回應無效</translation>
+        </message>
+        <message>
+            <source>Invalid translation service response</source>
+            <translation>無效的翻譯服務回應</translation>
+        </message>
+        <message>
+            <source>Invalid translation stream response</source>
+            <translation>無效的翻譯串流回應</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition failed</source>
+            <translation>LaTeX 辨識失敗</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition request timed out</source>
+            <translation>LaTeX 辨識請求逾時</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition response is too large</source>
+            <translation>LaTeX 辨識回應過大</translation>
+        </message>
+        <message>
+            <source>LaTeX recognition returned no formula</source>
+            <translation>LaTeX 辨識未傳回公式</translation>
+        </message>
+        <message>
+            <source>No translation services are available</source>
+            <translation>沒有可用的翻譯服務</translation>
+        </message>
+        <message>
+            <source>Table recognition failed</source>
+            <translation>表格辨識失敗</translation>
+        </message>
+        <message>
+            <source>Table recognition request timed out</source>
+            <translation>表格辨識請求逾時</translation>
+        </message>
+        <message>
+            <source>Table recognition response is too large</source>
+            <translation>表格辨識回應過大</translation>
+        </message>
+        <message>
+            <source>Table recognition returned no table</source>
+            <translation>表格辨識未傳回表格</translation>
+        </message>
+        <message>
+            <source>The image could not be prepared for conversion</source>
+            <translation>無法準備要轉換的影像</translation>
+        </message>
+        <message>
+            <source>The image is too large to convert. Select a smaller area.</source>
+            <translation>影像過大，無法轉換。請選取較小的區域。</translation>
+        </message>
+        <message>
+            <source>The model response is too large</source>
+            <translation>模型回應過大</translation>
+        </message>
+        <message>
+            <source>The model returned no content</source>
+            <translation>模型未傳回內容</translation>
+        </message>
+        <message>
+            <source>The text is too large to translate.</source>
+            <translation>文字過長，無法翻譯。</translation>
+        </message>
+        <message>
+            <source>The translation response is too large.</source>
+            <translation>翻譯回應過大。</translation>
+        </message>
+        <message>
+            <source>This service does not support the selected language combination.</source>
+            <translation>此服務不支援所選語言組合。</translation>
+        </message>
+        <message>
+            <source>Translation failed</source>
+            <translation>翻譯失敗</translation>
+        </message>
+        <message>
+            <source>Translation request timed out.</source>
+            <translation>翻譯請求逾時。</translation>
+        </message>
+        <message>
+            <source>Translation service request failed (HTTP %1, code %2).</source>
+            <translation>翻譯服務請求失敗（HTTP %1，代碼 %2）。</translation>
+        </message>
+        <message>
+            <source>Translation service response is too large</source>
+            <translation>翻譯服務回應過大</translation>
+        </message>
+        <message>
+            <source>Translation stream ended unexpectedly</source>
+            <translation>翻譯串流意外結束</translation>
         </message>
     </context>
     <context>
@@ -447,7 +570,7 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>請授予所需權限以繼續</translation>
         </message>
     </context>
-        <context>
+    <context>
         <name>QObject</name>
         <message>
             <source>%1 cannot be registered as a global shortcut, try another key</source>
@@ -490,6 +613,18 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>新增按鍵設定</translation>
         </message>
         <message>
+            <source>Could not create the local directory for %1</source>
+            <translation>無法建立本機目錄 %1</translation>
+        </message>
+        <message>
+            <source>Could not list the WebDAV directory: %1</source>
+            <translation>無法列出 WebDAV 目錄：%1</translation>
+        </message>
+        <message>
+            <source>Download failed for %1: %2</source>
+            <translation>下載 %1 失敗：%2</translation>
+        </message>
+        <message>
             <source>Global shortcuts are not supported on this platform</source>
             <translation>此平台不支援全域快速鍵</translation>
         </message>
@@ -516,6 +651,22 @@ so every moment on screen can be expressed clearly and shared easily.</source>
         <message>
             <source>Please press a key</source>
             <translation>請按下按鍵</translation>
+        </message>
+        <message>
+            <source>Remote deletion failed for %1: %2</source>
+            <translation>刪除遠端 %1 失敗：%2</translation>
+        </message>
+        <message>
+            <source>Scanning local files and the remote WebDAV server...</source>
+            <translation>正在掃描本機檔案與遠端 WebDAV 伺服器…</translation>
+        </message>
+        <message>
+            <source>Sync completed but the local sync state could not be saved. The next sync will re-verify all files.</source>
+            <translation>同步已完成，但無法儲存本機同步狀態。下次同步將重新驗證所有檔案。</translation>
+        </message>
+        <message>
+            <source>Syncing: %1 upload(s), %2 download(s), %3 deletion(s)</source>
+            <translation>正在同步：%1 個上傳、%2 個下載、%3 個刪除</translation>
         </message>
         <message>
             <source>This key cannot be registered as a global shortcut, try another key</source>
@@ -557,6 +708,26 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <source>Unsupported key</source>
             <translation>不支援的按鍵</translation>
         </message>
+        <message>
+            <source>Upload failed for %1: %2</source>
+            <translation>上傳 %1 失敗：%2</translation>
+        </message>
+        <message>
+            <source>WebDAV password is not set. Save the account credentials before syncing.</source>
+            <translation>尚未設定 WebDAV 密碼。請先儲存帳號憑據。</translation>
+        </message>
+        <message>
+            <source>WebDAV sync finished successfully</source>
+            <translation>WebDAV 同步已完成</translation>
+        </message>
+        <message>
+            <source>WebDAV sync is not configured. Provide a valid server URL and account before syncing.</source>
+            <translation>尚未設定 WebDAV 同步。請先提供有效的伺服器位址和帳號。</translation>
+        </message>
+        <message>
+            <source>WebDAV sync is unavailable because the storage directory could not be resolved</source>
+            <translation>無法解析儲存目錄，WebDAV 同步不可用</translation>
+        </message>
     </context>
     <context>
         <name>SectionHeaderWidget</name>
@@ -594,129 +765,6 @@ so every moment on screen can be expressed clearly and shared easily.</source>
         <message>
             <source>Search Function</source>
             <translation>搜尋功能</translation>
-        </message>
-    </context>
-    <context>
-        <name>ClipShotApiClient</name>
-        <message>
-            <source>Image conversion failed</source>
-            <translation>影像轉換失敗</translation>
-        </message>
-        <message>
-            <source>Image conversion is incomplete. Try a smaller area.</source>
-            <translation>影像轉換不完整，請嘗試較小的區域。</translation>
-        </message>
-        <message>
-            <source>Image conversion stream ended unexpectedly</source>
-            <translation>影像轉換串流意外中斷</translation>
-        </message>
-        <message>
-            <source>Image conversion timed out. Try a smaller area.</source>
-            <translation>影像轉換逾時，請嘗試較小的區域。</translation>
-        </message>
-        <message>
-            <source>Invalid LaTeX recognition response</source>
-            <translation>無效的 LaTeX 辨識回應</translation>
-        </message>
-        <message>
-            <source>Invalid model stream response</source>
-            <translation>模型串流回應無效</translation>
-        </message>
-        <message>
-            <source>Invalid table recognition response</source>
-            <translation>表格辨識回應無效</translation>
-        </message>
-        <message>
-            <source>Invalid translation service response</source>
-            <translation>無效的翻譯服務回應</translation>
-        </message>
-        <message>
-            <source>Invalid translation stream response</source>
-            <translation>無效的翻譯串流回應</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition failed</source>
-            <translation>LaTeX 辨識失敗</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition request timed out</source>
-            <translation>LaTeX 辨識請求逾時</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition response is too large</source>
-            <translation>LaTeX 辨識回應過大</translation>
-        </message>
-        <message>
-            <source>LaTeX recognition returned no formula</source>
-            <translation>LaTeX 辨識未傳回公式</translation>
-        </message>
-        <message>
-            <source>No translation services are available</source>
-            <translation>沒有可用的翻譯服務</translation>
-        </message>
-        <message>
-            <source>Table recognition failed</source>
-            <translation>表格辨識失敗</translation>
-        </message>
-        <message>
-            <source>Table recognition request timed out</source>
-            <translation>表格辨識請求逾時</translation>
-        </message>
-        <message>
-            <source>Table recognition response is too large</source>
-            <translation>表格辨識回應過大</translation>
-        </message>
-        <message>
-            <source>Table recognition returned no table</source>
-            <translation>表格辨識未傳回表格</translation>
-        </message>
-        <message>
-            <source>The image could not be prepared for conversion</source>
-            <translation>無法準備要轉換的影像</translation>
-        </message>
-        <message>
-            <source>The image is too large to convert. Select a smaller area.</source>
-            <translation>影像過大，無法轉換。請選取較小的區域。</translation>
-        </message>
-        <message>
-            <source>The model response is too large</source>
-            <translation>模型回應過大</translation>
-        </message>
-        <message>
-            <source>The model returned no content</source>
-            <translation>模型未傳回內容</translation>
-        </message>
-        <message>
-            <source>The text is too large to translate.</source>
-            <translation>文字過長，無法翻譯。</translation>
-        </message>
-        <message>
-            <source>The translation response is too large.</source>
-            <translation>翻譯回應過大。</translation>
-        </message>
-        <message>
-            <source>This service does not support the selected language combination.</source>
-            <translation>此服務不支援所選語言組合。</translation>
-        </message>
-        <message>
-            <source>Translation failed</source>
-            <translation>翻譯失敗</translation>
-        </message>
-        <message>
-            <source>Translation request timed out.</source>
-            <translation>翻譯請求逾時。</translation>
-        </message>
-        <message>
-            <source>Translation service request failed (HTTP %1, code %2).</source>
-            <translation>翻譯服務請求失敗（HTTP %1，代碼 %2）。</translation>
-        </message>
-        <message>
-            <source>Translation service response is too large</source>
-            <translation>翻譯服務回應過大</translation>
-        </message>
-        <message>
-            <source>Translation stream ended unexpectedly</source>
-            <translation>翻譯串流意外結束</translation>
         </message>
     </context>
     <context>
@@ -780,6 +828,14 @@ so every moment on screen can be expressed clearly and shared easily.</source>
             <translation>取消</translation>
         </message>
         <message>
+            <source>Clip %1 is available. Open About for update options.</source>
+            <translation>Clip %1 已推出。開啟「關於」查看更新選項。</translation>
+        </message>
+        <message>
+            <source>Clip will close and restart to install the update. Continue?</source>
+            <translation>Clip 將關閉並重新啟動以安裝更新。是否繼續？</translation>
+        </message>
+        <message>
             <source>Could not pin selected files</source>
             <translation>無法將所選檔案固定到螢幕</translation>
         </message>
@@ -802,14 +858,6 @@ so every moment on screen can be expressed clearly and shared easily.</source>
         <message>
             <source>Restart failed</source>
             <translation>重新啟動失敗</translation>
-        </message>
-        <message>
-            <source>Clip %1 is available. Open About for update options.</source>
-            <translation>Clip %1 已推出。開啟「關於」查看更新選項。</translation>
-        </message>
-        <message>
-            <source>Clip will close and restart to install the update. Continue?</source>
-            <translation>Clip 將關閉並重新啟動以安裝更新。是否繼續？</translation>
         </message>
         <message>
             <source>Your settings could not be saved. Please retry before updating.</source>

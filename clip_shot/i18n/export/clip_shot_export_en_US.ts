@@ -147,10 +147,6 @@
             <translation>The native print interface is unavailable</translation>
         </message>
         <message>
-            <source>The native print operation failed</source>
-            <translation>The native print operation failed</translation>
-        </message>
-        <message>
             <source>Windows printing failed (%1)</source>
             <translation>Windows printing failed (%1)</translation>
         </message>

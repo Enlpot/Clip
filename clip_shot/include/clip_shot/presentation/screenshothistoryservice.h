@@ -33,6 +33,7 @@ struct ScreenshotHistoryServiceContext {
 };
 
 class ScreenshotHistoryService final : public QObject {
+    Q_OBJECT
   public:
     using Clock = std::function<QDateTime()>;
 
@@ -54,6 +55,11 @@ class ScreenshotHistoryService final : public QObject {
     void drainPendingWrites();
     void refreshMetadata();
     [[nodiscard]] bool presentTransientEntry(const ScreenshotHistoryEntry& entry);
+
+  signals:
+    // Emitted whenever a screenshot is committed to history; the WebDAV sync
+    // hook uses this as its "screenshot stored" trigger.
+    void entryCommitted();
 
   private:
     friend class ScreenshotHistoryServiceTestAccess;

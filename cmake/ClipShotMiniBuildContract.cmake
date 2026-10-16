@@ -11,13 +11,16 @@ set(CLIP_SHOT_MINI_EXCLUDED_SOURCE_NAMES
     screenshottranslationsettingsdialog
     screenshotqrcontroller screenshotqrrecognitionservice
     screenshotimageconversioncontroller screenshotimageconversionview
-    screenshottabledocument screenshottableeditor screenshotrecognitionfileexport)
+    screenshottabledocument screenshottableeditor screenshotrecognitionfileexport
+    webdavsyncsettingswidget websyncservice webdavclient webdavsyncengine
+    webdavcredentialstore)
 list(JOIN CLIP_SHOT_MINI_EXCLUDED_SOURCE_NAMES "|" _clip_mini_source_names)
 set(CLIP_SHOT_MINI_EXCLUDED_SOURCE_PATTERN
     "(^|[/,:])(${_clip_mini_source_names})\\.(cpp|h|mm)($|>)")
 set(CLIP_SHOT_MINI_EXCLUDED_LINK_TARGETS
     clip_shot_translation clip_selected_text_c clip_shot_full_rust_ffi_bundle
-    opencv_wechat_qrcode opencv_objdetect opencv_dnn)
+    opencv_wechat_qrcode opencv_objdetect opencv_dnn
+    clip_shot_webdav_service clip_shot_webdav_sync clip_shot_webdav)
 set(CLIP_SHOT_MINI_EXCLUDED_TARGETS
     ${CLIP_SHOT_MINI_EXCLUDED_LINK_TARGETS}
     clip_shot clip_shot_edition_full

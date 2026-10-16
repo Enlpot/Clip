@@ -186,7 +186,7 @@
             <translation>Your current screenshot will be discarded.</translation>
         </message>
     </context>
-        <context>
+    <context>
         <name>ScreenshotOverlayWindow</name>
         <message>
             <source>Loading screenshot history</source>
@@ -511,7 +511,7 @@
             <translation>mouse wheel</translation>
         </message>
     </context>
-            <context>
+    <context>
         <name>clip_shot::presentation::DirectCaptureController</name>
         <message>
             <source>Capture failed: %1</source>

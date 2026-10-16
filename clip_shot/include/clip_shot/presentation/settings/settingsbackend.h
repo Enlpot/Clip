@@ -134,6 +134,12 @@ class SettingsBackend : public QObject {
     virtual bool applyCloudUploadSettings(const CloudUploadSettings&) {
         return false;
     }
+    [[nodiscard]] virtual WebDavSyncSettings webDavSyncSettings() const {
+        return {};
+    }
+    virtual bool applyWebDavSyncSettings(const WebDavSyncSettings&) {
+        return false;
+    }
 #if CLIP_SHOT_ENABLE_API_CONFIGURATION
     [[nodiscard]] virtual CustomAiModels customAiModels() const {
         return {};
@@ -324,6 +330,8 @@ class BuiltInSettingsBackend final : public SettingsBackend {
                                      bool includeToolbarStyles = false) override;
     [[nodiscard]] CloudUploadSettings cloudUploadSettings() const override;
     bool applyCloudUploadSettings(const CloudUploadSettings& values) override;
+    [[nodiscard]] WebDavSyncSettings webDavSyncSettings() const override;
+    bool applyWebDavSyncSettings(const WebDavSyncSettings& values) override;
 #if CLIP_SHOT_ENABLE_API_CONFIGURATION
     [[nodiscard]] CustomAiModels customAiModels() const override;
     bool applyCustomAiModels(const CustomAiModels& models) override;

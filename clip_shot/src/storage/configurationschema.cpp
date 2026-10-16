@@ -4,6 +4,7 @@
 #include "clip_shot/storage/floatingtoolbarsettings.h"
 #include "clip_shot/app/edition.h"
 #include "clip_shot/clouduploadconfiguration.h"
+#include "clip_shot/webdavsyncsettings.h"
 #if CLIP_SHOT_ENABLE_API_CONFIGURATION
 #include "clip_shot/serverconfiguration.h"
 #include "clip_shot/customaimodelconfiguration.h"
@@ -193,6 +194,8 @@ QString defaultOutputDirectory(QStandardPaths::StandardLocation primary) {
 
 const QVector<ConfigurationSchemaEntry> kRawEntries = {
     {QStringLiteral("cloud_upload/configuration"), cloudUploadSettingsToJson({}),
+     ConfigurationValueKind::Structured},
+    {QStringLiteral("webdav_sync/configuration"), webDavSyncSettingsToJson({}),
      ConfigurationValueKind::Structured},
     {QStringLiteral("screenshot_shortcuts/upload_to_cloud"),
      QJsonArray{QStringLiteral("Ctrl+U")},
@@ -2317,6 +2320,12 @@ ConfigurationNormalization ConfigurationSchema::normalize(const QString& key,
         bool valid = false;
         const auto values = cloudUploadSettingsFromJson(value, &valid);
         const auto normalized = cloudUploadSettingsToJson(values);
+        return {normalized, valid, normalized != value};
+    }
+    if (key == QStringLiteral("webdav_sync/configuration")) {
+        bool valid = false;
+        const auto values = webDavSyncSettingsFromJson(value, &valid);
+        const auto normalized = webDavSyncSettingsToJson(values);
         return {normalized, valid, normalized != value};
     }
 #if CLIP_SHOT_ENABLE_API_CONFIGURATION

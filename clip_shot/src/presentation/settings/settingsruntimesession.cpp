@@ -978,6 +978,12 @@ QVariant SettingsRuntimeSession::readValue(const SettingsFieldDescriptor& descri
                 switch (payload.renderer) {
                 case SettingsCustomRenderer::CloudUploadConfigurations:
                     return QVariant::fromValue(m_backend.cloudUploadSettings());
+                case SettingsCustomRenderer::WebDavSyncConfigurations:
+#if !CLIP_SHOT_EDITION_MINI
+                    return QVariant::fromValue(m_backend.webDavSyncSettings());
+#else
+                    return {};
+#endif
                 case SettingsCustomRenderer::PermissionScreenRecording:
                 case SettingsCustomRenderer::PermissionAccessibility:
                 case SettingsCustomRenderer::PermissionInputMonitoring:
@@ -1115,6 +1121,13 @@ bool SettingsRuntimeSession::writeValue(const SettingsFieldDescriptor& descripto
                 case SettingsCustomRenderer::CloudUploadConfigurations:
                     return value.canConvert<CloudUploadSettings>() &&
                            m_backend.applyCloudUploadSettings(value.value<CloudUploadSettings>());
+                case SettingsCustomRenderer::WebDavSyncConfigurations:
+#if !CLIP_SHOT_EDITION_MINI
+                    return value.canConvert<WebDavSyncSettings>() &&
+                           m_backend.applyWebDavSyncSettings(value.value<WebDavSyncSettings>());
+#else
+                    return false;
+#endif
                 case SettingsCustomRenderer::StorageStatus:
                     return false;
                 }
@@ -1644,6 +1657,14 @@ CloudUploadSettings SettingsRuntimeSession::cloudUploadSettings() const {
 }
 bool SettingsRuntimeSession::applyCloudUploadSettings(const CloudUploadSettings& values) {
     return submitDraft(QStringLiteral("screenshot-output.cloud-upload"),
+                       QVariant::fromValue(values));
+}
+WebDavSyncSettings SettingsRuntimeSession::webDavSyncSettings() const {
+    return state(QStringLiteral("webdav-sync.configuration"))
+        .acceptedValue.value<WebDavSyncSettings>();
+}
+bool SettingsRuntimeSession::applyWebDavSyncSettings(const WebDavSyncSettings& values) {
+    return submitDraft(QStringLiteral("webdav-sync.configuration"),
                        QVariant::fromValue(values));
 }
 storage::StorageStatus SettingsRuntimeSession::storageStatus() const {

@@ -186,7 +186,7 @@
             <translation>当前截图将被丢弃。</translation>
         </message>
     </context>
-        <context>
+    <context>
         <name>ScreenshotOverlayWindow</name>
         <message>
             <source>Loading screenshot history</source>
@@ -511,7 +511,7 @@
             <translation>鼠标滚轮</translation>
         </message>
     </context>
-            <context>
+    <context>
         <name>clip_shot::presentation::DirectCaptureController</name>
         <message>
             <source>Capture failed: %1</source>

@@ -459,6 +459,7 @@ ScreenshotHistoryService::snapshotCurrent(bool persistent) const {
 void ScreenshotHistoryService::commit(ScreenshotHistoryEntry entry) {
     entry.persistent = true;
     scheduleWrite(std::move(entry));
+    emit entryCommitted();
 }
 
 bool ScreenshotHistoryService::navigateToRecord(const QString& recordId) {
