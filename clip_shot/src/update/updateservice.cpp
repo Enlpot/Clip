@@ -137,6 +137,13 @@ struct UpdateService::Impl {
         scheduleTimer.setTimerType(Qt::CoarseTimer);
         QObject::connect(&scheduleTimer, &QTimer::timeout, &q, [this] {
             automaticCheckDue = true;
+            // A user-initiated check that is still queued must own the lifecycle:
+            // defer the periodic check so it cannot overtake the manual request.
+            // The user request is launched by launchPending and re-arms the
+            // interval on success; on failure queueDueAutomaticCheck consumes it.
+            if (pendingOperation == Operation::Check && pendingTrigger == Trigger::User) {
+                return;
+            }
             request(Operation::Check, Trigger::Periodic);
         });
         QObject::connect(&handshakeTimeout, &QTimer::timeout, &q, [this] {
@@ -302,6 +309,14 @@ struct UpdateService::Impl {
         }
         activeOperation = operation;
         activeTrigger = trigger;
+        // This request is now the active operation; release its queued slot so a
+        // later queueDueAutomaticCheck can queue the next periodic check. Keep the
+        // slot intact when launching a different request (e.g. a periodic check
+        // that overtook a queued user check would be wrong, so the user slot is
+        // preserved and launched afterwards).
+        if (pendingOperation == operation && pendingTrigger == trigger) {
+            pendingOperation = Operation::None;
+        }
         if (operation == Operation::Check && trigger == Trigger::Periodic) {
             automaticCheckDue = false;
         }
@@ -316,7 +331,9 @@ struct UpdateService::Impl {
         }
         const Operation operation = pendingOperation;
         const Trigger trigger = pendingTrigger;
-        pendingOperation = Operation::None;
+        // Keep the queued slot visible until the deferred launch actually runs.
+        // request() clears it when it becomes the active operation, so a periodic
+        // timer firing in between cannot mistake the window for an idle process.
         QTimer::singleShot(0, &q, [this, operation, trigger] { request(operation, trigger); });
     }
 
