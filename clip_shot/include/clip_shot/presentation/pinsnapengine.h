@@ -45,6 +45,13 @@ struct PinsnapCandidate {
     QString id;
 };
 
+// Which snap rule produced a result.
+enum class PinsnapKind {
+    None = 0,
+    Contact = 1, // edges touching: forms a group on drag release (PixJoin semantics)
+    Align = 2,   // same-side edge alignment: magnetic translation only, never groups
+};
+
 // The result of one snap decision.
 struct PinsnapResult {
     QRect snapped; // snapped bounding box of the dragged pinned window
@@ -54,6 +61,7 @@ struct PinsnapResult {
     QVector<PinsnapGuide> guides;
     int gap = 0; // gap on the primary snap axis
     int cost = 0; // total displacement (sum of abs(dx) + abs(dy))
+    PinsnapKind kind = PinsnapKind::None;
 };
 
 class PinsnapEngine {

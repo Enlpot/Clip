@@ -270,6 +270,7 @@ std::optional<PinsnapResult> PinsnapEngine::resolveContact(
         return std::nullopt;
     }
     best->gap = std::abs(best->gap);
+    best->kind = PinsnapKind::Contact;
     return best;
 }
 
@@ -290,6 +291,10 @@ std::optional<PinsnapResult> PinsnapEngine::resolveAlign(
             best = candidateResult;
         }
     }
+    if (!best.has_value()) {
+        return std::nullopt;
+    }
+    best->kind = PinsnapKind::Align;
     return best;
 }
 

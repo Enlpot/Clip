@@ -8,6 +8,7 @@
 namespace {
 using clip_shot::presentation::PinsnapCandidate;
 using clip_shot::presentation::PinsnapEngine;
+using clip_shot::presentation::PinsnapKind;
 using clip_shot::presentation::PinsnapOptions;
 using clip_shot::presentation::PinsnapResult;
 
@@ -41,6 +42,7 @@ void testHorizontalContactLeft() {
     require(result->targetId == QStringLiteral("b"), "target id should be reported");
     require(result->snapped == QRect(106, 100, 50, 50), "snapped bounds should be translated");
     require(!result->guides.isEmpty(), "contact snap should emit guides");
+    require(result->kind == PinsnapKind::Contact, "contact snap should report Contact kind");
 }
 
 // Horizontal contact: A is right of B (B right edge 4px from A left edge) -> move left by 4.
@@ -146,6 +148,7 @@ void testAlignTopEdges() {
     require(result.has_value(), "top-edge alignment within tolerance should snap");
     require(result->dy == -3, "top edges should align");
     require(result->dx == 0, "no horizontal shift for top-edge align");
+    require(result->kind == PinsnapKind::Align, "edge alignment should report Align kind");
 }
 
 // Edge align: same-side left alignment (vertical projection overlap + left-edge deviation 3px).
@@ -182,6 +185,8 @@ void testResolveFallbackToAlign() {
     require(result.has_value(), "fallback alignment should snap");
     require(result->dy == -3, "fallback should apply top-edge alignment");
     require(result->dx == 0, "fallback should not shift horizontally");
+    require(result->kind == PinsnapKind::Align,
+            "fallback should report Align kind (edge alignment never groups)");
 }
 
 } // namespace

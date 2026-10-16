@@ -634,6 +634,9 @@ bool PinnedWindowWindowsEvents::handle(ScreenshotPinnedWindow& window, const QBy
                     // Drag snap: adjust the target geometry near other pinned
                     // windows and show the guide layer.
                     static_cast<void>(window.adjustMoveForSnap(target));
+                    // Snap group motion: move the other group members with the
+                    // same delta (or detach this window when Ctrl is held).
+                    window.onDragMoved(target);
                     writeNativeRect(target, proposedNativeRect);
                     if (result != nullptr) {
                         *result = TRUE;

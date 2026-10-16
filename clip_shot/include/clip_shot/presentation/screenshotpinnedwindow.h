@@ -14,6 +14,7 @@
 #include "clip_shot/presentation/screenshotresultcompositor.h"
 #include "clip_shot/presentation/pinsnapengine.h"
 #include "clip_shot/presentation/pinsnapguidelayer.h"
+#include "clip_shot/presentation/pinsnapgroupregistry.h"
 #include "clip_shot/storage/pinnedwindowtypes.h"
 #include "clip_shot/storage/pinnedwindowplacement.h"
 
@@ -459,6 +460,19 @@ class ScreenshotPinnedWindow final : public QWidget {
     bool adjustMoveForSnap(QRect& target);
     void hideSnapGuides();
     clip_shot::presentation::PinsnapGuideLayer* ensureSnapGuideLayer();
+    // Per-frame callback from the native move loop (WM_MOVING). Applies snap
+    // group motion: when Ctrl is not held, every other member of the dragged
+    // window's snap group follows the same delta; when Ctrl is held, only this
+    // window moves and the group is detached on drop.
+    void onDragMoved(const QRect& target);
+    // Translates this window's native geometry by delta (used to move snap
+    // group members together).
+    void applyNativeDelta(const QPoint& delta);
+    // Applies scale/zoom to every other member of this window's snap group.
+    void propagateScaleToGroup(int percent);
+    void propagateWheelScaleToGroup(double percent, const QPointF& nativeCursor);
+    void detachFromSnapGroup();
+    static clip_shot::presentation::PinsnapGroupRegistry& snapGroupRegistry();
     bool handleDoubleClick(const QPoint& position);
     bool handleMiddleClick(const QPoint& position);
     void updateWindowDragCursor(const QPoint& position);
@@ -703,7 +717,14 @@ class ScreenshotPinnedWindow final : public QWidget {
     std::unique_ptr<clip_shot::presentation::PinsnapGuideLayer> m_snapGuideLayer;
     bool m_snapActive = false;
     QString m_snapTargetId;
+    // Contact snap target held while dragging; grouping happens on drag
+    // release (finishWindowMove), matching PixJoin's EndDrag semantics.
+    QString m_pendingSnapTargetId;
     clip_shot::presentation::PinsnapOptions m_snapOptions;
+    // Pinned window snap group state (group motion / Ctrl detach / group zoom).
+    QRect m_lastDragNativeRect;
+    bool m_dragCtrlSeen = false;
+    bool m_groupScaleSync = false;
     bool m_nonClientPointerInside = false;
     bool m_nonClientTrackingPending = false;
     bool m_windowActive = false;

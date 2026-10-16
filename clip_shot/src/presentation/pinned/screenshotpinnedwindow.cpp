@@ -826,6 +826,7 @@ using clip_shot::presentation::PinsnapEngine;
 using clip_shot::presentation::PinsnapGuideLayer;
 using clip_shot::presentation::PinsnapOptions;
 using clip_shot::presentation::PinsnapResult;
+using clip_shot::presentation::PinsnapGroupRegistry;
 
 class ScreenshotPinnedCanvasWidget final : public ClipCanvasWidget {
   public:
@@ -1500,6 +1501,8 @@ ScreenshotPinnedWindow::~ScreenshotPinnedWindow() {
         // while this object is still a valid ScreenshotPinnedWindow receiver.
         QObject::disconnect(m_groupManager, nullptr, this, nullptr);
     }
+    // Leave any ad-hoc snap group this window belongs to.
+    snapGroupRegistry().removeMember(persistenceId());
     if (!m_persistenceRemovalRequested && m_presented && !m_closing) {
         if (m_persistenceTimer != nullptr) {
             m_persistenceTimer->stop();
@@ -6541,6 +6544,8 @@ void ScreenshotPinnedWindow::applyScale(int percent) {
     if (percent < kMinimumScalePercent || percent > kMaximumScalePercent) {
         return;
     }
+    // Snap group: propagate the same scale to every other member.
+    propagateScaleToGroup(percent);
     restoreFromThumbnailImmediately();
     QSize nativeSize = orientedInitialWindowSize();
     nativeSize = QSize(std::max(1, qRound(nativeSize.width() * percent / 100.0)),
@@ -6584,6 +6589,8 @@ void ScreenshotPinnedWindow::applyWheelScale(double percent, const QPointF& nati
     if (percent < kMinimumScalePercent || percent > kMaximumScalePercent) {
         return;
     }
+    // Snap group: propagate the same percentage to every other member.
+    propagateWheelScaleToGroup(percent, nativeCursor);
     restoreFromThumbnailImmediately();
     const QRect oldGeometry = authoritativeNativeGeometry();
     if (!oldGeometry.isValid() || oldGeometry.isEmpty()) {
@@ -7998,6 +8005,9 @@ bool ScreenshotPinnedWindow::startWindowMove() {
         m_windowDragActive = true;
         setWindowDragCursor(Qt::ClosedHandCursor);
         m_platform->setSystemMoveActive(true);
+        // Reset per-drag snap group state.
+        m_lastDragNativeRect = currentNativeGeometry();
+        m_dragCtrlSeen = false;
         return true;
     }
     finishWindowMove();
@@ -8018,6 +8028,66 @@ void ScreenshotPinnedWindow::finishWindowMove() {
     m_snapActive = false;
     m_snapTargetId.clear();
     hideSnapGuides();
+    // Grouping happens here, on drag release: if a contact snap was recorded
+    // while dragging and this drag was not a Ctrl detach, join the dragged
+    // window and the target into one ad-hoc snap group (PixJoin EndDrag
+    // semantics). The pending target survives small releases during micro
+    // adjustment; spacing is re-checked at release so dragging far away does
+    // not group. Edge alignment never groups.
+    if (!m_pendingSnapTargetId.isEmpty() && !m_dragCtrlSeen) {
+        bool group = true;
+        if (m_groupManager != nullptr) {
+            ScreenshotPinnedWindow* targetWindow =
+                m_groupManager->liveWindow(m_pendingSnapTargetId);
+            if (targetWindow != nullptr) {
+                // Re-check spacing against the whole assembly (the dragged
+                // window unioned with its group members), matching how the
+                // snap itself was resolved while dragging.
+                QRect movingRect = currentNativeGeometry();
+                for (const QString& memberId :
+                     snapGroupRegistry().membersOf(persistenceId())) {
+                    ScreenshotPinnedWindow* member =
+                        m_groupManager->liveWindow(memberId);
+                    if (member == nullptr || member == this) {
+                        continue;
+                    }
+                    const QRect memberRect = member->currentNativeGeometry();
+                    if (memberRect.isValid() && !memberRect.isEmpty()) {
+                        movingRect = movingRect.united(memberRect);
+                    }
+                }
+                const QRect targetRect = targetWindow->currentNativeGeometry();
+                if (movingRect.isValid() && targetRect.isValid()) {
+                    const double hProj =
+                        std::max(movingRect.left(), targetRect.left()) -
+                        std::min(movingRect.right(), targetRect.right());
+                    const double vProj =
+                        std::max(movingRect.top(), targetRect.top()) -
+                        std::min(movingRect.bottom(), targetRect.bottom());
+                    double separation = 0.0;
+                    if (hProj > 0.0 && vProj > 0.0) {
+                        separation = std::min(hProj, vProj);
+                    } else if (hProj > 0.0) {
+                        separation = hProj;
+                    } else if (vProj > 0.0) {
+                        separation = vProj;
+                    }
+                    group = separation <= kSnapDistance + kSnapHysteresis;
+                }
+            }
+        }
+        if (group) {
+            snapGroupRegistry().merge(persistenceId(), m_pendingSnapTargetId);
+        }
+    }
+    m_pendingSnapTargetId.clear();
+    // Ctrl was held during the drag: the window was moved on its own and now
+    // leaves its ad-hoc snap group (drop-to-detach).
+    if (m_dragCtrlSeen) {
+        snapGroupRegistry().removeMember(persistenceId());
+    }
+    m_dragCtrlSeen = false;
+    m_lastDragNativeRect = QRect();
     if (wasActive) {
         if (hideToTopActive() &&
             m_hideToTop->state() == ScreenshotPinnedHideToTopController::State::Entering &&
@@ -8035,10 +8105,32 @@ bool ScreenshotPinnedWindow::adjustMoveForSnap(QRect& target) {
         return false;
     }
 
+    // Ctrl detach-drag: this window moves on its own, so it must not snap to
+    // other windows (it leaves its group on release; snapping here would
+    // re-join it to a new group mid-drag and contradict drop-to-detach).
+    const bool ctrlDown =
+        (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) != 0;
+    if (ctrlDown) {
+        m_snapActive = false;
+        m_snapTargetId.clear();
+        m_pendingSnapTargetId.clear();
+        hideSnapGuides();
+        return false;
+    }
+
     QVector<PinsnapCandidate> candidates;
     candidates.reserve(8);
+    const std::optional<QString> myGroup = snapGroupRegistry().groupOf(persistenceId());
     for (ScreenshotPinnedWindow* other : m_groupManager->liveWindows()) {
         if (other == nullptr || other == this) {
+            continue;
+        }
+        // Members of the same snap group are never snap targets: otherwise a
+        // dragged member would be pulled back by its own group while the group
+        // tries to move as a whole (PixJoin semantics: selfGroupId filter).
+        const std::optional<QString> otherGroup =
+            snapGroupRegistry().groupOf(other->persistenceId());
+        if (myGroup.has_value() && otherGroup.has_value() && *myGroup == *otherGroup) {
             continue;
         }
         PinsnapCandidate candidate;
@@ -8053,7 +8145,24 @@ bool ScreenshotPinnedWindow::adjustMoveForSnap(QRect& target) {
         return false;
     }
 
-    const QRect moving = target;
+    // Snap against the whole group's bounding box when this window belongs to
+    // a snap group, so the assembly moves and snaps as one unit (PixJoin
+    // semantics: Resolve(moving = UnionBounds(group), ...)).
+    QRect moving = target;
+    const QStringList groupMembers = snapGroupRegistry().membersOf(persistenceId());
+    if (!groupMembers.isEmpty()) {
+        for (const QString& memberId : groupMembers) {
+            ScreenshotPinnedWindow* member = m_groupManager->liveWindow(memberId);
+            if (member == nullptr || member == this) {
+                continue;
+            }
+            const QRect memberRect = member->currentNativeGeometry();
+            if (memberRect.isValid() && !memberRect.isEmpty()) {
+                moving = moving.united(memberRect);
+            }
+        }
+    }
+
     std::optional<PinsnapResult> snap;
     // Hysteresis: when already snapped, prefer keeping the current target
     // (loosened threshold); leaving needs to exceed trigger distance + band.
@@ -8066,9 +8175,19 @@ bool ScreenshotPinnedWindow::adjustMoveForSnap(QRect& target) {
         snap = PinsnapEngine::resolve(moving, candidates, m_snapOptions);
     }
     if (snap.has_value() && snap->snapped != moving) {
-        target = snap->snapped;
+        // Apply the assembly displacement to the dragged window's target; the
+        // per-frame group-motion hook (onDragMoved) then carries the same
+        // delta to the other members, so the whole group moves together.
+        const QPoint assemblyDelta = snap->snapped.topLeft() - moving.topLeft();
+        target.translate(assemblyDelta);
         m_snapActive = true;
         m_snapTargetId = snap->targetId;
+        // Grouping is deferred to drag release (PixJoin EndDrag semantics):
+        // while dragging we only remember the last contact target and never
+        // merge. Edge alignment is magnetic translation only and never groups.
+        if (snap->kind == clip_shot::presentation::PinsnapKind::Contact) {
+            m_pendingSnapTargetId = snap->targetId;
+        }
         if (auto* layer = ensureSnapGuideLayer()) {
             layer->showGuides(snap->guides, screen());
         }
@@ -8076,8 +8195,102 @@ bool ScreenshotPinnedWindow::adjustMoveForSnap(QRect& target) {
     }
     m_snapActive = false;
     m_snapTargetId.clear();
+    // Keep m_pendingSnapTargetId: the user may micro-adjust away from the
+    // target before releasing, and release-time spacing decides grouping.
     hideSnapGuides();
     return false;
+}
+
+void ScreenshotPinnedWindow::onDragMoved(const QRect& target) {
+    if (m_closing || !m_presented) {
+        return;
+    }
+    const bool ctrlDown =
+        (QGuiApplication::keyboardModifiers() & Qt::ControlModifier) != 0;
+    if (ctrlDown) {
+        m_dragCtrlSeen = true;
+        // Ctrl detaches: this window moves on its own; group members stay.
+        m_lastDragNativeRect = target;
+        return;
+    }
+    const QRect previous =
+        m_lastDragNativeRect.isValid() ? m_lastDragNativeRect : target;
+    m_lastDragNativeRect = target;
+    const QPoint delta = target.topLeft() - previous.topLeft();
+    if (delta.isNull() || m_groupManager == nullptr) {
+        return;
+    }
+    for (const QString& memberId :
+         snapGroupRegistry().membersOf(persistenceId())) {
+        ScreenshotPinnedWindow* member = m_groupManager->liveWindow(memberId);
+        if (member == nullptr || member == this) {
+            continue;
+        }
+        member->applyNativeDelta(delta);
+    }
+}
+
+void ScreenshotPinnedWindow::applyNativeDelta(const QPoint& delta) {
+    if (m_closing || !m_presented || m_nativeGeometryController == nullptr ||
+        m_platform == nullptr) {
+        return;
+    }
+    QRect geometry = currentNativeGeometry();
+    if (!geometry.isValid() || geometry.isEmpty()) {
+        return;
+    }
+    geometry.translate(delta);
+    static_cast<void>(applyWindowGeometry(geometry, GeometryMutation::Move));
+}
+
+void ScreenshotPinnedWindow::propagateScaleToGroup(int percent) {
+    if (m_groupScaleSync || m_groupManager == nullptr) {
+        return;
+    }
+    const QStringList members = snapGroupRegistry().membersOf(persistenceId());
+    if (members.isEmpty()) {
+        return;
+    }
+    m_groupScaleSync = true;
+    for (const QString& memberId : members) {
+        ScreenshotPinnedWindow* member = m_groupManager->liveWindow(memberId);
+        if (member == nullptr || member == this) {
+            continue;
+        }
+        member->applyScale(percent);
+    }
+    m_groupScaleSync = false;
+}
+
+void ScreenshotPinnedWindow::propagateWheelScaleToGroup(
+    double percent, const QPointF& nativeCursor) {
+    if (m_groupScaleSync || m_groupManager == nullptr) {
+        return;
+    }
+    const QStringList members = snapGroupRegistry().membersOf(persistenceId());
+    if (members.isEmpty()) {
+        return;
+    }
+    m_groupScaleSync = true;
+    for (const QString& memberId : members) {
+        ScreenshotPinnedWindow* member = m_groupManager->liveWindow(memberId);
+        if (member == nullptr || member == this) {
+            continue;
+        }
+        member->applyWheelScale(percent, nativeCursor);
+    }
+    m_groupScaleSync = false;
+}
+
+void ScreenshotPinnedWindow::detachFromSnapGroup() {
+    snapGroupRegistry().removeMember(persistenceId());
+}
+
+PinsnapGroupRegistry& ScreenshotPinnedWindow::snapGroupRegistry() {
+    // Deliberately leaked on exit: window destructors may outlive other static
+    // storage, so the registry must never be destroyed before them.
+    static PinsnapGroupRegistry* s_registry = new PinsnapGroupRegistry();
+    return *s_registry;
 }
 
 void ScreenshotPinnedWindow::hideSnapGuides() {
